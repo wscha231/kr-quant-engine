@@ -118,9 +118,19 @@ def fetch_foreign_futures_oi(start: str, end: str, refresh_days: int = 7) -> pd.
                 pass
 
     out = pd.DataFrame(columns=["date", "foreign_futures_net_oi"])
+
+    # Split ImportError (loud-fail) from runtime/method-shape errors (graceful).
+    # pykrx ImportError is a deployment bug — raise so the user sees it.
+    # API shape errors (method renamed/missing) are version drift — log + empty.
     try:
         from pykrx import derivatives as _deriv
-        # Try the most common API method names
+    except ImportError as ex:
+        raise RuntimeError(
+            "pykrx not installed — kr_derivatives.fetch_foreign_futures_oi "
+            "needs it. Install: py -3 -m pip install pykrx>=1.0.45"
+        ) from ex
+
+    try:
         if hasattr(_deriv, "get_derivatives_open_interest_by_investor"):
             df = _deriv.get_derivatives_open_interest_by_investor(s, e)
             if df is not None and not df.empty:
@@ -136,9 +146,14 @@ def fetch_foreign_futures_oi(start: str, end: str, refresh_days: int = 7) -> pd.
                         "foreign_futures_net_oi": pd.to_numeric(df[foreign_cols[0]],
                                                                   errors="coerce"),
                     })
+        else:
+            log("[derivatives] pykrx.derivatives missing "
+                "get_derivatives_open_interest_by_investor (API drift); "
+                "returning empty foreign_futures_oi", level="WARN")
     except Exception as ex:
-        log(f"[derivatives] foreign futures OI unavailable: {ex}", level="WARN")
-        # Return empty — derivatives module API varies across pykrx versions
+        log(f"[derivatives] foreign futures OI runtime error: {ex}", level="WARN")
+        # Return empty — runtime errors (network, schema drift) shouldn't
+        # crash the entire backtest. ImportError above is the loud path.
 
     if not out.empty:
         try:

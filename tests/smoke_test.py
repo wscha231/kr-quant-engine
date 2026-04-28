@@ -268,6 +268,46 @@ def test_pipeline_panels_wired():
         assert loader in src, f"build_scored_panel_v0 missing {loader} call"
 
 
+@_test("structural: kr_multibagger_classifier exposes deduplicate_overlapping_episodes")
+def test_mb_classifier_dedup_exists():
+    """Issue C regression guard — overlapping pre-surge windows must be
+    deconflicted before labeling."""
+    src = (PROJECT_ROOT / "kr_multibagger_classifier.py").read_text(encoding="utf-8")
+    assert "def deduplicate_overlapping_episodes(" in src, \
+        "kr_multibagger_classifier missing deduplicate_overlapping_episodes"
+    # And label_pre_surge must call it
+    assert "deduplicate_overlapping_episodes(" in src.split("def label_pre_surge", 1)[-1], \
+        "label_pre_surge must call deduplicate_overlapping_episodes"
+
+
+@_test("structural: pykrx ImportError is loud (kr_flow + kr_derivatives)")
+def test_pykrx_import_loud_fail():
+    """Issue B regression guard — silent ImportError returns hide signal
+    evaporation across an entire backtest. Must raise RuntimeError instead."""
+    for mod in ("kr_flow.py", "kr_derivatives.py"):
+        src = (PROJECT_ROOT / mod).read_text(encoding="utf-8")
+        # Reject the silent pattern: `except ImportError:\n        return pd.DataFrame()`
+        bad = "except ImportError:\n        return pd.DataFrame()"
+        assert bad not in src, \
+            f"{mod} still has silent ImportError -> empty DataFrame return"
+        # Require explicit raise of RuntimeError mentioning install instructions
+        assert "raise RuntimeError(" in src and "pykrx" in src, \
+            f"{mod} missing explicit pykrx ImportError raise"
+
+
+@_test("structural: kr_universe.compute_listed_months no longer stub-999")
+def test_listed_months_real_impl():
+    """Issue D regression guard — stub returning constant 999 silently
+    disables the min_listed_months filter."""
+    src = (PROJECT_ROOT / "kr_universe.py").read_text(encoding="utf-8")
+    # The previous stub body was a single-line return of [999] * len(tickers).
+    # Real impl must reference a listing-date resolver.
+    assert "_resolve_listing_date" in src, \
+        "kr_universe.compute_listed_months missing _resolve_listing_date helper"
+    assert "listed_months" in src and "_LISTING_DATE_CACHE" in src, \
+        "kr_universe missing in-process listing-date cache"
+
+
 @_test("structural: kr_derivatives module exists with key functions")
 def test_derivatives_module():
     src = (PROJECT_ROOT / "kr_derivatives.py").read_text(encoding="utf-8")

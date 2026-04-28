@@ -37,6 +37,53 @@ from kr_helpers import log
 # ---------------------------------------------------------------------------
 # Label generation
 # ---------------------------------------------------------------------------
+def deduplicate_overlapping_episodes(
+    episodes: pd.DataFrame,
+    pre_surge_months: int = 6,
+    post_surge_months: int = 3,
+) -> pd.DataFrame:
+    """Drop overlapping pre-surge windows on the same ticker.
+
+    For each ticker sorted by surge_start_date ascending, keep the first
+    episode and drop any subsequent episode whose [surge_start - pre,
+    surge_start + post] window overlaps the previous kept window. Without
+    this, label_pre_surge double-labels rows in the overlap region — the
+    classifier sees two competing positive examples for the same row, which
+    biases predictions and inflates apparent prevalence.
+
+    Returns: filtered episodes (with same columns) + dropped count logged.
+    """
+    if episodes is None or episodes.empty or "surge_start_date" not in episodes.columns:
+        return episodes
+
+    df = episodes.copy()
+    df = df[df["surge_start_date"].notna()].copy()
+    df["surge_start_date"] = pd.to_datetime(df["surge_start_date"])
+    df["ticker"] = df["ticker"].astype(str)
+    df = df.sort_values(["ticker", "surge_start_date"]).reset_index(drop=True)
+
+    keep_idx = []
+    last_window_end_by_ticker: dict[str, pd.Timestamp] = {}
+    for i, ep in df.iterrows():
+        tk = ep["ticker"]
+        ssd = ep["surge_start_date"]
+        win_start = ssd - pd.DateOffset(months=pre_surge_months)
+        win_end = ssd + pd.DateOffset(months=post_surge_months)
+        prev_end = last_window_end_by_ticker.get(tk)
+        if prev_end is not None and win_start <= prev_end:
+            # Overlap with previous kept window for this ticker — drop
+            continue
+        keep_idx.append(i)
+        last_window_end_by_ticker[tk] = win_end
+
+    n_dropped = len(df) - len(keep_idx)
+    if n_dropped:
+        log(f"[mb-classifier] deduplicate_overlapping_episodes: dropped "
+            f"{n_dropped}/{len(df)} overlapping (window=[-{pre_surge_months}m, "
+            f"+{post_surge_months}m])")
+    return df.iloc[keep_idx].reset_index(drop=True)
+
+
 def label_pre_surge(
     scored_panel: pd.DataFrame,
     episodes: pd.DataFrame,
@@ -48,6 +95,9 @@ def label_pre_surge(
     For each episode (ticker, surge_start_date), label rows where:
       ticker matches AND
       surge_start - pre_surge_months <= rebalance_date <= surge_start + post_surge_months
+
+    Episodes are deduplicated first so overlapping windows on the same ticker
+    don't double-label the same row (Issue C, P_MB.2 blocker).
     """
     if scored_panel.empty:
         return scored_panel
@@ -57,6 +107,10 @@ def label_pre_surge(
 
     if episodes is None or episodes.empty or "surge_start_date" not in episodes.columns:
         return out
+
+    episodes = deduplicate_overlapping_episodes(
+        episodes, pre_surge_months, post_surge_months,
+    )
 
     n_labeled = 0
     for _, ep in episodes.iterrows():

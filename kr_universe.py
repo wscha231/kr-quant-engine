@@ -31,12 +31,19 @@ from kr_config import (
 )
 from kr_helpers import log
 from kr_pykrx_client import (
+    FDR_AVAILABLE,
     fetch_business_days,
     fetch_listing,
     fetch_market_cap_market,
     fetch_month_end_business_days,
     fetch_daily_ohlcv_market,
+    fetch_ticker_history,
 )
+
+try:
+    import FinanceDataReader as _fdr
+except ImportError:
+    _fdr = None
 
 
 # ---------------------------------------------------------------------------
@@ -123,23 +130,102 @@ def compute_avg_trading_value_60d(
 
 
 # ---------------------------------------------------------------------------
-# Listing age (P0 conservative: assume listed long ago if first OHLCV exists)
+# Listing age
 # ---------------------------------------------------------------------------
+_LISTING_DATE_CACHE: dict[str, pd.Timestamp] = {}
+
+
+def _resolve_listing_date(ticker: str) -> Optional[pd.Timestamp]:
+    """Return a ticker's listing date (KRX 상장일) using FDR's StockListing
+    when available, else the earliest available OHLCV date as fallback.
+
+    Cached in-process so monthly snapshots don't re-fetch.
+    """
+    tk = str(ticker).zfill(6)
+    if tk in _LISTING_DATE_CACHE:
+        return _LISTING_DATE_CACHE[tk]
+
+    listing_date: Optional[pd.Timestamp] = None
+
+    # 1. FDR StockListing (has 'ListingDate' on KRX/KOSPI/KOSDAQ feeds)
+    if _fdr is not None:
+        try:
+            for mkt in ("KRX", "KOSPI", "KOSDAQ"):
+                try:
+                    df = _fdr.StockListing(mkt)
+                except Exception:
+                    continue
+                if df is None or df.empty:
+                    continue
+                if "Code" not in df.columns:
+                    continue
+                df = df.copy()
+                df["Code"] = df["Code"].astype(str).str.zfill(6)
+                hit = df[df["Code"] == tk]
+                if hit.empty:
+                    continue
+                # FDR uses 'ListingDate' (varies by feed); fall back to common alts
+                for col in ("ListingDate", "Listed", "ListingDay"):
+                    if col in hit.columns and pd.notna(hit.iloc[0][col]):
+                        listing_date = pd.Timestamp(hit.iloc[0][col]).normalize()
+                        break
+                if listing_date is not None:
+                    break
+        except Exception:
+            listing_date = None
+
+    # 2. Fallback: earliest OHLCV record (cached) — bounded lookback
+    if listing_date is None:
+        try:
+            history = fetch_ticker_history(tk, "20000101",
+                                            datetime.now().strftime("%Y%m%d"),
+                                            refresh_days=30)
+            if history is not None and not history.empty and "date" in history.columns:
+                listing_date = pd.Timestamp(history["date"].min()).normalize()
+        except Exception:
+            pass
+
+    _LISTING_DATE_CACHE[tk] = listing_date
+    return listing_date
+
+
 def compute_listed_months(
     rebalance_date: pd.Timestamp,
     tickers: list[str],
     cache_path: Optional[Path] = None,
 ) -> pd.DataFrame:
-    """Approximate listed months by finding earliest OHLCV record per ticker.
+    """Compute listed_months as (rebalance_date - listing_date) in months.
 
-    P0 v0: cheap proxy via FinanceDataReader if available (DartReader has
-    listing dates). For now, return all tickers with listed_months = 999
-    (i.e., assume long-listed) and let pykrx OHLCV history handle the
-    "12-month lookback" check at feature time. This is conservative.
+    Sources, in order:
+      1. FDR StockListing (KRX/KOSPI/KOSDAQ) — official 상장일 when available
+      2. Earliest OHLCV record from cached pykrx/FDR history — fallback proxy
+      3. None → listed_months = 999 (let downstream features filter on history)
 
-    P1 will replace with proper DART corp listing date.
+    The previous P0 stub returned 999 for every ticker, silently disabling
+    the `min_listed_months=12` filter. This version drives the filter for
+    real on the first month-end build, then reuses an in-process cache.
     """
-    return pd.DataFrame({"ticker": tickers, "listed_months": [999] * len(tickers)})
+    rd = pd.Timestamp(rebalance_date).normalize()
+    rows = []
+    unresolved = 0
+    for tk in tickers:
+        listing_date = _resolve_listing_date(tk)
+        if listing_date is None:
+            rows.append({"ticker": tk, "listed_months": 999,
+                          "listing_date_resolved": False})
+            unresolved += 1
+            continue
+        delta_days = max(0, (rd - listing_date).days)
+        listed_months = int(delta_days // 30)
+        rows.append({"ticker": tk, "listed_months": listed_months,
+                      "listing_date_resolved": True,
+                      "listing_date": listing_date})
+    out = pd.DataFrame(rows)
+    if unresolved:
+        log(f"[universe] compute_listed_months: {unresolved}/{len(tickers)} "
+            f"tickers unresolved (FDR + history both empty) -> 999 fallback",
+            level="WARN")
+    return out
 
 
 # ---------------------------------------------------------------------------

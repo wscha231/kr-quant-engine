@@ -66,9 +66,13 @@ def fetch_market_flow_daily(date: str, market: str = "KOSPI",
 
     try:
         from pykrx import stock as _stock
-    except ImportError:
-        log("[flow] pykrx not installed", level="ERROR")
-        return pd.DataFrame()
+    except ImportError as ex:
+        # Loud-fail: silent empty would hide signal evaporation across an
+        # entire backtest. Caller (run_local) will surface this immediately.
+        raise RuntimeError(
+            "pykrx not installed — kr_flow requires it for market-level "
+            "flow signals. Install: py -3 -m pip install pykrx>=1.0.45"
+        ) from ex
 
     try:
         df = _stock.get_market_trading_value_by_investor(d, d, market=market)
@@ -174,8 +178,11 @@ def fetch_ticker_flow_for_date_range(
 
     try:
         from pykrx import stock as _stock
-    except ImportError:
-        return pd.DataFrame()
+    except ImportError as ex:
+        raise RuntimeError(
+            "pykrx not installed — kr_flow.fetch_ticker_flow_for_date_range "
+            "needs it. Install: py -3 -m pip install pykrx>=1.0.45"
+        ) from ex
 
     try:
         df = _stock.get_market_trading_value_by_date(s, e, ticker)
@@ -225,8 +232,11 @@ def fetch_foreign_holding_for_date(date: str, market: str = "ALL",
 
     try:
         from pykrx import stock as _stock
-    except ImportError:
-        return pd.DataFrame()
+    except ImportError as ex:
+        raise RuntimeError(
+            "pykrx not installed — kr_flow.fetch_foreign_holding_for_date "
+            "needs it. Install: py -3 -m pip install pykrx>=1.0.45"
+        ) from ex
 
     frames = []
     markets = ["KOSPI", "KOSDAQ"] if market == "ALL" else [market]

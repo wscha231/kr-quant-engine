@@ -6,6 +6,43 @@
 
 ## 2026-04-28
 
+### 22:30 KST — Issue B/C/D fixes + GitHub Actions CI
+
+**Scope**: 정밀분석 deferred 목록 중 우선순위 상위 3개 (B, C, D) 처리 + GitHub에서 자동 실행되는 smoke CI 워크플로 추가.
+
+**What landed**:
+- **Issue C — multibagger classifier label deconfliction** (P_MB.2 차단 해제):
+  - `kr_multibagger_classifier.deduplicate_overlapping_episodes(eps, pre, post)` 신설.
+  - 같은 ticker 의 surge_start_date 를 오름차순 정렬 후, 직전 keep 윈도우 `[ssd-pre, ssd+post]` 와 겹치는 후속 episode 는 drop.
+  - `label_pre_surge` 가 라벨링 직전에 자동 호출 → 같은 row 가 두 번 label=1 처리되는 leak 제거.
+  - `tests/test_multibagger_classifier.py` 신설 (7 tests: non-overlap / overlap / cross-ticker isolation / chained overlaps / NaN drop / in-window labeling / no double-label).
+- **Issue B — pykrx ImportError loud-fail**:
+  - `kr_flow.py` 3 위치 (`fetch_market_flow_daily`, `fetch_ticker_flow_for_date_range`, `fetch_foreign_holding_for_date`) 의 silent `except ImportError: return pd.DataFrame()` → `raise RuntimeError(...)` with install hint 으로 전환.
+  - `kr_derivatives.fetch_foreign_futures_oi` 의 합쳐진 try/except 를 (a) ImportError loud-fail / (b) API shape drift graceful warn 으로 분리.
+  - 백테스트 도중 pykrx 가 누락되어도 시그널이 NaN 으로 증발하던 위험 제거.
+- **Issue D — `kr_universe.compute_listed_months` 실제 구현**:
+  - 기존 stub `999 * len(tickers)` → FDR `StockListing` (KRX/KOSPI/KOSDAQ) 기반 실제 상장일 조회.
+  - FDR 미해결 시 `fetch_ticker_history` 의 earliest record 로 폴백, 그것마저 없으면 999.
+  - `_LISTING_DATE_CACHE` in-process dict 로 monthly 스냅샷마다 재조회 방지.
+  - `min_listed_months=12` 필터가 비로소 실제 신규 상장 종목을 거름.
+- **GitHub Actions CI** (`.github/workflows/smoke.yml`):
+  - push 모든 브랜치 + PR-to-main + workflow_dispatch 트리거.
+  - Ubuntu + Python 3.11 + pandas/numpy 설치 후 `tests/smoke_test.py --quick` + `tests/test_multibagger_classifier.py` 실행.
+  - timeout 5분, concurrency cancel-in-progress.
+- **Smoke regression guards** (4건 추가, 총 28 quick tests):
+  - kr_multibagger_classifier 가 `deduplicate_overlapping_episodes` 노출하고 `label_pre_surge` 가 호출하는지
+  - kr_flow.py + kr_derivatives.py 에 silent ImportError 패턴 부재 + 명시적 RuntimeError 존재
+  - kr_universe.py 에 `_resolve_listing_date` + `_LISTING_DATE_CACHE` 존재
+
+**symbols_added**: `kr_multibagger_classifier.deduplicate_overlapping_episodes`, `kr_universe._resolve_listing_date`, `kr_universe._LISTING_DATE_CACHE`
+**symbols_changed**: `kr_multibagger_classifier.label_pre_surge` (sliding dedup 호출), `kr_universe.compute_listed_months` (stub→real impl), `kr_flow.fetch_market_flow_daily/fetch_ticker_flow_for_date_range/fetch_foreign_holding_for_date` (loud ImportError), `kr_derivatives.fetch_foreign_futures_oi` (split ImportError vs runtime)
+**config_fields_added**: none
+**breaking_changes**: pykrx 미설치 시 이전에는 silent NaN 으로 진행 → 이제 RuntimeError 즉시 발생 (사용자가 누락을 즉시 인지하므로 의도된 동작)
+
+**Smoke test**: `--quick` 28/0 (이전 25/0 + new 3 structural + new 1 dedup) ✅
+
+---
+
 ### 21:30 KST — p3-pipeline-wired (모든 패널 orchestration 결합)
 
 **Scope**: 정밀분석 결과 `kr_pipeline.build_scored_panel_v0`이 6개 패널 중 1개(`fund_panel`)만 사전 빌드하여 모든 토글 ON 시에도 P2/P2.5/P2.6/P3.2 시그널이 NaN/0으로 채워지던 결정적 wiring 누락을 수정. SESSION_HANDOFF의 "전 토글 ON baseline 측정" 액션이 실제 동작 가능해짐.
