@@ -1,0 +1,55 @@
+# universe.yaml — KOSPI + KOSDAQ 통합 universe 정의 + 멤버십 규칙
+# r1000 adr_universe.yaml 패턴 차용
+
+version: "0.1"
+last_updated: "2026-04-27"
+
+# === Exchanges ===
+exchanges:
+  - kospi
+  - kosdaq
+# konex은 P0에서 제외 (거래대금 < 5억원 거의 전부)
+
+# === Hard exclusions (rebal date 시점 기준) ===
+hard_exclusions:
+  preferred_stocks: true        # 우선주 (5/7/9 끝자리)
+  etfs: true                    # ETF
+  etns: true                    # ETN
+  elws: true                    # ELW
+  reits: true                   # 리츠 (P1에서 재검토)
+  spacs: true                   # SPAC
+  managed_stocks: true          # 관리종목
+  trading_halt: true            # 거래정지
+  liquidation: true             # 정리매매
+  delisting_announced: true     # 상장폐지 예정
+
+# === Soft filters (P0 기준) ===
+soft_filters:
+  min_trading_value_60d_krw: 500000000     # 5억원
+  min_market_cap_krw: 50000000000          # 500억원
+  min_listed_months: 12                     # 상장 12개월 이상
+
+# === Cross-exchange weight caps (P3+에서 활성화) ===
+exchange_caps:
+  enabled: false
+  kospi_max_weight: 1.0
+  kosdaq_max_weight: 0.50      # KOSDAQ 50% 한도 (P3 검증 후 조정)
+
+# === Membership snapshot ===
+snapshot:
+  freeze_at: "first_business_day_of_month"   # 매월 첫 영업일
+  pit_lookback_days: 60                       # 거래대금 60일 평균
+
+# === KRX 종목코드 patterns (참고용) ===
+ticker_patterns:
+  preferred_stock_suffix: ["5", "7", "9"]    # 005935 = 삼성전자우 (우선주)
+  spac_pattern: ".*스팩.*"                    # 종목명에 "스팩" 포함
+  reit_pattern: ".*리츠.*"                    # 종목명에 "리츠" 포함
+
+# === Chaebol mapping (P2+에서 활용) ===
+chaebol_groups:
+  samsung: []                  # 삼성전자, 삼성SDI, 삼성바이오, 삼성생명 등 (런타임에 채움)
+  sk: []
+  hyundai_motor: []
+  lg: []
+  # 추가는 P2 시점에 검토

@@ -1,0 +1,46 @@
+# kr_quant_engine — Python dependencies
+# Install: py -3 -m pip install -r requirements.txt
+
+# --- Core data stack ---
+numpy>=1.24
+pandas>=2.0
+pyarrow>=14.0          # parquet I/O
+duckdb>=0.10            # ad-hoc SQL on parquet
+
+# --- Korean market data ---
+pykrx>=1.0.45           # KRX prices, mktcap, foreign/institutional flow, PER/PBR
+finance-datareader>=0.9 # KRX listings, indices, KRW, secondary sources
+opendartreader>=0.2     # DART convenience wrapper (P1+)
+beautifulsoup4>=4.12    # Naver/KRX scraping
+lxml>=4.9
+requests>=2.31
+
+# --- Macro / global ---
+yfinance>=0.2.40        # USD/KRW, US benchmarks
+fredapi>=0.5            # US macro reference (optional)
+
+# --- ML / stats ---
+scikit-learn>=1.3
+catboost>=1.2
+scipy>=1.11
+statsmodels>=0.14
+
+# --- Plotting / reporting ---
+matplotlib>=3.8
+seaborn>=0.13
+plotly>=5.18
+
+# --- Notebook / tooling ---
+jupyter>=1.0
+ipython>=8.18
+tqdm>=4.66
+python-dotenv>=1.0      # .env loading
+pyyaml>=6.0
+tabulate>=0.9
+
+# --- Calendar ---
+exchange-calendars>=4.5  # KRX trading calendar
+pandas-market-calendars>=4.4  # supplementary
+
+# --- Testing ---
+pytest>=7.4

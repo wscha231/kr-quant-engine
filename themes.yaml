@@ -1,0 +1,95 @@
+# themes.yaml — 한국시장 테마 분류 + phase classifier
+# r1000 themes.yaml 패턴 차용. P2에서 본격 활용.
+
+version: "0.1"
+last_updated: "2026-04-27"
+
+# Phase classifier thresholds
+phase_thresholds:
+  dormant: { return_3m_max: 0.0 }
+  emerging: { return_3m_min: 0.0, return_3m_max: 0.15, volume_zscore_min: 1.0 }
+  trending: { return_3m_min: 0.15, return_3m_max: 0.50, foreign_inst_net_buy: true }
+  parabolic: { return_3m_min: 0.50 }                  # AVOID
+  rolling_over: { peak_drop_pct: -0.15, peak_within_months: 3 }   # AVOID
+
+# === 핵심 테마 (P2 시점 확장 예정) ===
+# tickers는 런타임에 KRX 분류 + Naver 테마 + 수동 라벨링으로 채움
+themes:
+  semiconductor:
+    name_kr: "반도체"
+    description: "메모리 + 비메모리 + 장비 + 소재"
+    tickers: []      # e.g. ["005930", "000660", "042700", ...]
+    drivers: ["dram_price", "dxi_index", "ai_capex"]
+
+  battery:
+    name_kr: "2차전지"
+    description: "양극재, 음극재, 분리막, 전해질, 셀"
+    tickers: []
+    drivers: ["lithium_price", "ev_sales", "ira_subsidy"]
+
+  ai_software:
+    name_kr: "AI"
+    description: "AI 솔루션, LLM, 데이터센터"
+    tickers: []
+    drivers: ["nvidia_capex", "samsung_hbm", "data_center_demand"]
+
+  bio:
+    name_kr: "바이오"
+    description: "신약, 바이오시밀러, 진단"
+    tickers: []
+    drivers: ["fda_approvals", "clinical_trials"]
+
+  shipbuilding:
+    name_kr: "조선"
+    description: "LNG선, 컨테이너선, 해양플랜트"
+    tickers: []
+    drivers: ["clarksons_index", "lng_demand", "imo_regulation"]
+
+  defense:
+    name_kr: "방산"
+    description: "항공, 미사일, 통신, 사이버"
+    tickers: []
+    drivers: ["nato_spending", "kr_export_orders"]
+
+  nuclear:
+    name_kr: "원전"
+    description: "SMR, 대형원전, 후속비용"
+    tickers: []
+    drivers: ["smr_orders", "energy_policy"]
+
+  display:
+    name_kr: "디스플레이"
+    description: "OLED, LCD, 마이크로LED"
+    tickers: []
+    drivers: ["apple_orders", "panel_pricing"]
+
+  automotive:
+    name_kr: "자동차"
+    description: "완성차, 부품, 전장"
+    tickers: []
+    drivers: ["us_auto_sales", "chip_supply", "ev_transition"]
+
+  internet_platform:
+    name_kr: "인터넷·플랫폼"
+    description: "포털, 커머스, 핀테크, 게임"
+    tickers: []
+    drivers: ["consumer_spending", "ad_revenue"]
+
+# === Phase 4 등가 — regime별 테마 가중 (P3 정의) ===
+regime_theme_multipliers:
+  bull_trending:
+    semiconductor: 1.20
+    ai_software: 1.30
+    battery: 1.10
+  bear_falling:
+    defense: 1.20
+    nuclear: 1.15
+    bio: 1.05    # defensive
+  recovery:
+    automotive: 1.20
+    semiconductor: 1.15
+
+# === 추가 후보 (P2 시점 enrich) ===
+# 화장품, 음식료, 건설, 철강, 화학, 유통, 통신, 보험, 은행, 증권, 미디어,
+# 게임, 엔터, 콘텐츠, 항공, 해운, 물류, 식자재유통, 전자결제, 보안, 로봇,
+# 우주항공, 수소, 풍력, 태양광, 식품, 의료기기, 농업, 펫, 메타버스, 헬스케어

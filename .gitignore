@@ -1,0 +1,61 @@
+# Secrets — NEVER commit
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+api_keys.json
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+venv/
+.venv/
+env/
+
+# Data caches (large, regenerable)
+cache_pykrx/
+cache_dart/
+cache_macro/
+cache_misc/
+data_raw/
+
+# Model artifacts (large, regenerable)
+feature_store/
+models/
+catboost_info/
+
+# Outputs (regenerable, but keep .gitkeep)
+outputs/*
+!outputs/.gitkeep
+outputs_advisor/*
+!outputs_advisor/.gitkeep
+backtest_results/*
+!backtest_results/.gitkeep
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+*.ipynb_checkpoints/
+
+# Logs
+*.log
+logs/
+
+# Temporary
+tmp_*/
+*_tmp.py
+*.bak_*
