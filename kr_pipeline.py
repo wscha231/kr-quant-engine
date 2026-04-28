@@ -31,6 +31,7 @@ from kr_features import (
 )
 from kr_helpers import log, phase_is_enabled
 from kr_pykrx_client import (
+    fetch_daily_ohlcv_market,
     fetch_index_ohlcv,
     fetch_month_end_business_days,
     fetch_ticker_history,
@@ -232,7 +233,13 @@ def select_topn_per_month(scored_panel: pd.DataFrame, n: int = 30,
 def _ticker_month_return(
     ticker: str, period_start: pd.Timestamp, period_end: pd.Timestamp
 ) -> float:
-    """Return for ticker over [period_start, period_end] using close prices."""
+    """Return for ticker over [period_start, period_end] using close prices.
+
+    Per-name pykrx fetch — kept for backward compatibility / single-ticker
+    debugging only. The hot path in backtest_topn_momentum_v0 uses
+    `_prefetch_period_end_close_map` instead, which fetches a single
+    market-wide OHLCV snapshot per rebalance date (Issue G, 2026-04-28).
+    """
     start = (period_start - timedelta(days=10)).strftime("%Y%m%d")
     end = (period_end + timedelta(days=10)).strftime("%Y%m%d")
     df = fetch_ticker_history(ticker, start, end, refresh_days=30)
@@ -248,6 +255,78 @@ def _ticker_month_return(
     if s <= 0:
         return 0.0
     return e / s - 1.0
+
+
+def _prefetch_period_end_close_map(
+    rebalance_dates: list[pd.Timestamp],
+    refresh_days: int = 30,
+) -> dict[pd.Timestamp, dict[str, float]]:
+    """Fetch one market-wide OHLCV snapshot per rebalance date.
+
+    Returns: {rebalance_date: {ticker: close}}. ~60 calls for a 5-year
+    monthly window vs N×months single-ticker calls (10-100x speedup for
+    a 1,000-ticker universe). Uses fetch_daily_ohlcv_market under the
+    hood, which is already per-day parquet-cached so re-runs are free.
+
+    If a date returns empty (KRX outage, holiday alignment), the snapshot
+    falls back to single-ticker history at lookup time via
+    `_period_close_for_ticker_with_map`.
+    """
+    out: dict[pd.Timestamp, dict[str, float]] = {}
+    for rd in rebalance_dates:
+        rd_norm = pd.Timestamp(rd).normalize()
+        if rd_norm in out:
+            continue
+        try:
+            df = fetch_daily_ohlcv_market(
+                rd_norm.strftime("%Y%m%d"), market="ALL",
+                refresh_days=refresh_days,
+            )
+        except Exception as e:
+            log(f"[backtest] bulk OHLCV fetch fail at {rd_norm}: {e} -> empty snapshot",
+                level="WARN")
+            df = pd.DataFrame()
+        snap: dict[str, float] = {}
+        if not df.empty and "ticker" in df.columns and "close" in df.columns:
+            for tk, close in zip(df["ticker"].astype(str), df["close"]):
+                try:
+                    val = float(close)
+                except (TypeError, ValueError):
+                    continue
+                if val > 0:
+                    snap[tk] = val
+        out[rd_norm] = snap
+    return out
+
+
+def _period_close_for_ticker_with_map(
+    ticker: str,
+    rebalance_date: pd.Timestamp,
+    close_map: dict[pd.Timestamp, dict[str, float]],
+) -> Optional[float]:
+    """Look up close in pre-fetched snapshot; fall back to per-ticker history
+    if the bulk snapshot is missing this ticker (e.g., trading halt at the
+    snapshot date)."""
+    rd = pd.Timestamp(rebalance_date).normalize()
+    snap = close_map.get(rd) or {}
+    val = snap.get(str(ticker))
+    if val is not None and val > 0:
+        return val
+    # Fallback: per-ticker history (slow path, used only on misses)
+    start = (rd - timedelta(days=10)).strftime("%Y%m%d")
+    end = rd.strftime("%Y%m%d")
+    df = fetch_ticker_history(ticker, start, end, refresh_days=30)
+    if df.empty or "close" not in df.columns:
+        return None
+    df = df.sort_values("date")
+    sub = df[df["date"] <= rd]
+    if sub.empty:
+        return None
+    try:
+        v = float(sub.iloc[-1]["close"])
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
 
 
 def backtest_topn_momentum_v0(
@@ -271,6 +350,13 @@ def backtest_topn_momentum_v0(
     rds = sorted(selected["rebalance_date"].unique())
     monthly_rows = []
     prev_holdings: dict[str, float] = {}    # ticker -> weight
+
+    # Issue G: pre-fetch one market-wide OHLCV snapshot per rebalance date
+    # so per-name return lookup is dict-only (no pykrx call in inner loop).
+    # 10-100x speedup for ≥1k-ticker universes.
+    rd_norms = [pd.Timestamp(rd).normalize() for rd in rds]
+    log(f"[backtest] prefetching market OHLCV for {len(rd_norms)} rebalance dates")
+    close_map = _prefetch_period_end_close_map(rd_norms)
 
     for i in range(len(rds) - 1):
         rd = pd.Timestamp(rds[i])
@@ -296,13 +382,16 @@ def backtest_topn_momentum_v0(
         weights = weights.clip(upper=cap)
         weights = weights / weights.sum() if weights.sum() > 0 else weights
 
-        # Compute holding returns over [rd, next_rd]
+        # Compute holding returns over [rd, next_rd] using bulk close_map
         ret_per_name = {}
-        for idx, row in sel.iterrows():
-            tk = row["ticker"]
-            r = _ticker_month_return(tk, rd, next_rd)
-            ret_per_name[tk] = r
-        sel["period_return"] = sel["ticker"].map(ret_per_name).fillna(0.0)
+        for tk in sel["ticker"].astype(str):
+            p_start = _period_close_for_ticker_with_map(tk, rd, close_map)
+            p_end = _period_close_for_ticker_with_map(tk, next_rd, close_map)
+            if p_start is None or p_end is None or p_start <= 0:
+                ret_per_name[tk] = 0.0
+            else:
+                ret_per_name[tk] = p_end / p_start - 1.0
+        sel["period_return"] = sel["ticker"].astype(str).map(ret_per_name).fillna(0.0)
         sel["weight"] = weights.values
 
         gross_ret = float((sel["weight"] * sel["period_return"]).sum())

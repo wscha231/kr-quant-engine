@@ -326,7 +326,13 @@ def build_macro_panel(
     for p in panels[1:]:
         merged = merged.merge(p, on="date", how="outer")
     merged = merged.sort_values("date").reset_index(drop=True)
-    merged = merged.set_index("date").asfreq("D").ffill().reset_index()
+    # Issue F: cap ffill propagation. BOK monthly publishes within ~30-45 days
+    # of month-end; capping here prevents a single 6-month-old print from
+    # repeating across an entire half-year of daily snapshots and clustering
+    # the signal at month-ends.
+    merged = (
+        merged.set_index("date").asfreq("D").ffill(limit=45).reset_index()
+    )
 
     enriched = add_derived_macro_signals(merged)
 

@@ -593,15 +593,31 @@ def build_corp_quarterly_panel(
 # ---------------------------------------------------------------------------
 # 6. PIT-safe join helper
 # ---------------------------------------------------------------------------
-def pit_filter_panel(panel: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
+def pit_filter_panel(panel: pd.DataFrame, as_of: pd.Timestamp,
+                     strict: bool = True) -> pd.DataFrame:
     """Filter panel to rows visible as of `as_of` (rcept_dt <= as_of).
 
     Critical for backtest no-look-ahead. If rcept_dt missing, drop the row
     (defensive — never use stale period_end-based fallback).
+
+    `strict=True` (default) additionally asserts rcept_dt >= period_end —
+    a filing cannot be reported before the period it covers (Issue A
+    safety guard, 2026-04-28). If the assertion fires, the offending rows
+    are dropped + a WARN is logged (don't crash the pipeline mid-run).
     """
     if panel.empty or "rcept_dt" not in panel.columns:
         return panel.iloc[0:0]   # empty same-schema
     out = panel[panel["rcept_dt"].notna() & (panel["rcept_dt"] <= as_of)].copy()
+    if strict and not out.empty and "period_end" in out.columns:
+        bad = out["period_end"].notna() & (out["rcept_dt"] < out["period_end"])
+        n_bad = int(bad.sum())
+        if n_bad:
+            sample = out.loc[bad, ["corp_code", "bsns_year", "reprt_code",
+                                    "rcept_dt", "period_end"]].head(3)
+            log(f"[dart] pit_filter_panel: dropping {n_bad} rows with "
+                f"rcept_dt < period_end (impossible filing date). Sample:\n"
+                f"{sample.to_string(index=False)}", level="WARN")
+            out = out[~bad]
     return out
 
 

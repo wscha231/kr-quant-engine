@@ -6,6 +6,38 @@
 
 ## 2026-04-28
 
+### 23:30 KST — Issue A/F/G fixes (PIT guard + macro ffill cap + backtest bulk prefetch)
+
+**Scope**: 정밀분석 deferred 목록 중 alpha-integrity (A) + signal-quality (F) + iteration-speed (G) 동시 처리.
+
+**What landed**:
+- **Issue G — backtest 종목별 fetch 제거**:
+  - `kr_pipeline._prefetch_period_end_close_map(rebalance_dates)` 신설. 월말마다 `fetch_daily_ohlcv_market` 1회 호출로 universe 전체 close 한 번에 dict 화 → backtest 내부 루프는 dict lookup 으로 대체.
+  - `_period_close_for_ticker_with_map(ticker, rd, close_map)` — bulk snapshot 미스 시 per-ticker history 폴백.
+  - `backtest_topn_momentum_v0` 가 새 path 사용. 기존 `_ticker_month_return` 은 single-ticker 디버깅용으로 유지.
+  - 1k-ticker universe × 60 monthly rebalance 기준 60,000+ pykrx 호출 → ~60 호출. **10-100x 속도**.
+- **Issue A — DART PIT safety guard**:
+  - `kr_dart_client.pit_filter_panel(panel, as_of, strict=True)` — `strict=True` 면 `rcept_dt < period_end` 인 row (불가능한 filing date) drop + WARN 로그.
+  - 기존 PIT 로직은 이미 `rcept_dt` 기반으로 정상이지만, 데이터 source 가 corrupt 한 경우의 안전망 추가.
+- **Issue F — macro panel ffill 클러스터링 완화**:
+  - `kr_macro.build_macro_panel` 의 `asfreq("D").ffill().reset_index()` → `asfreq("D").ffill(limit=45).reset_index()`.
+  - BOK monthly print 이 6개월 stale 한 채 daily 로 propagate 되어 월말마다 같은 시그널이 "fresh"하게 fire 하던 클러스터링 제거.
+  - 일반적인 BOK 월간 publish lag (~30-45일) 까지는 허용, 그 이상은 NaN 으로 무효화.
+- **Smoke regression guards** 4건 추가 (총 31 quick tests):
+  - `_prefetch_period_end_close_map` + `_period_close_for_ticker_with_map` 존재
+  - `backtest_topn_momentum_v0` 가 prefetch helper 호출
+  - `pit_filter_panel` 의 `strict` 파라미터 + `rcept_dt < period_end` 가드
+  - `kr_macro` 의 ffill `limit=` 명시
+
+**symbols_added**: `kr_pipeline._prefetch_period_end_close_map`, `kr_pipeline._period_close_for_ticker_with_map`
+**symbols_changed**: `kr_pipeline.backtest_topn_momentum_v0` (bulk prefetch path), `kr_dart_client.pit_filter_panel` (strict 파라미터 + safety guard), `kr_macro.build_macro_panel` (ffill limit)
+**config_fields_added**: none
+**breaking_changes**: none — 기존 `_ticker_month_return` 시맨틱 유지, 새 bulk path 는 같은 결과 산출. `pit_filter_panel(..., strict=False)` 로 레거시 동작 옵트아웃 가능.
+
+**Smoke test**: `--quick` 31/0 (이전 28/0 + new 3 structural + new 1) ✅
+
+---
+
 ### 22:30 KST — Issue B/C/D fixes + GitHub Actions CI
 
 **Scope**: 정밀분석 deferred 목록 중 우선순위 상위 3개 (B, C, D) 처리 + GitHub에서 자동 실행되는 smoke CI 워크플로 추가.

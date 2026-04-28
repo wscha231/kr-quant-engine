@@ -308,6 +308,49 @@ def test_listed_months_real_impl():
         "kr_universe missing in-process listing-date cache"
 
 
+@_test("structural: backtest uses bulk OHLCV prefetch (Issue G)")
+def test_backtest_bulk_prefetch():
+    """Issue G regression guard — per-name pykrx fetch in inner loop is the
+    biggest bottleneck for ≥1k-ticker universes. Backtest must use the
+    market-wide snapshot via _prefetch_period_end_close_map."""
+    src = (PROJECT_ROOT / "kr_pipeline.py").read_text(encoding="utf-8")
+    assert "def _prefetch_period_end_close_map(" in src, \
+        "kr_pipeline missing _prefetch_period_end_close_map helper"
+    assert "_period_close_for_ticker_with_map" in src, \
+        "kr_pipeline missing per-ticker close map lookup"
+    # backtest_topn_momentum_v0 must invoke the prefetch
+    bt_section = src.split("def backtest_topn_momentum_v0", 1)[-1]
+    assert "_prefetch_period_end_close_map(" in bt_section, \
+        "backtest_topn_momentum_v0 not using bulk prefetch"
+
+
+@_test("structural: pit_filter_panel guards rcept_dt >= period_end (Issue A)")
+def test_dart_pit_strict_guard():
+    """Issue A safety guard — a filing's rcept_dt must be on/after the
+    period it covers. Drops impossible rows + WARN log."""
+    src = (PROJECT_ROOT / "kr_dart_client.py").read_text(encoding="utf-8")
+    pit_section = src.split("def pit_filter_panel(", 1)[-1].split("\ndef ", 1)[0]
+    assert "strict" in pit_section, \
+        "pit_filter_panel missing strict-mode parameter"
+    assert "rcept_dt < " in pit_section and "period_end" in pit_section, \
+        "pit_filter_panel missing rcept_dt < period_end guard"
+
+
+@_test("structural: macro panel ffill is bounded (Issue F)")
+def test_macro_ffill_bounded():
+    """Issue F regression guard — unbounded ffill propagates stale BOK
+    monthly prints across many months, clustering signals at month-ends.
+    build_macro_panel must cap ffill with a `limit=` argument."""
+    src = (PROJECT_ROOT / "kr_macro.py").read_text(encoding="utf-8")
+    # Reject unbounded `.ffill().reset_index()` on the merged panel
+    bad = ".asfreq(\"D\").ffill().reset_index()"
+    assert bad not in src, \
+        f"kr_macro still has unbounded ffill: {bad}"
+    # Require explicit limit
+    assert "ffill(limit=" in src, \
+        "kr_macro missing ffill(limit=...) cap on macro panel"
+
+
 @_test("structural: kr_derivatives module exists with key functions")
 def test_derivatives_module():
     src = (PROJECT_ROOT / "kr_derivatives.py").read_text(encoding="utf-8")
