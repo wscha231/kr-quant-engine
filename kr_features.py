@@ -30,6 +30,9 @@ from kr_config import (
     PHASE0_MOMENTUM_COLUMNS,
     PHASE1_FUNDAMENTAL_COLUMNS,
     PHASE2_DART_EVENT_COLUMNS,
+    PHASE2_DERIVATIVES_COLUMNS,
+    PHASE2_FLOW_COLUMNS,
+    PHASE3_MACRO_COLUMNS,
     PHASE3_TECHNICAL_COLUMNS,
 )
 from kr_helpers import (
@@ -920,6 +923,186 @@ def add_technical_indicators(
     return out
 
 
+# ===========================================================================
+# P2.5 — Flow signals (foreign / inst / individual supply-demand)
+# ===========================================================================
+def add_flow_signals(
+    universe: pd.DataFrame,
+    rebalance_date: pd.Timestamp,
+    market_flow_panel: Optional[pd.DataFrame] = None,
+    ticker_flow_panel: Optional[pd.DataFrame] = None,
+    foreign_holding_panel: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Add foreign/institutional flow signals to universe at rebalance_date.
+
+    Three input panels (PIT-filtered downstream):
+      market_flow_panel: KOSPI/KOSDAQ-level foreign/inst flow rolling sums
+      ticker_flow_panel: per-ticker daily net buy z-scores + streaks
+      foreign_holding_panel: per-ticker foreign ownership % daily
+
+    All PHASE2_FLOW_COLUMNS populated (NaN if data missing).
+    Phase toggle: PHASE_PHASE2_FLOW_ENABLED (default OFF).
+    """
+    out = universe.copy()
+    if out.empty:
+        for col in PHASE2_FLOW_COLUMNS:
+            out[col] = np.nan
+        return out
+
+    if not phase_is_enabled("phase2_flow", default=False):
+        log("[features] phase2_flow DISABLED -> NaN-fill flow cols", level="INFO")
+        for col in PHASE2_FLOW_COLUMNS:
+            out[col] = np.nan
+        return out
+
+    from kr_flow import (
+        get_market_flow_snapshot, get_ticker_flow_snapshot,
+        get_foreign_holding_snapshot,
+    )
+
+    # Market-level (broadcast)
+    if market_flow_panel is not None and not market_flow_panel.empty:
+        mkt_snap = get_market_flow_snapshot(market_flow_panel, rebalance_date)
+    else:
+        mkt_snap = {}
+    for col in ("market_foreign_net_buy_20d_kospi", "market_foreign_net_buy_20d_kosdaq",
+                "market_inst_net_buy_20d_kospi", "market_inst_net_buy_20d_kosdaq",
+                "market_foreign_cumulative_60d"):
+        out[col] = mkt_snap.get(col, np.nan)
+
+    # Ticker-level (per-ticker)
+    ticker_signal_cols = [
+        "foreign_net_buy_5d_zscore", "foreign_net_buy_20d_zscore",
+        "foreign_net_buy_60d_zscore", "inst_net_buy_5d_zscore",
+        "inst_net_buy_20d_zscore", "inst_net_buy_60d_zscore",
+        "individual_net_buy_20d_zscore",
+        "foreign_buying_streak_days", "inst_buying_streak_days",
+        "foreign_inst_combined_zscore_20d",
+    ]
+
+    if ticker_flow_panel is not None and not ticker_flow_panel.empty:
+        rows = []
+        for tk in out["ticker"].astype(str):
+            snap = get_ticker_flow_snapshot(ticker_flow_panel, tk, rebalance_date)
+            snap["ticker"] = tk
+            rows.append(snap)
+        ticker_df = pd.DataFrame(rows)
+        keep = ["ticker"] + [c for c in ticker_signal_cols if c in ticker_df.columns]
+        out = out.merge(ticker_df[keep], on="ticker", how="left")
+    else:
+        for col in ticker_signal_cols:
+            out[col] = np.nan
+
+    # Foreign holding pct + change
+    if foreign_holding_panel is not None and not foreign_holding_panel.empty:
+        rows = []
+        for tk in out["ticker"].astype(str):
+            snap = get_foreign_holding_snapshot(foreign_holding_panel, tk, rebalance_date)
+            snap["ticker"] = tk
+            rows.append(snap)
+        hold_df = pd.DataFrame(rows)
+        out = out.merge(
+            hold_df[["ticker", "foreign_holding_pct", "foreign_holding_change_20d"]],
+            on="ticker", how="left", suffixes=("_old", ""),
+        )
+        # Drop any duplicate columns from prior phases
+        for c in ("foreign_holding_pct_old", "foreign_holding_change_20d_old"):
+            if c in out.columns:
+                out = out.drop(columns=[c])
+    else:
+        out["foreign_holding_pct"] = np.nan
+        out["foreign_holding_change_20d"] = np.nan
+
+    # Final: ensure all PHASE2_FLOW_COLUMNS present
+    for col in PHASE2_FLOW_COLUMNS:
+        if col not in out.columns:
+            out[col] = np.nan
+    return out
+
+
+# ===========================================================================
+# P2.6 — Derivatives sentiment (VKOSPI + foreign futures)
+# ===========================================================================
+def add_derivatives_signals(
+    universe: pd.DataFrame,
+    rebalance_date: pd.Timestamp,
+    derivatives_panel: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Add derivatives sentiment as broadcast columns.
+
+    Phase toggle: PHASE_PHASE2_DERIVATIVES_ENABLED (default OFF).
+    """
+    out = universe.copy()
+    if out.empty:
+        for col in PHASE2_DERIVATIVES_COLUMNS:
+            out[col] = False if col == "vkospi_above_25" else np.nan
+        return out
+
+    if not phase_is_enabled("phase2_derivatives", default=False):
+        log("[features] phase2_derivatives DISABLED -> NaN-fill", level="INFO")
+        for col in PHASE2_DERIVATIVES_COLUMNS:
+            out[col] = False if col == "vkospi_above_25" else np.nan
+        return out
+
+    if derivatives_panel is None or derivatives_panel.empty:
+        log("[features] phase2_derivatives: empty panel -> NaN-fill", level="WARN")
+        for col in PHASE2_DERIVATIVES_COLUMNS:
+            out[col] = False if col == "vkospi_above_25" else np.nan
+        return out
+
+    from kr_derivatives import get_derivatives_snapshot
+    snap = get_derivatives_snapshot(derivatives_panel, rebalance_date)
+    for col in PHASE2_DERIVATIVES_COLUMNS:
+        out[col] = snap.get(col,
+                              False if col == "vkospi_above_25" else np.nan)
+    return out
+
+
+# ===========================================================================
+# P3.2 — Macro layer (kr_macro.py): broadcast snapshot to all rows
+# ===========================================================================
+def add_macro_signals(
+    universe: pd.DataFrame,
+    rebalance_date: pd.Timestamp,
+    macro_panel: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Add macro snapshot at rebalance_date as broadcast columns.
+
+    Every row gets identical macro values (regime indicators apply universally).
+    Sector-specific multipliers come at P3.3 (regime classifier).
+
+    Phase toggle: PHASE_PHASE3_MACRO_ENABLED (default OFF).
+    """
+    out = universe.copy()
+    if out.empty:
+        for col in PHASE3_MACRO_COLUMNS:
+            out[col] = np.nan
+        return out
+
+    if not phase_is_enabled("phase3_macro", default=False):
+        log("[features] phase3_macro DISABLED -> NaN-fill macro cols", level="INFO")
+        for col in PHASE3_MACRO_COLUMNS:
+            out[col] = np.nan
+        return out
+
+    if macro_panel is None or macro_panel.empty:
+        log("[features] phase3_macro: empty macro_panel -> NaN-fill", level="WARN")
+        for col in PHASE3_MACRO_COLUMNS:
+            out[col] = np.nan
+        return out
+
+    from kr_macro import get_macro_snapshot
+
+    snap = get_macro_snapshot(macro_panel, rebalance_date)
+    for col in PHASE3_MACRO_COLUMNS:
+        out[col] = snap.get(col, np.nan)
+
+    nonnan = sum(1 for c in PHASE3_MACRO_COLUMNS if pd.notna(snap.get(c)))
+    log(f"[features] phase3_macro: {nonnan}/{len(PHASE3_MACRO_COLUMNS)} signals available "
+        f"at {rebalance_date.strftime('%Y-%m-%d')}")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
@@ -928,6 +1111,11 @@ def add_universe_features(
     rebalance_date: pd.Timestamp,
     fund_panel: Optional[pd.DataFrame] = None,
     event_panel: Optional[pd.DataFrame] = None,
+    macro_panel: Optional[pd.DataFrame] = None,
+    market_flow_panel: Optional[pd.DataFrame] = None,
+    ticker_flow_panel: Optional[pd.DataFrame] = None,
+    foreign_holding_panel: Optional[pd.DataFrame] = None,
+    derivatives_panel: Optional[pd.DataFrame] = None,
     event_lookback_days: int = 90,
 ) -> pd.DataFrame:
     """Add all enabled-phase features to a single rebalance_date snapshot.
@@ -935,10 +1123,12 @@ def add_universe_features(
     Args:
         universe_snapshot: rows for one rebalance_date (post-filter)
         rebalance_date: snapshot date
-        fund_panel: pre-built DART quarterly panel (full history, all tickers).
-                    If None and phase1_fundamental enabled, will skip P1.
+        fund_panel: pre-built DART quarterly panel.
         event_panel: pre-built DART events panel from prepare_event_panel.
-                    If None and phase2_dart_events enabled, will skip P2.
+        macro_panel: pre-built macro panel from kr_macro.build_macro_panel.
+        market_flow_panel: market-level flow rolling features (KOSPI/KOSDAQ).
+        ticker_flow_panel: per-ticker daily flow signals.
+        foreign_holding_panel: per-ticker foreign ownership %.
         event_lookback_days: rolling window for P2 event score aggregation.
     """
     log(f"[features] add_universe_features for {rebalance_date.strftime('%Y-%m-%d')} "
@@ -948,14 +1138,13 @@ def add_universe_features(
     df = add_basic_momentum(df, rebalance_date)
     df = add_basic_value(df, rebalance_date)
 
-    # P1: PIT fundamentals (default OFF — explicit env enable)
+    # P1: PIT fundamentals (default OFF)
     if phase_is_enabled("phase1_fundamental", default=False):
         if fund_panel is None or fund_panel.empty:
             log("[features] phase1 enabled but fund_panel empty -> skip", level="WARN")
         else:
             df = add_pit_fundamentals(df, rebalance_date, fund_panel)
     else:
-        # Zero-fill P1 columns to preserve schema
         df = add_pit_fundamentals(df, rebalance_date, pd.DataFrame())
 
     # P2: DART corporate events (default OFF)
@@ -963,8 +1152,37 @@ def add_universe_features(
         df, rebalance_date, event_panel, lookback_days=event_lookback_days,
     )
 
-    # P3: Technical indicators (default OFF)
+    # P2.5: Flow signals (default OFF)
+    df = add_flow_signals(
+        df, rebalance_date,
+        market_flow_panel=market_flow_panel,
+        ticker_flow_panel=ticker_flow_panel,
+        foreign_holding_panel=foreign_holding_panel,
+    )
+
+    # P2.6: Derivatives sentiment (default OFF)
+    df = add_derivatives_signals(df, rebalance_date, derivatives_panel)
+
+    # P3.1: Technical indicators (default OFF)
     df = add_technical_indicators(df, rebalance_date)
+
+    # P3.2: Macro layer (default OFF)
+    df = add_macro_signals(df, rebalance_date, macro_panel)
+
+    # P3.3: Regime classifier (default OFF — combines all P2.5/P2.6/P3.2)
+    from kr_regime import add_regime_signals
+    # kospi_above_ma200 derived from technicals if available
+    kospi_ma_flag = True
+    if "ma_stack_aligned" in df.columns:
+        # Use majority of universe (or first non-null) as proxy for market regime
+        kospi_ma_flag = bool(df["ma_stack_aligned"].fillna(False).mean() > 0.3)
+    df = add_regime_signals(
+        df, rebalance_date,
+        macro_panel=macro_panel,
+        market_flow_panel=market_flow_panel,
+        derivatives_panel=derivatives_panel,
+        kospi_above_ma200=kospi_ma_flag,
+    )
 
     df = add_cross_sectional_ranks(df)
     df = compute_p0_score(df)

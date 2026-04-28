@@ -395,3 +395,113 @@ v1 (count-based)는 Samsung 2024년 인사이더 보고 2,614 row × 0.30 weight
 - Live DART API: Samsung 2024 score recomputed +0.117 (was +43.10) ✓
 
 **Verdict**: C + D-3 SHIPPED. Test coverage 81 → 102 (+21 tests). 다음 세션에서 P_MB.2 (multibagger classifier with technicals + events as features) 진입 가능.
+
+---
+
+### 16:15 KST — p3.2-macro + p2.5-flow + p2.6-derivatives + p3.3-regime (4 layers)
+
+**Scope**: 사용자 요청 "한국경제 선행지표/수출입/유가/달러 + 코스피코스닥 지수선물옵션 + 외인기관개인 수급 변화" 모두 통합. 4개 신규 layer 순차 구현 (B 먼저 + A + C 모든 phase).
+
+**Layer 1 — P3.2 Macro (`kr_macro.py`, 380 lines)**:
+- BOK ECOS panel builder (10 series): 기준금리, 국고채 3Y/10Y, USD/KRW, PMI, 산업생산, 수출 YoY, 소비자/기업 심리, 가계대출
+- FRED-via-yfinance fallback: US 10Y/2Y, VIX, DXY (no FRED API key required)
+- yfinance commodities: WTI 원유, KRX 지수, KRW 환율
+- Derived signals (23 컬럼 in PHASE3_MACRO_COLUMNS):
+  - `macro_bok_rate_change_60d`, `macro_ktb_10y_3y_spread`, `macro_us_10y_2y_spread`
+  - `macro_usd_krw_zscore_60d`, `macro_usd_krw_change_20d`
+  - `macro_kr_pmi_diffusion` (PMI - 50)
+  - `macro_export_yoy_3m_avg`
+  - `macro_dxy_zscore_60d`, `macro_wti_zscore_60d`
+- `build_macro_panel(start, end)` — 3 source 통합 + outer-join + ffill
+- `get_macro_snapshot(panel, as_of)` — PIT lookup
+- 13 tests: derived signals 정확도 (rate change, yield spread, USD/KRW zscore, PMI diffusion, export YoY 3m avg), PIT lookup, missing source graceful fill
+
+**Layer 2 — P2.5 Flow (`kr_flow.py`, 400 lines)**:
+- 시장 전체 (KOSPI/KOSDAQ): 외인/기관/개인 + 연기금/투신/사모/은행/보험 분리
+- 종목별: 일별 외인/기관/개인 net buy (KRW)
+- 외국인 보유 비중 + 변화
+- Signals (17 컬럼 in PHASE2_FLOW_COLUMNS):
+  - `foreign_net_buy_5d/20d/60d_zscore`, `inst_net_buy_5d/20d/60d_zscore`
+  - `individual_net_buy_20d_zscore`
+  - `foreign_holding_pct`, `foreign_holding_change_20d`
+  - `foreign_buying_streak_days`, `inst_buying_streak_days`
+  - `market_foreign_net_buy_20d_kospi/kosdaq`, `market_inst_net_buy_20d_kospi/kosdaq`
+  - `market_foreign_cumulative_60d`
+  - `foreign_inst_combined_zscore_20d` (composite 0.6×F + 0.4×I)
+- 14 tests: zscore (panic spike + zero variance), streak counter, ticker/market signals, PIT join, broadcast vs per-ticker behavior
+
+**Layer 3 — P2.6 Derivatives (`kr_derivatives.py`, 250 lines)**:
+- VKOSPI (KRX index 1003 via pykrx, fallback yfinance ^VKOSPI)
+- 외국인 KOSPI 200 선물 미결제 (pykrx derivatives 모듈, defensive — API 변동성 대비)
+- Signals (7 컬럼 in PHASE2_DERIVATIVES_COLUMNS):
+  - `vkospi_level`, `vkospi_zscore_60d`, `vkospi_change_5d`, `vkospi_above_25` (panic flag)
+  - `foreign_futures_net_oi`, `foreign_futures_net_5d_change`
+  - `kospi200_basis_bp` (placeholder, P3+에서 spot+futures 결합 시 활성)
+- 12 tests: panic spike detection, calm market flag, change derivation, missing data fill
+
+**Layer 4 — P3.3 Regime (`kr_regime.py`, 280 lines)** — **모든 layer 통합**:
+- 8-state classifier:
+  - `bull_trending`: KOSPI > MA200 + 외인 누적 매수 + VKOSPI < 18
+  - `bull_peaking`: VKOSPI 18-25 + 외인 sell 시작
+  - `bear_falling`: KOSPI < MA200 + VKOSPI > 25 + 외인 sell + USD/KRW 절상
+  - `bear_bottoming`: VKOSPI > 30 + 외인 sell 둔화
+  - `recovery`: KOSPI MA200 회복 + 외인 net buy 재개 + PMI < 50
+  - `sideways`: default
+  - `stagflation_kr`: PMI < 48 + USD/KRW zscore > 1 + BOK 인상
+  - `won_crisis`: USD/KRW > 1400 + 외인 대량 sell + KOSPI -10% in 5d (overrides others)
+- `REGIME_SLEEVE_MULTIPLIERS`: per-regime {core, future, early} multipliers (r1000 Phase 4 등가)
+  - bull_trending: 1.00/1.30/1.20 (offensive)
+  - bear_falling: 1.20/0.50/0.40 (defensive)
+  - won_crisis: 0.60/0.30/0.20 (max de-risk)
+- Multipliers clamped to [0.30, 1.50]
+- 14 tests: 7 regime classifications + sleeve multipliers + PIT broadcast + summary stats
+
+**kr_features integration**:
+- `add_macro_signals` (P3.2), `add_flow_signals` (P2.5), `add_derivatives_signals` (P2.6), `add_regime_signals` (P3.3 — via kr_regime.add_regime_signals)
+- `add_universe_features` orchestrator: 새 params (macro_panel, market_flow_panel, ticker_flow_panel, foreign_holding_panel, derivatives_panel)
+- 모든 phase 독립 toggle: PHASE_PHASE3_MACRO_ENABLED / PHASE_PHASE2_FLOW_ENABLED / PHASE_PHASE2_DERIVATIVES_ENABLED / PHASE_PHASE3_REGIME_ENABLED
+
+**kr_config 확장**:
+- `PHASE3_MACRO_COLUMNS` (23): 금리/환율/경기/글로벌
+- `PHASE2_FLOW_COLUMNS` (17, expanded from 4): 종목별 + 시장 + 보유비중 + 연속매수
+- `PHASE2_DERIVATIVES_COLUMNS` (7): VKOSPI + 선물
+- `PHASE3_REGIME_COLUMNS` (9): regime label + sleeve multipliers + 매크로/수급/파생 carry-forward
+- `ALL_PHASE_COLUMNS` aggregated 91 → 138 컬럼
+
+**Test 결과 (총 162/162 통과)**:
+- smoke: 37 → **44** (+7 — 새 모듈 4개 + PHASE column counts + import checks)
+- dart_pit: 13/13
+- multibagger: 17/17
+- p2_events: 18/18
+- technicals: 17/17
+- **macro: 13/13** (NEW)
+- **flow: 14/14** (NEW)
+- **derivatives: 12/12** (NEW)
+- **regime: 14/14** (NEW)
+- **TOTAL: 102 → 162 (+60 tests)**
+
+**Bug fix (em-dash encoding)**: tests/test_regime.py — em-dash (U+2014) → ASCII dash (cp949 console 호환).
+
+**symbols_added**:
+- kr_macro (new): build_macro_panel, load_or_build_macro_panel, get_macro_snapshot, add_derived_macro_signals, fetch_bok_macro_wide, fetch_fred_macro_wide, fetch_yfinance_macro_wide, _zscore_rolling, _change_pct, _yoy_3m_avg
+- kr_flow (new): fetch_market_flow_daily, fetch_market_flow_panel, fetch_ticker_flow_for_date_range, fetch_foreign_holding_for_date, compute_ticker_flow_signals, compute_market_flow_signals, get_market_flow_snapshot, get_ticker_flow_snapshot, get_foreign_holding_snapshot, build_market_flow_panel, build_ticker_flow_panel, load_or_build_market_flow_panel, _zscore, _streak_days
+- kr_derivatives (new): fetch_vkospi, fetch_foreign_futures_oi, add_derived_derivatives_signals, build_derivatives_panel, load_or_build_derivatives_panel, get_derivatives_snapshot
+- kr_regime (new): classify_regime, get_regime_sleeve_multipliers, add_regime_signals, regime_summary, REGIME_SLEEVE_MULTIPLIERS, REGIME_SLEEVE_MULTIPLIER_CLAMP
+- kr_features: add_macro_signals, add_flow_signals, add_derivatives_signals
+- kr_config: PHASE3_MACRO_COLUMNS, PHASE2_DERIVATIVES_COLUMNS (PHASE2_FLOW_COLUMNS expanded)
+- tests/test_macro.py, test_flow.py, test_derivatives.py, test_regime.py (new)
+
+**symbols_changed**:
+- kr_features.add_universe_features: 5 new optional params (macro_panel, market_flow_panel, ticker_flow_panel, foreign_holding_panel, derivatives_panel)
+- kr_config.PHASE2_FLOW_COLUMNS: 4 → 17 (expanded sub-categories)
+
+**config_fields_added**: env vars PHASE_PHASE3_MACRO_ENABLED, PHASE_PHASE2_FLOW_ENABLED, PHASE_PHASE2_DERIVATIVES_ENABLED, PHASE_PHASE3_REGIME_ENABLED
+
+**breaking_changes**: none (all new functionality additive; existing tests still pass)
+
+**Validation**:
+- All 9 test suites: 162/162 in <2s combined
+- Each layer independently togglable
+- Mock data covers panic/calm/recovery/crisis scenarios
+
+**Verdict**: 4-layer macro + flow + derivatives + regime SHIPPED. 한국 매크로 + 수급 + 파생 + regime의 모든 차원이 시스템에 통합됨. P_MB.2 (multibagger classifier)는 이제 P0+P1+P2(events+flow+derivatives)+P3(technicals+macro+regime)의 풍부한 feature 세트를 학습 input으로 사용 가능.

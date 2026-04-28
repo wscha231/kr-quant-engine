@@ -5,82 +5,108 @@
 
 ---
 
-## 마지막으로 한 일 (2026-04-28 14:30 KST)
+## 마지막으로 한 일 (2026-04-28 16:15 KST)
 
-**C + D-3 순차 SHIPPED**. 사용자 요청 "순차적으로 수정해" 따라 진행:
+**4개 신규 layer 순차 SHIPPED** (사용자 요청 "한국경제 + 수급 + 파생 + regime 모두"):
 
-### C — P2 DART 이벤트 v2 재설계 (count → KRW-amount-based)
-v1 Samsung 폭발 (+43.10 from 2,614 row × count) → v2 정상화 (+0.117 from 2.68조/600조 mcap × 0.50 weight). 5개 scoring modes (amount_pct_mcap, computed_dilution, binary, insider_net_buy, stkrt_change). `kr_features.prepare_event_panel` + `add_disclosure_event_signal` + `compute_p2_score` 통합.
+| Layer | 모듈 | 컬럼 | Tests |
+|---|---|---|---|
+| **P3.2 Macro** | `kr_macro.py` | 23 (금리/환율/경기/글로벌) | 13/13 |
+| **P2.5 Flow** | `kr_flow.py` | 17 (종목/시장 외인기관) | 14/14 |
+| **P2.6 Derivatives** | `kr_derivatives.py` | 7 (VKOSPI + 외인선물) | 12/12 |
+| **P3.3 Regime** | `kr_regime.py` | 9 (8 regime + multipliers) | 14/14 |
 
-### D-3 — 기술지표 (P3.1)
-`kr_technicals.py` (340 lines) — 31 indicators:
-- MA 5/20/50/60/150/200 + stack alignment
-- 52w high/low + distance
-- RSI 14, ATR 14, Bollinger 20/2
-- Volume MA + zscore + dryup
-- Volatility contraction (Minervini VCP)
-- Weinstein 4-stage classifier
-- **Minervini 8-condition trend template** (score 0-8, ≥7 = pass)
-- Breakout flag (52w high + volume spike)
+전체 코드 ~5,800 → **~7,200 lines**, tests **102 → 162 (+60)**.
 
-`kr_features.add_technical_indicators` integration with `PHASE_PHASE3_TECHNICAL_ENABLED` toggle.
+### 시그널 카탈로그 (158 columns 총합)
 
-### Test 결과 (총 102/102 통과)
-- smoke: 37/37
-- dart_pit: 13/13
-- multibagger: 17/17
-- **p2_events: 18/18** (NEW — Samsung 2,614 row 회귀 방지 회로 포함)
-- **technicals: 17/17** (NEW)
+```
+P0 momentum (9)        : 1m/3m/6m/12m + 12-1m skip + RS
+P1 fundamentals (16)   : PER/PBR/ROE/margins/growth + value/quality/turnaround
+P2 DART events (12)    : KRW-based (treasury_buyback/insider_net_buy/cap_increase 등)
+P2.5 Flow (17)         : foreign/inst/individual zscore + streak + holding pct
+                          + market-level KOSPI/KOSDAQ rolling
+P2.6 Derivatives (7)   : VKOSPI level/zscore/panic + foreign futures OI
+P3.1 Technicals (31)   : MA stack + 52w + RSI + ATR + BB + Stage + Trend Template
+P3.2 Macro (23)        : BOK + FRED + yfinance: 금리/환율/PMI/수출/유가/VIX/DXY
+P3.3 Regime (9)        : 8 regime label + per-sleeve multipliers (r1000 Phase 4)
+```
 
-## 다음 액션 (우선순위 순서)
+### 8개 Regime + Sleeve Multipliers (r1000 Phase 4 ported)
 
-### 1. 사용자 — pip install + sanity (선행 필수)
+| Regime | Trigger | core/future/early multiplier |
+|---|---|---|
+| bull_trending | KOSPI > MA200 + foreign cum buy + VKOSPI < 18 | 1.00 / 1.30 / 1.20 |
+| bull_peaking | VKOSPI 18-25 + foreign sell start | 1.10 / 0.85 / 0.80 |
+| bear_falling | KOSPI < MA200 + VKOSPI > 25 + foreign sell | 1.20 / 0.50 / 0.40 |
+| bear_bottoming | VKOSPI > 30 + sell slowing | 0.90 / 1.10 / 1.30 |
+| recovery | MA200 reclaim + foreign return + PMI < 50 | 1.00 / 1.20 / 1.40 |
+| sideways | default | 1.00 / 1.00 / 1.00 |
+| stagflation_kr | PMI < 48 + USDKRW z>1 + BOK hike | 1.30 / 0.70 / 0.50 |
+| won_crisis | USDKRW > 1400 + 외인 대량매도 + -10%/5d | 0.60 / 0.30 / 0.20 |
+
+### Phase Toggles (env vars)
+
+```powershell
+$env:PHASE_PHASE0_MOMENTUM_ENABLED="1"      # default ON
+$env:PHASE_PHASE1_FUNDAMENTAL_ENABLED="0"
+$env:PHASE_PHASE2_DART_EVENTS_ENABLED="0"
+$env:PHASE_PHASE2_FLOW_ENABLED="0"           # NEW
+$env:PHASE_PHASE2_DERIVATIVES_ENABLED="0"    # NEW
+$env:PHASE_PHASE3_TECHNICAL_ENABLED="0"
+$env:PHASE_PHASE3_MACRO_ENABLED="0"          # NEW
+$env:PHASE_PHASE3_REGIME_ENABLED="0"         # NEW
+```
+
+## 다음 액션
+
+### 1. 사용자 — pip install + 첫 fetch (필수)
 ```powershell
 cd H:\codex\kr_quant_engine
 py -3 -m pip install -r requirements.txt
-py -3 kr_pykrx_client.py     # KOSPI+KOSDAQ ~2,300 listed
-py -3 kr_dart_client.py       # Samsung 이벤트 v2 score (+0.117 expected)
+py -3 kr_macro.py            # BOK + FRED + yfinance panel
+py -3 kr_dart_client.py       # DART events (Samsung +0.117 expected)
 ```
 
-### 2. P_MB.2 — Multibagger Classifier (개발자, 다음 세션)
-이제 P0+P1+P2 (events) + P3 (technicals)이 모두 갖춰졌으니 multibagger pre-surge feature panel 빌드 가능. r1000 phase11 entry classifier 패턴:
-- `kr_multibagger.add_pre_surge_features(episodes, fund_panel, event_panel, prices)` — pre-surge window features collect
-- `kr_multibagger_classifier.train_entry_classifier()` — CatBoost binary, walk-forward 5-fold
-- `research/06_walkforward_baselines/p_mb_v1_classifier_results.md` — AUC, precision@K, top picks
+### 2. P_MB.2 Multibagger Classifier (개발자, 다음 세션 ★ 우선)
+이제 158 features 갖춰짐 → r1000 phase11 entry classifier 패턴 가능:
+- `kr_multibagger.add_pre_surge_features(episodes, fund_panel, event_panel, flow_panel, macro_panel, deriv_panel, prices)` — 모든 시그널 collect
+- `kr_multibagger_classifier.py` — CatBoost binary, walk-forward 5-fold
+- `research/06_walkforward_baselines/p_mb_v1_classifier_results.md` — AUC, top picks
 
-### 3. P0/P1/P2/P3 baseline 측정 (사용자, 데이터 fetch 후)
+### 3. P0/P1/P2/P3 baseline 측정 (사용자, 모든 토글 ON)
 ```powershell
-# 모든 phase 토글 조합 A/B
 $env:PHASE_PHASE1_FUNDAMENTAL_ENABLED="1"
 $env:PHASE_PHASE2_DART_EVENTS_ENABLED="1"
+$env:PHASE_PHASE2_FLOW_ENABLED="1"
+$env:PHASE_PHASE2_DERIVATIVES_ENABLED="1"
 $env:PHASE_PHASE3_TECHNICAL_ENABLED="1"
+$env:PHASE_PHASE3_MACRO_ENABLED="1"
+$env:PHASE_PHASE3_REGIME_ENABLED="1"
 py -3 run_local.py --quick --start-date 2019-01-01 --end-date 2024-12-31
-py -3 run_local.py --verdict-only
 ```
 
-### 4. 후속 D-1/D-2/D-4 (incremental, 우선순위 낮음)
-- D-1: DART 전체 IS/BS/CF parsing (매출원가/판관비/매출채권/재고/차입금 등)
-- D-2: FCF (영업CF − CAPEX), ROIC, Sloan accruals
-- D-4: TTM rolling 4Q sum 정밀화
+### 4. 후속 (incremental, 후순위)
+- D-1: DART 전체 IS/BS/CF parsing
+- D-2: FCF / ROIC / Sloan accruals
+- P2.7: 단기과열/투자경고/관리종목 (KRX scrape)
+- P2.8: 테마 분류 + phase classifier (themes.yaml + Naver)
 
-이건 P_MB.2 또는 P3 regime 진입 시 필요해지면 추가.
+## 알려진 logic issues
 
-## 알려진 logic issues 잔존
-
-| # | 이슈 | 위치 | 해결 시점 |
+| # | 이슈 | 위치 | 우선 |
 |---|---|---|---|
-| 2 | listed_months stub (모두 999) | kr_universe | P3 (DART listing date) |
-| 3 | TTM annual factor 단순화 | kr_features._compute_ttm_from_panel | D-4 (deferred) |
-| 4 | 가격제한폭 fill 미구현 | kr_pipeline.backtest | P3 |
-| 5 | OCF는 multi에서 미반환 | kr_dart_client | D-1 (deferred) |
-| 6 | PHASE2/3 columns keep_cols 미등록 | kr_pipeline.build_feature_store | P2/P3 진입 시 (현재 add_universe_features 직접 컬럼 추가하므로 영향 없음) |
-
-이슈 1 (insider count 폭발) ✅ **이번 세션에서 fix 완료** (C-1).
+| 2 | listed_months stub | kr_universe | P3 |
+| 3 | TTM annual factor | kr_features._compute_ttm_from_panel | D-4 deferred |
+| 4 | 가격제한폭 fill | kr_pipeline.backtest | P3 |
+| 5 | OCF는 multi에서 미반환 | kr_dart_client | D-1 deferred |
+| 6 | KOSIS 선행지수 미연동 | kr_macro | API 키 발급 후 |
+| 7 | foreign_futures_net_oi pykrx 모듈 fragile | kr_derivatives | P3+ |
 
 ## 차단 사항
-- pykrx 미설치 (사용자 pip install 필요) — multibagger 실측 차단
+- pykrx + KOSIS API 미설치/미발급
 - 그 외 OK
 
 ## GitHub
 - Repo: https://github.com/wscha231/kr-quant-engine (private)
-- 다음 commit: C + D-3 (P2 events v2 + 기술지표)
+- 다음 commit: 4-layer (macro + flow + derivatives + regime)

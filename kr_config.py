@@ -174,12 +174,31 @@ PHASE2_DART_EVENT_COLUMNS = (
     "event_capital_reduction_score",         # -
 )
 
-# P2 flow signals (foreign + institutional, P2.5 implementation)
+# P2 flow signals (P2.5 — kr_flow.py): foreign / institutional / individual
+# supply-demand at both market level (broadcast) and ticker level (PIT).
 PHASE2_FLOW_COLUMNS = (
+    # Ticker-level net buy z-scores (rolling)
     "foreign_net_buy_5d_zscore",
     "foreign_net_buy_20d_zscore",
+    "foreign_net_buy_60d_zscore",
     "inst_net_buy_5d_zscore",
     "inst_net_buy_20d_zscore",
+    "inst_net_buy_60d_zscore",
+    "individual_net_buy_20d_zscore",
+    # Foreign ownership pct + change
+    "foreign_holding_pct",
+    "foreign_holding_change_20d",
+    # Buying streak (consecutive days of net buy by foreign)
+    "foreign_buying_streak_days",
+    "inst_buying_streak_days",
+    # Market-level (broadcast)
+    "market_foreign_net_buy_20d_kospi",
+    "market_foreign_net_buy_20d_kosdaq",
+    "market_inst_net_buy_20d_kospi",
+    "market_inst_net_buy_20d_kosdaq",
+    "market_foreign_cumulative_60d",
+    # Composite
+    "foreign_inst_combined_zscore_20d",
 )
 
 # P2 theme + safety signals (P2.6 / P2.7)
@@ -197,6 +216,47 @@ PHASE2_KOREA_ALPHA_COLUMNS = (
     PHASE2_DART_EVENT_COLUMNS
     + PHASE2_FLOW_COLUMNS
     + PHASE2_THEME_SAFETY_COLUMNS
+)
+
+# P2.6 Derivatives sentiment (kr_derivatives.py): VKOSPI + foreign futures
+PHASE2_DERIVATIVES_COLUMNS = (
+    "vkospi_level",
+    "vkospi_zscore_60d",
+    "vkospi_change_5d",
+    "vkospi_above_25",
+    "foreign_futures_net_oi",
+    "foreign_futures_net_5d_change",
+    "kospi200_basis_bp",          # (futures - spot) basis points
+)
+
+# P3 macro layer (P3.2 — kr_macro.py): KR + global macro broadcast
+PHASE3_MACRO_COLUMNS = (
+    # 금리 / 환율
+    "macro_bok_base_rate",
+    "macro_bok_rate_change_60d",
+    "macro_ktb_3y_yield",
+    "macro_ktb_10y_yield",
+    "macro_ktb_10y_3y_spread",
+    "macro_usd_krw",
+    "macro_usd_krw_zscore_60d",
+    "macro_usd_krw_change_20d",
+    # KR 경기
+    "macro_kr_pmi",
+    "macro_kr_pmi_diffusion",         # PMI - 50 (50 above = 확장)
+    "macro_consumer_sentiment",
+    "macro_business_sentiment",
+    "macro_kr_industrial_prod",
+    "macro_export_yoy",
+    "macro_export_yoy_3m_avg",
+    # 글로벌 (FRED + yfinance)
+    "macro_us_10y",
+    "macro_us_2y",
+    "macro_us_10y_2y_spread",
+    "macro_dxy",
+    "macro_dxy_zscore_60d",
+    "macro_vix",
+    "macro_wti_close",
+    "macro_wti_zscore_60d",
 )
 
 # P3 technical indicators (P3.1 — kr_technicals.py)
@@ -235,7 +295,9 @@ ALL_PHASE_COLUMNS = (
     PHASE0_MOMENTUM_COLUMNS
     + PHASE1_FUNDAMENTAL_COLUMNS
     + PHASE2_KOREA_ALPHA_COLUMNS
+    + PHASE2_DERIVATIVES_COLUMNS
     + PHASE3_TECHNICAL_COLUMNS
+    + PHASE3_MACRO_COLUMNS
     + PHASE3_REGIME_COLUMNS
 )
 

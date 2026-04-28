@@ -217,6 +217,57 @@ def test_technicals_module():
         assert f"def {fn}(" in src, f"kr_technicals missing {fn}"
 
 
+@_test("structural: kr_macro module exists with key functions")
+def test_macro_module():
+    src = (PROJECT_ROOT / "kr_macro.py").read_text(encoding="utf-8")
+    for fn in ("build_macro_panel", "load_or_build_macro_panel",
+               "get_macro_snapshot", "add_derived_macro_signals",
+               "fetch_bok_macro_wide", "fetch_fred_macro_wide",
+               "fetch_yfinance_macro_wide"):
+        assert f"def {fn}(" in src, f"kr_macro missing {fn}"
+
+
+@_test("structural: kr_flow module exists with key functions")
+def test_flow_module():
+    src = (PROJECT_ROOT / "kr_flow.py").read_text(encoding="utf-8")
+    for fn in ("compute_ticker_flow_signals", "compute_market_flow_signals",
+               "get_market_flow_snapshot", "get_ticker_flow_snapshot",
+               "get_foreign_holding_snapshot", "build_market_flow_panel",
+               "build_ticker_flow_panel", "fetch_foreign_holding_for_date"):
+        assert f"def {fn}(" in src, f"kr_flow missing {fn}"
+
+
+@_test("structural: kr_derivatives module exists with key functions")
+def test_derivatives_module():
+    src = (PROJECT_ROOT / "kr_derivatives.py").read_text(encoding="utf-8")
+    for fn in ("fetch_vkospi", "fetch_foreign_futures_oi",
+               "add_derived_derivatives_signals", "build_derivatives_panel",
+               "get_derivatives_snapshot"):
+        assert f"def {fn}(" in src, f"kr_derivatives missing {fn}"
+
+
+@_test("structural: kr_regime module exists with classifier + multipliers")
+def test_regime_module():
+    src = (PROJECT_ROOT / "kr_regime.py").read_text(encoding="utf-8")
+    for fn in ("classify_regime", "get_regime_sleeve_multipliers",
+               "add_regime_signals", "regime_summary"):
+        assert f"def {fn}(" in src, f"kr_regime missing {fn}"
+    assert "REGIME_SLEEVE_MULTIPLIERS" in src
+    for r in ("bull_trending", "bear_falling", "won_crisis", "stagflation_kr",
+              "recovery", "bear_bottoming", "bull_peaking", "sideways"):
+        assert f'"{r}"' in src, f"REGIME_SLEEVE_MULTIPLIERS missing {r}"
+
+
+@_test("structural: PHASE_*_COLUMNS counts (macro 23, flow 17, deriv 7, regime 9)")
+def test_phase_column_counts():
+    from kr_config import (PHASE3_MACRO_COLUMNS, PHASE2_FLOW_COLUMNS,
+                           PHASE2_DERIVATIVES_COLUMNS, PHASE3_REGIME_COLUMNS)
+    assert len(PHASE3_MACRO_COLUMNS) == 23
+    assert len(PHASE2_FLOW_COLUMNS) == 17
+    assert len(PHASE2_DERIVATIVES_COLUMNS) == 7
+    assert len(PHASE3_REGIME_COLUMNS) == 9
+
+
 @_test("structural: PHASE3_TECHNICAL_COLUMNS = 31 columns registered")
 def test_phase3_technical_columns():
     from kr_config import PHASE3_TECHNICAL_COLUMNS, ALL_PHASE_COLUMNS
@@ -330,6 +381,26 @@ def test_import_kr_technicals():
 def test_import_kr_features_technicals():
     import kr_features
     assert callable(kr_features.add_technical_indicators)
+
+
+@_test("import: kr_macro / kr_flow / kr_derivatives / kr_regime")
+def test_import_p3_modules():
+    import kr_macro
+    import kr_flow
+    import kr_derivatives
+    import kr_regime
+    assert callable(kr_macro.build_macro_panel)
+    assert callable(kr_flow.compute_ticker_flow_signals)
+    assert callable(kr_derivatives.build_derivatives_panel)
+    assert callable(kr_regime.classify_regime)
+
+
+@_test("import: kr_features new add_* functions (flow, derivatives, macro, regime)")
+def test_import_kr_features_new_phases():
+    import kr_features
+    assert callable(kr_features.add_flow_signals)
+    assert callable(kr_features.add_derivatives_signals)
+    assert callable(kr_features.add_macro_signals)
 
 
 @_test("import: kr_bok_client")
