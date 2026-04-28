@@ -29,6 +29,8 @@ from kr_config import (
     BENCHMARK_KOSDAQ150,
     PHASE0_MOMENTUM_COLUMNS,
     PHASE1_FUNDAMENTAL_COLUMNS,
+    PHASE2_DART_EVENT_COLUMNS,
+    PHASE3_TECHNICAL_COLUMNS,
 )
 from kr_helpers import (
     cross_sectional_robust_z,
@@ -631,6 +633,293 @@ def compute_p1_score(universe: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+# ===========================================================================
+# P2 — Korean-specific corporate disclosure events (DART)
+# ===========================================================================
+def prepare_event_panel(
+    tickers: list[str],
+    start_date: str,
+    end_date: str,
+    event_types: Optional[list[str]] = None,
+    polite_sleep_s: float = 0.15,
+) -> pd.DataFrame:
+    """Bulk fetch DART events for all tickers in [start_date, end_date].
+
+    Returns long-format panel with all event categories interleaved (rcept_dt,
+    event_category, ticker, corp_code + endpoint-specific fields).
+
+    Args:
+        event_types: subset of DART_EVENT_CATALOG keys. Default = priority 5
+                     (treasury_buyback, capital_increase, bonus_issue,
+                     insider_holdings, major_holders).
+
+    First-time cost: ~5,000 calls for 1,000 corps × 5 events / decade.
+    Subsequent: cache hits at cache_dart/events/{endpoint}/{corp}_{date}.parquet.
+    """
+    from kr_dart_client import (
+        DART_EVENT_CATALOG,
+        fetch_all_events_for_corp,
+        fetch_corp_to_ticker_map,
+    )
+
+    # Default to priority-5 (★★★) — most informative, manageable API budget
+    if event_types is None:
+        event_types = ["treasury_buyback", "capital_increase", "bonus_issue",
+                       "insider_holdings", "major_holders"]
+
+    log(f"[features] prepare_event_panel for {len(tickers)} tickers, "
+        f"events={event_types}, {start_date}~{end_date}")
+
+    corp_map = fetch_corp_to_ticker_map()
+    corp_map_dict = dict(zip(corp_map["ticker"], corp_map["corp_code"]))
+    rev_map = dict(zip(corp_map["corp_code"], corp_map["ticker"]))
+
+    bgn = str(start_date).replace("-", "")
+    end = str(end_date).replace("-", "")
+
+    frames = []
+    n_tickers = len(tickers)
+    for i, tk in enumerate(tickers, 1):
+        if i % 50 == 0:
+            log(f"[features] event_panel {i}/{n_tickers}")
+        if tk not in corp_map_dict:
+            continue
+        corp = corp_map_dict[tk]
+        df = fetch_all_events_for_corp(corp, bgn, end, event_types=event_types,
+                                        polite_sleep_s=polite_sleep_s)
+        if df.empty:
+            continue
+        df = df.copy()
+        df["ticker"] = tk
+        frames.append(df)
+
+    if not frames:
+        return pd.DataFrame()
+    panel = pd.concat(frames, ignore_index=True, sort=False)
+    log(f"[features] event_panel: {len(panel)} rows, "
+        f"{panel['ticker'].nunique()} tickers, "
+        f"categories={panel['event_category'].value_counts().to_dict()}")
+    return panel
+
+
+def add_disclosure_event_signal(
+    universe: pd.DataFrame,
+    rebalance_date: pd.Timestamp,
+    event_panel: Optional[pd.DataFrame] = None,
+    lookback_days: int = 90,
+) -> pd.DataFrame:
+    """PIT join: for each ticker in universe, compute event scores using
+    only events with rcept_dt <= rebalance_date.
+
+    Args:
+        universe: snapshot DataFrame with ticker + market_cap (for scoring)
+        rebalance_date: PIT cutoff
+        event_panel: pre-built event panel (long-format) from prepare_event_panel.
+                     If None or empty, all event scores zero-filled.
+        lookback_days: rolling window for event score aggregation (default 90d)
+
+    Adds 12 columns from PHASE2_DART_EVENT_COLUMNS to universe.
+    """
+    out = universe.copy()
+    if out.empty:
+        for col in PHASE2_DART_EVENT_COLUMNS:
+            out[col] = 0.0
+        return out
+
+    # Phase toggle
+    if not phase_is_enabled("phase2_dart_events", default=False):
+        log("[features] phase2_dart_events DISABLED -> zero-fill event cols",
+            level="INFO")
+        for col in PHASE2_DART_EVENT_COLUMNS:
+            out[col] = 0.0
+        return out
+
+    # No event panel = zero-fill (don't crash)
+    if event_panel is None or event_panel.empty:
+        log("[features] phase2_dart_events: empty event_panel -> zero-fill",
+            level="WARN")
+        for col in PHASE2_DART_EVENT_COLUMNS:
+            out[col] = 0.0
+        return out
+
+    # PIT filter
+    pit_panel = event_panel[
+        event_panel["rcept_dt"].notna()
+        & (event_panel["rcept_dt"] <= rebalance_date)
+    ].copy()
+    if pit_panel.empty:
+        for col in PHASE2_DART_EVENT_COLUMNS:
+            out[col] = 0.0
+        return out
+
+    # Compute scores per ticker
+    from kr_dart_client import compute_event_score_for_corp
+
+    # Cap scores per ticker — extract event subset, mcap, then score
+    scores_rows = []
+    for ticker, mcap in zip(out["ticker"].astype(str), out.get("market_cap", 0)):
+        mcap_val = float(mcap) if pd.notna(mcap) and mcap is not None else 0.0
+        ticker_events = pit_panel[pit_panel["ticker"] == ticker]
+        scores = compute_event_score_for_corp(
+            ticker_events, rebalance_date,
+            lookback_days=lookback_days, mcap=mcap_val,
+        )
+        scores["ticker"] = ticker
+        scores_rows.append(scores)
+
+    scores_df = pd.DataFrame(scores_rows)
+
+    # Map event_category scores to PHASE2_DART_EVENT_COLUMNS naming convention
+    column_map = {
+        "total_score": "disclosure_event_total_score",
+        "treasury_buyback": "event_treasury_buyback_score",
+        "capital_increase": "event_capital_increase_score",
+        "bonus_issue": "event_bonus_issue_score",
+        "treasury_sell": "event_treasury_sell_score",
+        "convertible_bond": "event_convertible_bond_score",
+        "warrant_bond": "event_warrant_bond_score",
+        "insider_holdings": "event_insider_holdings_score",
+        "major_holders": "event_major_holders_score",
+        "merger": "event_merger_score",
+        "spinoff": "event_spinoff_score",
+        "capital_reduction": "event_capital_reduction_score",
+    }
+    scores_df = scores_df.rename(columns=column_map)
+
+    # Merge into universe
+    keep_cols = ["ticker"] + [c for c in column_map.values() if c in scores_df.columns]
+    out = out.merge(scores_df[keep_cols], on="ticker", how="left")
+
+    # Zero-fill any missing
+    for col in PHASE2_DART_EVENT_COLUMNS:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.0)
+        else:
+            out[col] = 0.0
+
+    nonzero_count = int((out["disclosure_event_total_score"].abs() > 0.001).sum())
+    log(f"[features] phase2 events: {nonzero_count}/{len(out)} tickers "
+        f"with non-trivial event score")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# P2 composite score
+# ---------------------------------------------------------------------------
+def compute_p2_score(universe: pd.DataFrame) -> pd.DataFrame:
+    """P0 + P1 + P2 (events) blended composite.
+
+    Weights:
+      0.30 * p0_momentum_score
+      0.20 * value_score
+      0.20 * quality_score
+      0.10 * turnaround_score
+      0.20 * disclosure_event_total_score   (event alpha — strongest single signal)
+
+    Note: disclosure_event_total_score is already in [-1, +1] scale, so
+    pre-normalization is not needed. Other scores are robust-z, so weighting
+    composes naturally.
+    """
+    out = universe.copy()
+    if out.empty:
+        return out
+    w = {
+        "p0_momentum_score": 0.30,
+        "value_score": 0.20,
+        "quality_score": 0.20,
+        "turnaround_score": 0.10,
+        "disclosure_event_total_score": 0.20,
+    }
+    score = pd.Series(0.0, index=out.index)
+    total_w = 0.0
+    for col, weight in w.items():
+        if col in out.columns:
+            score += out[col].fillna(0.0) * weight
+            total_w += weight
+    if total_w > 0:
+        score /= total_w
+    out["p2_blended_score"] = score
+    return out
+
+
+# ===========================================================================
+# P3 — Technical indicators (kr_technicals.py)
+# ===========================================================================
+def add_technical_indicators(
+    universe: pd.DataFrame,
+    rebalance_date: pd.Timestamp,
+    history_lookback_days: int = 540,
+) -> pd.DataFrame:
+    """For each ticker in universe, compute the full P3 technical indicator
+    set from daily OHLCV history.
+
+    Adds 31 columns from PHASE3_TECHNICAL_COLUMNS.
+
+    Phase toggle: PHASE_PHASE3_TECHNICAL_ENABLED (default OFF).
+    """
+    out = universe.copy()
+    if out.empty:
+        for col in PHASE3_TECHNICAL_COLUMNS:
+            out[col] = np.nan if col != "stage_label" else "unknown"
+        return out
+
+    if not phase_is_enabled("phase3_technical", default=False):
+        log("[features] phase3_technical DISABLED -> zero/null-fill technical cols",
+            level="INFO")
+        for col in PHASE3_TECHNICAL_COLUMNS:
+            if col in ("stage_label",):
+                out[col] = "unknown"
+            elif col.endswith("_flag") or col == "trend_template_pass" \
+                    or col == "ma_stack_aligned" \
+                    or col in ("rsi_overbought", "rsi_oversold"):
+                out[col] = False
+            else:
+                out[col] = np.nan
+        return out
+
+    from kr_technicals import compute_all_technicals
+    from kr_pykrx_client import fetch_index_ohlcv, fetch_ticker_history
+
+    # Pre-fetch benchmark for RS rating in trend_template
+    start = (rebalance_date - timedelta(days=history_lookback_days)).strftime("%Y%m%d")
+    end = rebalance_date.strftime("%Y%m%d")
+    bench_df = fetch_index_ohlcv(BENCHMARK_KOSPI200, start, end, refresh_days=30)
+    if not bench_df.empty:
+        bench_df = bench_df.sort_values("date").rename(columns={"close": "close"})
+
+    rows = []
+    tickers = out["ticker"].astype(str).tolist()
+    for i, tk in enumerate(tickers):
+        if i % 200 == 0 and i > 0:
+            log(f"[features] technicals {i}/{len(tickers)}")
+        prices = fetch_ticker_history(tk, start, end, refresh_days=7)
+        if prices.empty:
+            tech = {}
+        else:
+            prices = prices.sort_values("date")
+            tech = compute_all_technicals(prices, bench_df if not bench_df.empty else None)
+        tech["ticker"] = tk
+        rows.append(tech)
+
+    tech_df = pd.DataFrame(rows)
+    keep = [c for c in PHASE3_TECHNICAL_COLUMNS if c in tech_df.columns]
+    keep_cols = ["ticker"] + keep
+    out = out.merge(tech_df[keep_cols], on="ticker", how="left")
+
+    # Fill missing booleans + numerics
+    for col in PHASE3_TECHNICAL_COLUMNS:
+        if col not in out.columns:
+            if col == "stage_label":
+                out[col] = "unknown"
+            elif col.endswith("_flag") or col in (
+                "trend_template_pass", "ma_stack_aligned",
+                "rsi_overbought", "rsi_oversold"):
+                out[col] = False
+            else:
+                out[col] = np.nan
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
@@ -638,6 +927,8 @@ def add_universe_features(
     universe_snapshot: pd.DataFrame,
     rebalance_date: pd.Timestamp,
     fund_panel: Optional[pd.DataFrame] = None,
+    event_panel: Optional[pd.DataFrame] = None,
+    event_lookback_days: int = 90,
 ) -> pd.DataFrame:
     """Add all enabled-phase features to a single rebalance_date snapshot.
 
@@ -646,6 +937,9 @@ def add_universe_features(
         rebalance_date: snapshot date
         fund_panel: pre-built DART quarterly panel (full history, all tickers).
                     If None and phase1_fundamental enabled, will skip P1.
+        event_panel: pre-built DART events panel from prepare_event_panel.
+                    If None and phase2_dart_events enabled, will skip P2.
+        event_lookback_days: rolling window for P2 event score aggregation.
     """
     log(f"[features] add_universe_features for {rebalance_date.strftime('%Y-%m-%d')} "
         f"({len(universe_snapshot)} rows)")
@@ -664,7 +958,16 @@ def add_universe_features(
         # Zero-fill P1 columns to preserve schema
         df = add_pit_fundamentals(df, rebalance_date, pd.DataFrame())
 
+    # P2: DART corporate events (default OFF)
+    df = add_disclosure_event_signal(
+        df, rebalance_date, event_panel, lookback_days=event_lookback_days,
+    )
+
+    # P3: Technical indicators (default OFF)
+    df = add_technical_indicators(df, rebalance_date)
+
     df = add_cross_sectional_ranks(df)
     df = compute_p0_score(df)
     df = compute_p1_score(df)
+    df = compute_p2_score(df)
     return df

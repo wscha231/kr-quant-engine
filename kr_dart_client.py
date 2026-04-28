@@ -629,19 +629,128 @@ def pit_filter_panel(panel: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
 # rcept_dt → PIT timestamp (공시일).
 # ===========================================================================
 
-# Event type catalog: (endpoint, signal_direction, alpha_weight, korean_name)
+# ===========================================================================
+# DART_EVENT_CATALOG v2 (2026-04-28) — KRW-amount-based scoring
+#
+# v1 (count-based) had a critical issue: Samsung 2024 had 2,614 insider
+# disclosures × 0.30 weight = +784 score (literally 100x too large). The
+# fix is to score by economic magnitude (KRW amount / mcap), not count.
+#
+# Each event has:
+#   endpoint           — DART JSON endpoint name
+#   direction          — "positive" / "negative" / "bidirectional" / "case"
+#   alpha_weight       — max contribution to final score (signed)
+#   scoring_mode       — how to compute magnitude:
+#       "amount_pct_mcap"      — sum(amount_field) / mcap, capped at full_pct
+#       "binary"               — fires once if any event in window
+#       "stkrt_change"         — sum(stkrt_irds) (already %), signed
+#       "insider_net_buy"      — special: sum (delta_qty × trade_uv) / mcap
+#       "computed_dilution"    — nstk_ostk_qy × bdis_pric / mcap (capital raise)
+#   amount_field       — column to read amount from (mode-dependent)
+#   full_weight_pct    — mcap pct at which alpha_weight is fully applied
+#                        (e.g. 0.02 = 2% mcap event → max weight)
+#   kr_name            — Korean disclosure name
+# ===========================================================================
 DART_EVENT_CATALOG = {
-    "insider_holdings":    ("elestock",     "bidirectional", 0.30, "임원·주요주주 소유상황보고"),
-    "major_holders":       ("majorstock",   "bidirectional", 0.25, "주식등의 대량보유상황보고"),
-    "capital_increase":    ("piicDecsn",    "negative",     -0.40, "유상증자결정"),
-    "bonus_issue":         ("fricDecsn",    "positive",      0.30, "무상증자결정"),
-    "treasury_buyback":    ("tsstkAqDecsn", "positive",      0.50, "자기주식취득결정"),
-    "treasury_sell":       ("tsstkDpDecsn", "negative",     -0.30, "자기주식처분결정"),
-    "convertible_bond":    ("cvbdIsDecsn",  "negative",     -0.20, "전환사채발행결정"),
-    "warrant_bond":        ("bdIsDecsn",    "negative",     -0.20, "신주인수권부사채발행결정"),
-    "merger":              ("mgDecsn",      "case",          0.0,  "합병결정"),
-    "spinoff":             ("divDecsn",     "case",          0.0,  "분할결정"),
-    "capital_reduction":   ("crDecsn",      "negative",     -0.40, "감자결정"),
+    "treasury_buyback": {
+        "endpoint": "tsstkAqDecsn",
+        "direction": "positive",
+        "alpha_weight": 0.50,
+        "scoring_mode": "amount_pct_mcap",
+        "amount_field": "aqpln_prc_ostk",   # 취득예정금액 보통주 (KRW)
+        "full_weight_pct": 0.02,             # 2% mcap buyback = full +0.50
+        "kr_name": "자기주식취득결정",
+    },
+    "capital_increase": {
+        "endpoint": "piicDecsn",
+        "direction": "negative",
+        "alpha_weight": -0.40,
+        "scoring_mode": "computed_dilution",
+        "amount_field": "nstk_ostk_qy",      # 보통주 신주수 (×bdis_pric → 발행규모)
+        "full_weight_pct": 0.05,             # 5% dilution = full -0.40
+        "kr_name": "유상증자결정",
+    },
+    "bonus_issue": {
+        "endpoint": "fricDecsn",
+        "direction": "positive",
+        "alpha_weight": 0.30,
+        "scoring_mode": "binary",            # 심리 효과 — size 무관
+        "amount_field": None,
+        "full_weight_pct": None,
+        "kr_name": "무상증자결정",
+    },
+    "treasury_sell": {
+        "endpoint": "tsstkDpDecsn",
+        "direction": "negative",
+        "alpha_weight": -0.30,
+        "scoring_mode": "amount_pct_mcap",
+        "amount_field": "dppln_prc_ostk",    # 처분예정금액 보통주
+        "full_weight_pct": 0.02,
+        "kr_name": "자기주식처분결정",
+    },
+    "convertible_bond": {
+        "endpoint": "cvbdIsDecsn",
+        "direction": "negative",
+        "alpha_weight": -0.20,
+        "scoring_mode": "amount_pct_mcap",
+        "amount_field": "bd_fta",            # 사채총액
+        "full_weight_pct": 0.10,             # 10% mcap CB = full -0.20
+        "kr_name": "전환사채발행결정",
+    },
+    "warrant_bond": {
+        "endpoint": "bdIsDecsn",
+        "direction": "negative",
+        "alpha_weight": -0.20,
+        "scoring_mode": "amount_pct_mcap",
+        "amount_field": "bd_fta",
+        "full_weight_pct": 0.10,
+        "kr_name": "신주인수권부사채발행결정",
+    },
+    "insider_holdings": {
+        "endpoint": "elestock",
+        "direction": "bidirectional",
+        "alpha_weight": 0.30,                # signed magnitude
+        "scoring_mode": "insider_net_buy",
+        "amount_field": None,                # special handling
+        "full_weight_pct": 0.005,            # 0.5% mcap net buy = full ±0.30
+        "kr_name": "임원·주요주주 소유상황보고",
+    },
+    "major_holders": {
+        "endpoint": "majorstock",
+        "direction": "bidirectional",
+        "alpha_weight": 0.25,
+        "scoring_mode": "stkrt_change",
+        "amount_field": "stkrt_irds",        # 보유비율 변동 (%)
+        "full_weight_pct": None,             # uses raw 1.0% threshold
+        "kr_name": "주식등의 대량보유상황보고",
+    },
+    "merger": {
+        "endpoint": "mgDecsn",
+        "direction": "case",
+        "alpha_weight": 0.0,                 # P3 분리 모델
+        "scoring_mode": "binary",
+        "amount_field": None,
+        "full_weight_pct": None,
+        "kr_name": "합병결정",
+    },
+    "spinoff": {
+        "endpoint": "divDecsn",
+        "direction": "negative",             # 한국 특수: 90% 물적분할 → governance discount
+        "alpha_weight": -0.15,
+        "scoring_mode": "binary",
+        "amount_field": None,
+        "full_weight_pct": None,
+        "kr_name": "분할결정",
+    },
+    "capital_reduction": {
+        "endpoint": "crDecsn",
+        "direction": "negative",
+        "alpha_weight": -0.40,
+        "scoring_mode": "binary",            # 보통 부실 시그널
+        "amount_field": None,
+        "full_weight_pct": None,
+        "kr_name": "감자결정",
+    },
 }
 
 
@@ -708,9 +817,21 @@ def _fetch_dart_event(
             df["rcept_no"].astype(str).str[:8], format="%Y%m%d", errors="coerce",
         )
 
-    # Coerce monetary amount fields (convention: *_amt, *_amount)
+    # Coerce monetary/quantity/ratio fields. DART convention suffixes:
+    #   _amt/_amount  — 금액 (KRW)
+    #   _qy           — 수량 (주, 건)
+    #   _stkqy        — 주식수
+    #   _prc/_pric    — 가격/금액 (e.g. aqpln_prc_ostk, bdis_pric)
+    #   _fta          — 사채 총액
+    #   _rt           — 비율
+    #   _irds         — 변동률
+    #   _stkrt        — 주식 비율
+    #   _ostk/_estk   — 보통주/우선주 (수량)
     for col in df.columns:
-        if any(suffix in col.lower() for suffix in ("_amt", "_amount", "_qy", "_stkqy")):
+        if any(suffix in col.lower() for suffix in (
+            "_amt", "_amount", "_qy", "_stkqy", "_prc", "_pric",
+            "_fta", "_rt", "_irds", "_stkrt", "_ostk", "_estk",
+        )):
             df[col] = (df[col].astype(str)
                        .str.replace(",", "", regex=False)
                        .str.replace("-", "0", regex=False)
@@ -847,7 +968,7 @@ def fetch_all_events_for_corp(
 ) -> pd.DataFrame:
     """Fetch all configured event types for one corp + date range.
 
-    Returns long-format DataFrame with `event_type` column distinguishing rows.
+    Returns long-format DataFrame with `event_category` column distinguishing rows.
 
     Args:
         event_types: subset of DART_EVENT_CATALOG keys. None = all.
@@ -858,7 +979,8 @@ def fetch_all_events_for_corp(
         if t not in DART_EVENT_CATALOG:
             log(f"[dart] unknown event_type: {t}", level="WARN")
             continue
-        endpoint, _, _, _ = DART_EVENT_CATALOG[t]
+        meta = DART_EVENT_CATALOG[t]
+        endpoint = meta["endpoint"]
         df = _fetch_dart_event(endpoint, corp_code, bgn_de, end_de)
         time.sleep(polite_sleep_s)
         if df.empty:
@@ -872,24 +994,174 @@ def fetch_all_events_for_corp(
     return pd.concat(frames, ignore_index=True, sort=False)
 
 
+# ---------------------------------------------------------------------------
+# Event scoring helpers — KRW-amount-based, not count-based
+# ---------------------------------------------------------------------------
+def _signed_cap(value: float, cap: float = 1.0) -> float:
+    """Cap |value| to ±cap, preserving sign."""
+    return float(max(-cap, min(cap, value)))
+
+
+def _score_amount_pct_mcap(
+    events_subset: pd.DataFrame,
+    mcap: float,
+    amount_field: str,
+    weight: float,
+    full_pct: float,
+) -> float:
+    """Sum amount_field across events, divide by mcap, scale by weight.
+
+    Returns weight × min(1.0, sum_amt / mcap / full_pct).
+
+    Used for: treasury_buyback (+), treasury_sell (-), convertible_bond (-),
+    warrant_bond (-). The weight sign determines direction.
+    """
+    if events_subset.empty or mcap <= 0 or amount_field not in events_subset.columns:
+        return 0.0
+    total_amt = pd.to_numeric(events_subset[amount_field], errors="coerce").sum()
+    if pd.isna(total_amt) or total_amt <= 0 or full_pct <= 0:
+        return 0.0
+    pct = float(total_amt) / float(mcap)
+    magnitude = min(1.0, pct / full_pct)
+    return weight * magnitude
+
+
+def _score_computed_dilution(
+    events_subset: pd.DataFrame,
+    mcap: float,
+    weight: float,
+    full_pct: float,
+) -> float:
+    """Capital increase dilution magnitude.
+
+    Sum across events of (nstk_ostk_qy × bdis_pric) / mcap → percentage.
+    Negative weight applied (dilution is bearish).
+    """
+    if events_subset.empty or mcap <= 0:
+        return 0.0
+    qty_col = "nstk_ostk_qy"
+    price_col = "bdis_pric"
+    if qty_col not in events_subset.columns or price_col not in events_subset.columns:
+        # Fallback: count-based binary if amount fields unavailable
+        return weight * (0.5 if len(events_subset) > 0 else 0.0)
+    qty = pd.to_numeric(events_subset[qty_col], errors="coerce").fillna(0)
+    pric = pd.to_numeric(events_subset[price_col], errors="coerce").fillna(0)
+    total_dilution_amt = float((qty * pric).sum())
+    if total_dilution_amt <= 0 or full_pct <= 0:
+        return 0.0
+    pct = total_dilution_amt / float(mcap)
+    magnitude = min(1.0, pct / full_pct)
+    return weight * magnitude
+
+
+def _score_binary(events_subset: pd.DataFrame, weight: float) -> float:
+    """Binary score: weight if any event present, else 0.
+
+    Used for: bonus_issue (+), spinoff (-), capital_reduction (-), merger (case).
+    Multiple events in window do NOT stack (one-shot psychological effect).
+    """
+    return weight if len(events_subset) > 0 else 0.0
+
+
+def _score_insider_net_buy(
+    events_subset: pd.DataFrame,
+    mcap: float,
+    weight: float,
+    full_pct: float,
+) -> float:
+    """Insider holdings net buy (KRW amount / mcap), signed.
+
+    elestock 보고에서 (aft_stkqy − bsis_stkqy) × trade_uv 합산.
+    + → 매수 우세 (positive alpha)
+    − → 매도 우세 (negative alpha)
+
+    Cap at ±full_pct of mcap → ±weight magnitude.
+    """
+    if events_subset.empty or mcap <= 0:
+        return 0.0
+    if "aft_stkqy" not in events_subset.columns or "bsis_stkqy" not in events_subset.columns:
+        return 0.0
+    aft = pd.to_numeric(events_subset["aft_stkqy"], errors="coerce").fillna(0)
+    bef = pd.to_numeric(events_subset["bsis_stkqy"], errors="coerce").fillna(0)
+    delta_qty = aft - bef
+    if "trade_uv" in events_subset.columns:
+        uv = pd.to_numeric(events_subset["trade_uv"], errors="coerce").fillna(0)
+    elif "trade_amt" in events_subset.columns:
+        # If unit price missing, derive average from total amount
+        amt = pd.to_numeric(events_subset["trade_amt"], errors="coerce").fillna(0)
+        # Sign already in delta_qty; magnitude via amt
+        signed_amt = (delta_qty.apply(np.sign).fillna(0)) * amt.abs()
+        net_amt = float(signed_amt.sum())
+        pct = net_amt / float(mcap)
+        return weight * _signed_cap(pct / full_pct if full_pct > 0 else 0.0)
+    else:
+        return 0.0
+    signed_amt = delta_qty * uv
+    net_amt = float(signed_amt.sum())
+    if full_pct <= 0:
+        return 0.0
+    pct = net_amt / float(mcap)
+    return weight * _signed_cap(pct / full_pct)
+
+
+def _score_stkrt_change(
+    events_subset: pd.DataFrame,
+    weight: float,
+) -> float:
+    """Major holders stkrt_irds (% holding change) net sum.
+
+    1.0% net change → full ±weight. Capped at ±1.0.
+    """
+    if events_subset.empty or "stkrt_irds" not in events_subset.columns:
+        return 0.0
+    net_pct = pd.to_numeric(events_subset["stkrt_irds"], errors="coerce").fillna(0).sum()
+    return weight * _signed_cap(float(net_pct) / 1.0)
+
+
 def compute_event_score_for_corp(
     events: pd.DataFrame,
     as_of: pd.Timestamp,
     lookback_days: int = 90,
-) -> float:
-    """Aggregate signed alpha weights from event_category over rolling window.
+    mcap: float = 0.0,
+) -> dict:
+    """KRW-amount-based event score (v2, 2026-04-28 redesign).
 
-    For each event in [as_of - lookback_days, as_of], add the configured
-    alpha_weight from DART_EVENT_CATALOG. Weights are designed so the
-    output is a unitless score, typically in [-1, +1] for normal corps,
-    can spike larger if many events cluster.
+    Replaces v1 count-based score that exploded on large-cap insider noise
+    (Samsung 2024: 2,614 insider rows × 0.30 = +784).
+
+    For each event_category in DART_EVENT_CATALOG, apply mode-specific scoring:
+      - amount_pct_mcap: sum amount / mcap, capped at full_weight_pct
+      - computed_dilution: (nstk_ostk_qy × bdis_pric) / mcap
+      - binary: weight if any event present
+      - insider_net_buy: signed (delta × price) / mcap
+      - stkrt_change: signed sum of stkrt_irds (already %)
 
     PIT-safe: uses rcept_dt <= as_of.
+
+    Args:
+        events: long-format DataFrame from fetch_all_events_for_corp
+        as_of: rebalance date (PIT cutoff)
+        lookback_days: rolling window length
+        mcap: market cap at as_of (KRW). 0.0 → amount-based scores return 0.
+
+    Returns:
+        dict with per-category scores + total:
+            {
+                "total_score": float,
+                "treasury_buyback": float,
+                "capital_increase": float,
+                ...
+            }
     """
+    out = {"total_score": 0.0}
+    for cat in DART_EVENT_CATALOG:
+        out[cat] = 0.0
+
     if events.empty or "event_category" not in events.columns:
-        return 0.0
+        return out
     if "rcept_dt" not in events.columns:
-        return 0.0
+        return out
+
     cutoff = as_of - pd.Timedelta(days=lookback_days)
     window = events[
         events["rcept_dt"].notna()
@@ -897,13 +1169,36 @@ def compute_event_score_for_corp(
         & (events["rcept_dt"] <= as_of)
     ]
     if window.empty:
-        return 0.0
-    score = 0.0
-    for cat in window["event_category"]:
-        if cat in DART_EVENT_CATALOG:
-            _, _, weight, _ = DART_EVENT_CATALOG[cat]
-            score += weight
-    return float(score)
+        return out
+
+    total = 0.0
+    for cat, meta in DART_EVENT_CATALOG.items():
+        cat_events = window[window["event_category"] == cat]
+        if cat_events.empty:
+            continue
+        mode = meta["scoring_mode"]
+        weight = meta["alpha_weight"]
+        full_pct = meta.get("full_weight_pct") or 0.0
+        amount_field = meta.get("amount_field")
+
+        if mode == "amount_pct_mcap":
+            score = _score_amount_pct_mcap(cat_events, mcap, amount_field, weight, full_pct)
+        elif mode == "computed_dilution":
+            score = _score_computed_dilution(cat_events, mcap, weight, full_pct)
+        elif mode == "binary":
+            score = _score_binary(cat_events, weight)
+        elif mode == "insider_net_buy":
+            score = _score_insider_net_buy(cat_events, mcap, weight, full_pct)
+        elif mode == "stkrt_change":
+            score = _score_stkrt_change(cat_events, weight)
+        else:
+            score = 0.0
+
+        out[cat] = float(score)
+        total += score
+
+    out["total_score"] = float(total)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -960,10 +1255,18 @@ if __name__ == "__main__":
             print(f"      Rows: {len(events)}")
             counts = events["event_category"].value_counts()
             for cat, n in counts.items():
-                _, _, weight, name_kr = DART_EVENT_CATALOG[cat]
-                print(f"        {cat:25s} ({name_kr:30s}) n={n}, weight={weight:+.2f}")
-            score_now = compute_event_score_for_corp(
-                events, pd.Timestamp("2024-12-31"), lookback_days=365,
+                meta = DART_EVENT_CATALOG[cat]
+                print(f"        {cat:25s} ({meta['kr_name']:30s}) "
+                      f"n={n}, weight={meta['alpha_weight']:+.2f}, "
+                      f"mode={meta['scoring_mode']}")
+            # Samsung mcap as of 2024-12-31 (approx): 600조원 = 6e14 KRW
+            samsung_mcap = 6e14
+            scores = compute_event_score_for_corp(
+                events, pd.Timestamp("2024-12-31"),
+                lookback_days=365, mcap=samsung_mcap,
             )
-            print(f"\n      compute_event_score_for_corp(samsung, 2024-12-31, 365d) = {score_now:+.3f}")
+            print(f"\n      Event scores (samsung, 2024-12-31, 365d, mcap=600조):")
+            for k, v in scores.items():
+                if abs(v) > 1e-9 or k == "total_score":
+                    print(f"        {k:25s} = {v:+.4f}")
     print("\nDone.")

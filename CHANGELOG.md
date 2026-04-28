@@ -311,3 +311,87 @@
 5. P_MB.3 — multibagger sleeve integration + A/B (ΔCAGR ≥ +1pp ship gate)
 
 **Verdict**: V0 episode discovery + retrospective infra SHIPPED (mock-verified). 사용자 실측 후 V1 (classifier) 진입.
+
+---
+
+### 14:30 KST — c-p2-events-v2-redesign + d3-technical-indicators
+
+**Scope**: 사용자 요청에 따라 순차 진행.
+- C: P2 DART 이벤트 시그널 정밀화 (count → KRW-amount-based scoring 재설계)
+- D-3: 기술지표 P3 모듈 (52w high, MA stack, ATR, RSI, Bollinger, Stage, Minervini Trend Template)
+
+**C — DART_EVENT_CATALOG v2 재설계**:
+
+v1 (count-based)는 Samsung 2024년 인사이더 보고 2,614 row × 0.30 weight = +784로 폭발 (100x scale 오류). v2는 KRW 경제적 규모 / mcap 기준 정상화.
+
+- `DART_EVENT_CATALOG` v1 tuple `(endpoint, direction, weight, name)` → v2 dict 형식 (endpoint, direction, alpha_weight, scoring_mode, amount_field, full_weight_pct, kr_name)
+- 5개 scoring modes:
+  - `amount_pct_mcap`: sum(amount) / mcap, capped at full_pct (treasury_buyback, treasury_sell, CB, BW)
+  - `computed_dilution`: nstk_ostk_qy × bdis_pric / mcap (capital_increase)
+  - `binary`: weight if any event present (bonus_issue, merger, spinoff, capital_reduction)
+  - `insider_net_buy`: signed (delta_qty × trade_uv) / mcap
+  - `stkrt_change`: signed sum of stkrt_irds (already %)
+- Score helpers (`_score_amount_pct_mcap`, `_score_computed_dilution`, `_score_binary`, `_score_insider_net_buy`, `_score_stkrt_change`, `_signed_cap`)
+- `compute_event_score_for_corp()` 시그니처 변경: `mcap` parameter 필수, return type `dict` (per-category + total_score)
+- Numeric coercion suffix list 확장: `_prc`, `_pric`, `_fta`, `_irds`, `_stkrt`, `_ostk`, `_estk` 추가 (Samsung treasury_buyback amount 콤마 string 파싱 실패 버그 fix)
+- `kr_features` P2 통합: `prepare_event_panel`, `add_disclosure_event_signal` (PIT join + mcap 정규화), `compute_p2_score` (P0+P1+P2 blended)
+- `kr_config`:
+  - `PHASE2_DART_EVENT_COLUMNS` (12): disclosure_event_total_score + 11 event-specific scores
+  - `PHASE2_FLOW_COLUMNS` (4) — P2.5
+  - `PHASE2_THEME_SAFETY_COLUMNS` (6) — P2.6/P2.7
+  - `PHASE2_KOREA_ALPHA_COLUMNS` aggregated (22 total)
+- Phase toggle: `PHASE_PHASE2_DART_EVENTS_ENABLED`
+
+**Live verification (Samsung 2024)**:
+- 이전 v1: total_score = +43.10 (count 폭발)
+- 새 v2: total_score = **+0.117** (정상)
+  - treasury_buyback = +0.112 (2.68조 매입 / 600조 mcap = 0.45% × 0.50 weight)
+  - major_holders = +0.005 (소소한 holdings 변동)
+  - insider_holdings = 0 (net buy/sell ≈ 0)
+
+**D-3 — 기술지표 (P3.1)**:
+
+`kr_technicals.py` (340 lines) — pure-numeric 모듈:
+- 10개 카테고리 함수: moving averages, 52w extremes, volume stats, RSI, ATR, Bollinger, vol contraction, Weinstein 4-stage classifier, Minervini 8-condition trend template, breakout flag
+- 31 indicator outputs (registered as `PHASE3_TECHNICAL_COLUMNS`)
+- `compute_all_technicals(prices, benchmark_prices)` orchestrator
+- `kr_features.add_technical_indicators` integration with PHASE_PHASE3_TECHNICAL_ENABLED toggle + null-fill on disable
+
+**Tests (총 102/102 통과)**:
+- `tests/test_p2_events.py` (18 tests): KRW scoring, mcap normalization, PIT filter, lookback window, **insider count noise immunity** (Samsung 2,614 row 회귀 방지), full integration
+- `tests/test_technicals.py` (17 tests): MA SMA, MA stack, 52w extremes, RSI bounds, ATR, Bollinger position, volume stats, stage classifier (uptrend / downtrend), trend template (strong → ≥5, decline → ≤3), full integration, edge cases (empty / short history)
+- `tests/smoke_test.py` (33 → 37): DART_EVENT_CATALOG v2 dict format 검증, PHASE2 column split 검증, kr_technicals + features integration 검증
+- 기존: dart_pit 13/13, multibagger 17/17 — 모두 유지
+
+**Deferred (next session, incremental)**:
+- D-1: DART fnlttSinglAcntAll 전체 IS/BS/CF parsing (현재 6개 핵심 계정만 — 매출원가, 판관비, 매출채권, 재고, 차입금 등 추가)
+- D-2: FCF (영업CF − CAPEX), ROIC, Sloan accruals 계산
+- D-4: TTM rolling 4Q sum 정밀화 (현재 annual factor envelope 단순화)
+- 이유: alpha 직결도가 P_MB classifier / P3 regime detector보다 낮음. 데이터 확장은 후속.
+
+**symbols_added**:
+- kr_dart_client (v2): `_signed_cap`, `_score_amount_pct_mcap`, `_score_computed_dilution`, `_score_binary`, `_score_insider_net_buy`, `_score_stkrt_change`. DART_EVENT_CATALOG dict v2 format.
+- kr_features (P2): `prepare_event_panel`, `add_disclosure_event_signal`, `compute_p2_score`
+- kr_features (P3): `add_technical_indicators`
+- kr_technicals (new module): `compute_moving_averages`, `is_ma_stack_aligned`, `compute_52w_extremes`, `compute_volume_stats`, `compute_rsi`, `compute_atr`, `compute_bollinger`, `compute_volatility_contraction`, `classify_stage`, `compute_trend_template_score`, `compute_all_technicals`
+- kr_config: `PHASE2_DART_EVENT_COLUMNS` (12), `PHASE2_FLOW_COLUMNS` (4), `PHASE2_THEME_SAFETY_COLUMNS` (6), `PHASE3_TECHNICAL_COLUMNS` (31)
+- tests/test_p2_events.py (new), tests/test_technicals.py (new)
+
+**symbols_changed**:
+- kr_dart_client.DART_EVENT_CATALOG: tuple → dict format (BREAKING for consumers iterating tuple unpacking)
+- kr_dart_client.compute_event_score_for_corp: signature changed (`mcap` required, returns dict not float)
+- kr_dart_client._fetch_dart_event: numeric coercion suffix list expanded
+- kr_features.add_universe_features: new params `event_panel`, `event_lookback_days`
+- kr_config.PHASE2_KOREA_ALPHA_COLUMNS: composition reorganized (3 sub-groups)
+
+**config_fields_added**: PHASE_PHASE2_DART_EVENTS_ENABLED, PHASE_PHASE3_TECHNICAL_ENABLED (env vars, runtime toggles)
+
+**breaking_changes**:
+- `compute_event_score_for_corp` return type float → dict; callers must use `result["total_score"]`
+- `DART_EVENT_CATALOG[key]` access pattern: `(endpoint, dir, weight, name)` tuple unpacking → `meta["endpoint"]` / `meta["alpha_weight"]` etc.
+
+**Validation**:
+- All test suites: smoke 37/37, dart_pit 13/13, multibagger 17/17, p2_events 18/18, technicals 17/17 = **102/102 통과**
+- Live DART API: Samsung 2024 score recomputed +0.117 (was +43.10) ✓
+
+**Verdict**: C + D-3 SHIPPED. Test coverage 81 → 102 (+21 tests). 다음 세션에서 P_MB.2 (multibagger classifier with technicals + events as features) 진입 가능.

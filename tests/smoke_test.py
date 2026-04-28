@@ -164,7 +164,7 @@ def test_dart_uses_data_root():
     assert "CACHE_DIR = DATA_ROOT" in src
 
 
-@_test("structural: DART_EVENT_CATALOG has 11 events")
+@_test("structural: DART_EVENT_CATALOG has 11 events with v2 dict format")
 def test_dart_event_catalog():
     src = (PROJECT_ROOT / "kr_dart_client.py").read_text(encoding="utf-8")
     assert "DART_EVENT_CATALOG" in src
@@ -172,6 +172,28 @@ def test_dart_event_catalog():
     for key in ("treasury_buyback", "capital_increase", "bonus_issue",
                 "insider_holdings", "major_holders", "convertible_bond"):
         assert f'"{key}"' in src, f"DART_EVENT_CATALOG missing {key}"
+    # v2 fields present
+    assert "scoring_mode" in src
+    assert "amount_field" in src
+    assert "full_weight_pct" in src
+    assert "amount_pct_mcap" in src    # buyback mode
+    assert "computed_dilution" in src   # capital_increase mode
+    assert "insider_net_buy" in src     # insider mode
+
+
+@_test("structural: PHASE2_DART_EVENT_COLUMNS = 12 (total + 11 events)")
+def test_phase2_columns_split():
+    from kr_config import (PHASE2_DART_EVENT_COLUMNS, PHASE2_FLOW_COLUMNS,
+                           PHASE2_THEME_SAFETY_COLUMNS, PHASE2_KOREA_ALPHA_COLUMNS)
+    assert len(PHASE2_DART_EVENT_COLUMNS) == 12
+    assert "disclosure_event_total_score" in PHASE2_DART_EVENT_COLUMNS
+    assert "event_treasury_buyback_score" in PHASE2_DART_EVENT_COLUMNS
+    assert "event_capital_increase_score" in PHASE2_DART_EVENT_COLUMNS
+    # Aggregated must include all sub-groups
+    for c in PHASE2_DART_EVENT_COLUMNS:
+        assert c in PHASE2_KOREA_ALPHA_COLUMNS
+    for c in PHASE2_FLOW_COLUMNS:
+        assert c in PHASE2_KOREA_ALPHA_COLUMNS
 
 
 @_test("structural: kr_multibagger module exists with key functions")
@@ -182,6 +204,29 @@ def test_multibagger_module():
                "quality_filter_episodes", "build_episode_panel",
                "load_or_build_episode_panel", "episode_summary_stats"):
         assert f"def {fn}(" in src, f"kr_multibagger missing {fn}"
+
+
+@_test("structural: kr_technicals module exists with key functions")
+def test_technicals_module():
+    src = (PROJECT_ROOT / "kr_technicals.py").read_text(encoding="utf-8")
+    for fn in ("compute_moving_averages", "compute_52w_extremes",
+               "compute_rsi", "compute_atr", "compute_bollinger",
+               "compute_volatility_contraction", "classify_stage",
+               "compute_trend_template_score", "compute_all_technicals",
+               "is_ma_stack_aligned"):
+        assert f"def {fn}(" in src, f"kr_technicals missing {fn}"
+
+
+@_test("structural: PHASE3_TECHNICAL_COLUMNS = 31 columns registered")
+def test_phase3_technical_columns():
+    from kr_config import PHASE3_TECHNICAL_COLUMNS, ALL_PHASE_COLUMNS
+    assert len(PHASE3_TECHNICAL_COLUMNS) == 31
+    for col in ("ma_50", "ma_200", "ma_stack_aligned", "rsi_14",
+                "atr_pct", "bb_position", "stage_label",
+                "trend_template_score", "breakout_flag"):
+        assert col in PHASE3_TECHNICAL_COLUMNS
+    for col in PHASE3_TECHNICAL_COLUMNS:
+        assert col in ALL_PHASE_COLUMNS
 
 
 @_test("structural: multibagger config constants registered")
@@ -238,8 +283,26 @@ def test_import_kr_dart_client_events():
     assert callable(kr_dart_client.fetch_capital_increase_decisions)
     assert callable(kr_dart_client.fetch_all_events_for_corp)
     assert callable(kr_dart_client.compute_event_score_for_corp)
-    # Catalog populated
+    # P2 v2 score helpers
+    assert callable(kr_dart_client._score_amount_pct_mcap)
+    assert callable(kr_dart_client._score_computed_dilution)
+    assert callable(kr_dart_client._score_binary)
+    assert callable(kr_dart_client._score_insider_net_buy)
+    assert callable(kr_dart_client._score_stkrt_change)
+    # Catalog populated (v2 dict format)
     assert len(kr_dart_client.DART_EVENT_CATALOG) >= 10
+    sample = kr_dart_client.DART_EVENT_CATALOG["treasury_buyback"]
+    assert isinstance(sample, dict)
+    assert "scoring_mode" in sample
+    assert "alpha_weight" in sample
+
+
+@_test("import: kr_features P2 functions")
+def test_import_kr_features_p2():
+    import kr_features
+    assert callable(kr_features.prepare_event_panel)
+    assert callable(kr_features.add_disclosure_event_signal)
+    assert callable(kr_features.compute_p2_score)
 
 
 @_test("import: kr_multibagger module")
@@ -253,6 +316,20 @@ def test_import_kr_multibagger():
     assert mb.DEFAULT_THRESHOLD == 3.0
     assert mb.DEFAULT_WINDOW_MONTHS == 24
     assert mb.DEFAULT_MIN_MCAP_KRW == 5e11
+
+
+@_test("import: kr_technicals module")
+def test_import_kr_technicals():
+    import kr_technicals as t
+    assert callable(t.compute_all_technicals)
+    assert callable(t.classify_stage)
+    assert callable(t.compute_trend_template_score)
+
+
+@_test("import: kr_features.add_technical_indicators")
+def test_import_kr_features_technicals():
+    import kr_features
+    assert callable(kr_features.add_technical_indicators)
 
 
 @_test("import: kr_bok_client")

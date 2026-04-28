@@ -5,93 +5,82 @@
 
 ---
 
-## 마지막으로 한 일 (2026-04-28 12:55 KST)
+## 마지막으로 한 일 (2026-04-28 14:30 KST)
 
-**P_MB v0 (Multibagger Episode Discovery) SHIPPED**:
-- 사용자 결정: threshold **300%**, window **24m**, min mcap **5,000억**
-- `kr_multibagger.py` (470 lines) — episode definition + surge_start + quality filter + 캐시
-- `tests/test_multibagger.py` (310 lines, **17/17 통과**) — mock data로 logic 완전 검증
-- `tools/multibagger_explorer.py` — 분포 분석 + Top 30 출력 도구
-- `research/06_walkforward_baselines/multibagger_v0_design.md` — 설계 + 사용자 가이드
+**C + D-3 순차 SHIPPED**. 사용자 요청 "순차적으로 수정해" 따라 진행:
 
-**전체 시스템 상태 (2026-04-28)**:
-- 코드: 4,500+ lines (P0 + P1 + P2 prep + P_MB)
-- Tests: smoke 31/31, dart_pit 13/13, multibagger 17/17 = **총 61/61 통과**
-- 데이터: G:/내 드라이브/kr_quant_engine/cache_dart/ (35MB, Samsung 2023 financials + 2024 events 검증)
-- API 키: BOK ✅, DART ✅ (.env, gitignored)
-- Reference: r1000-quant-engine 패턴 (read-only at H:/codex/tmp_r1000_quant_engine/)
+### C — P2 DART 이벤트 v2 재설계 (count → KRW-amount-based)
+v1 Samsung 폭발 (+43.10 from 2,614 row × count) → v2 정상화 (+0.117 from 2.68조/600조 mcap × 0.50 weight). 5개 scoring modes (amount_pct_mcap, computed_dilution, binary, insider_net_buy, stkrt_change). `kr_features.prepare_event_panel` + `add_disclosure_event_signal` + `compute_p2_score` 통합.
 
-## 다음 액션 (사용자)
+### D-3 — 기술지표 (P3.1)
+`kr_technicals.py` (340 lines) — 31 indicators:
+- MA 5/20/50/60/150/200 + stack alignment
+- 52w high/low + distance
+- RSI 14, ATR 14, Bollinger 20/2
+- Volume MA + zscore + dryup
+- Volatility contraction (Minervini VCP)
+- Weinstein 4-stage classifier
+- **Minervini 8-condition trend template** (score 0-8, ≥7 = pass)
+- Breakout flag (52w high + volume spike)
 
-### A. pykrx 설치 (필수, ~5분)
-```bash
-cd H:/codex/kr_quant_engine
-py -3 -m pip install -r requirements.txt
-```
+`kr_features.add_technical_indicators` integration with `PHASE_PHASE3_TECHNICAL_ENABLED` toggle.
 
-### B. 시스템 sanity (sequential, ~5분)
-```bash
-py -3 kr_pykrx_client.py     # KOSPI+KOSDAQ ~2,300 listed
-py -3 kr_bok_client.py        # BOK 매크로
-py -3 kr_dart_client.py       # Samsung 2023 + 2024 events
-```
+### Test 결과 (총 102/102 통과)
+- smoke: 37/37
+- dart_pit: 13/13
+- multibagger: 17/17
+- **p2_events: 18/18** (NEW — Samsung 2,614 row 회귀 방지 회로 포함)
+- **technicals: 17/17** (NEW)
 
-### C. 핵심 작업 옵션 (선택)
+## 다음 액션 (우선순위 순서)
 
-**Option 1 — P0/P1 backtest baseline 측정** (45-100min 첫 run):
+### 1. 사용자 — pip install + sanity (선행 필수)
 ```powershell
-$env:PHASE_PHASE1_FUNDAMENTAL_ENABLED="0"
-py -3 run_local.py --quick --start-date 2019-01-01 --end-date 2024-12-31
+cd H:\codex\kr_quant_engine
+py -3 -m pip install -r requirements.txt
+py -3 kr_pykrx_client.py     # KOSPI+KOSDAQ ~2,300 listed
+py -3 kr_dart_client.py       # Samsung 이벤트 v2 score (+0.117 expected)
+```
 
+### 2. P_MB.2 — Multibagger Classifier (개발자, 다음 세션)
+이제 P0+P1+P2 (events) + P3 (technicals)이 모두 갖춰졌으니 multibagger pre-surge feature panel 빌드 가능. r1000 phase11 entry classifier 패턴:
+- `kr_multibagger.add_pre_surge_features(episodes, fund_panel, event_panel, prices)` — pre-surge window features collect
+- `kr_multibagger_classifier.train_entry_classifier()` — CatBoost binary, walk-forward 5-fold
+- `research/06_walkforward_baselines/p_mb_v1_classifier_results.md` — AUC, precision@K, top picks
+
+### 3. P0/P1/P2/P3 baseline 측정 (사용자, 데이터 fetch 후)
+```powershell
+# 모든 phase 토글 조합 A/B
 $env:PHASE_PHASE1_FUNDAMENTAL_ENABLED="1"
+$env:PHASE_PHASE2_DART_EVENTS_ENABLED="1"
+$env:PHASE_PHASE3_TECHNICAL_ENABLED="1"
 py -3 run_local.py --quick --start-date 2019-01-01 --end-date 2024-12-31
-
 py -3 run_local.py --verdict-only
 ```
 
-**Option 2 — Multibagger episode discovery** (~30-60min 첫 build):
-```bash
-py -3 -c "from kr_multibagger import load_or_build_episode_panel; load_or_build_episode_panel()"
-py -3 tools/multibagger_explorer.py
-```
+### 4. 후속 D-1/D-2/D-4 (incremental, 우선순위 낮음)
+- D-1: DART 전체 IS/BS/CF parsing (매출원가/판관비/매출채권/재고/차입금 등)
+- D-2: FCF (영업CF − CAPEX), ROIC, Sloan accruals
+- D-4: TTM rolling 4Q sum 정밀화
 
-**Option 1 + Option 2 병렬**: 가능. 가격 데이터 캐시는 양쪽 공유.
+이건 P_MB.2 또는 P3 regime 진입 시 필요해지면 추가.
 
-## 다음 코드 작업 (개발자)
+## 알려진 logic issues 잔존
 
-P_MB.2 (사용자 실측 후):
-- `kr_features.add_multibagger_pre_signals()` — pre-surge window features
-- `kr_multibagger_classifier.py` — CatBoost binary classifier + walk-forward
-- `research/06/p_mb_v1_classifier_results.md`
-
-P2.2 (이전 task):
-- `kr_dart_client.compute_event_score_for_corp` 재설계 (insider count → KRW/mktcap)
-- `kr_features.add_disclosure_event_signal`
-
-P3 (재무제표 확장):
-- DART fnlttSinglAcntAll 전체 IS/BS/CF parsing
-- 기술지표 (MA stack, 52w high, ATR, RSI, trend template)
-- TTM 정밀화 (rolling 4Q sum)
-
-## 알려진 logic issues (audit completed)
-
-| # | 이슈 | 위치 | 우선 |
+| # | 이슈 | 위치 | 해결 시점 |
 |---|---|---|---|
-| 1 | insider count score 폭발 | DART_EVENT_CATALOG | P2.2 |
-| 2 | listed_months stub (모두 999) | kr_universe | P3 |
-| 3 | TTM annual factor 단순화 | kr_features._compute_ttm_from_panel | P3 |
+| 2 | listed_months stub (모두 999) | kr_universe | P3 (DART listing date) |
+| 3 | TTM annual factor 단순화 | kr_features._compute_ttm_from_panel | D-4 (deferred) |
 | 4 | 가격제한폭 fill 미구현 | kr_pipeline.backtest | P3 |
-| 5 | OCF는 multi에서 미반환 | kr_dart_client | P3 |
-| 6 | PHASE2/3 columns keep_cols 미등록 | kr_pipeline.build_feature_store | P2/P3 |
+| 5 | OCF는 multi에서 미반환 | kr_dart_client | D-1 (deferred) |
+| 6 | PHASE2/3 columns keep_cols 미등록 | kr_pipeline.build_feature_store | P2/P3 진입 시 (현재 add_universe_features 직접 컬럼 추가하므로 영향 없음) |
+
+이슈 1 (insider count 폭발) ✅ **이번 세션에서 fix 완료** (C-1).
 
 ## 차단 사항
+- pykrx 미설치 (사용자 pip install 필요) — multibagger 실측 차단
+- 그 외 OK
 
-- pykrx 미설치 (사용자 pip install 필요)
-- 그 외 모두 OK
-
-## 참고
-
-- 원본 r1000 reference: `H:/codex/tmp_r1000_quant_engine/` (read-only)
-- API 키: `H:/codex/kr_quant_engine/.env` (gitignored)
-- 데이터: `G:/내 드라이브/kr_quant_engine/`
-- GitHub: 신규 repo 푸시 예정 (kr-quant-engine)
+## GitHub
+- Repo: https://github.com/wscha231/kr-quant-engine (private)
+- 다음 commit: C + D-3 (P2 events v2 + 기술지표)

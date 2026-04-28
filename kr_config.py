@@ -155,22 +155,69 @@ PHASE1_FUNDAMENTAL_COLUMNS = (
     "turnaround_score",
 )
 
-# P2 Korean-specific alpha
-PHASE2_KOREA_ALPHA_COLUMNS = (
+# P2 Korean-specific alpha (event signals + flow + theme + safety)
+# Split into sub-groups for keep_cols whitelist registration.
+
+# P2 DART corporate events (KRW-amount-based scores, 2026-04-28 v2)
+PHASE2_DART_EVENT_COLUMNS = (
+    "disclosure_event_total_score",         # weighted sum across all events
+    "event_treasury_buyback_score",          # +
+    "event_capital_increase_score",          # -
+    "event_bonus_issue_score",               # +
+    "event_treasury_sell_score",             # -
+    "event_convertible_bond_score",          # -
+    "event_warrant_bond_score",              # -
+    "event_insider_holdings_score",          # ± net buy
+    "event_major_holders_score",             # ± stkrt change
+    "event_merger_score",                    # case
+    "event_spinoff_score",                   # - (KR specific)
+    "event_capital_reduction_score",         # -
+)
+
+# P2 flow signals (foreign + institutional, P2.5 implementation)
+PHASE2_FLOW_COLUMNS = (
     "foreign_net_buy_5d_zscore",
     "foreign_net_buy_20d_zscore",
     "inst_net_buy_5d_zscore",
     "inst_net_buy_20d_zscore",
+)
+
+# P2 theme + safety signals (P2.6 / P2.7)
+PHASE2_THEME_SAFETY_COLUMNS = (
     "theme_phase_score",
     "theme_phase_label",
     "short_interest_change_5d",
     "chaebol_premium_score",
     "won_export_sensitivity",
-    "disclosure_event_score",
     "overheating_avoidance_flag",
 )
 
-# P3 regime & risk
+# Aggregated P2 column whitelist (for keep_cols + hard_sanitize)
+PHASE2_KOREA_ALPHA_COLUMNS = (
+    PHASE2_DART_EVENT_COLUMNS
+    + PHASE2_FLOW_COLUMNS
+    + PHASE2_THEME_SAFETY_COLUMNS
+)
+
+# P3 technical indicators (P3.1 — kr_technicals.py)
+PHASE3_TECHNICAL_COLUMNS = (
+    "ma_5", "ma_20", "ma_50", "ma_60", "ma_150", "ma_200",
+    "ma_stack_aligned",
+    "dist_from_ma_50", "dist_from_ma_150", "dist_from_ma_200",
+    "high_52w", "low_52w",
+    "dist_from_52w_high", "dist_from_52w_low",
+    "new_52w_high_flag",
+    "volume_ma_50", "volume_zscore_50", "volume_dryup_pct",
+    "rsi_14", "rsi_overbought", "rsi_oversold",
+    "atr_14", "atr_pct",
+    "bb_upper_20", "bb_lower_20", "bb_position",
+    "vol_contraction",
+    "stage_label",
+    "trend_template_score", "trend_template_pass",
+    "breakout_flag",
+)
+
+# P3 regime & risk (P3.2 — kr_macro.py — TBD)
 PHASE3_REGIME_COLUMNS = (
     "vkospi_zscore_63d",
     "usd_krw_change_20d",
@@ -188,6 +235,7 @@ ALL_PHASE_COLUMNS = (
     PHASE0_MOMENTUM_COLUMNS
     + PHASE1_FUNDAMENTAL_COLUMNS
     + PHASE2_KOREA_ALPHA_COLUMNS
+    + PHASE3_TECHNICAL_COLUMNS
     + PHASE3_REGIME_COLUMNS
 )
 
