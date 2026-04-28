@@ -4,6 +4,37 @@
 
 ---
 
+## 2026-04-28
+
+### 21:30 KST — p3-pipeline-wired (모든 패널 orchestration 결합)
+
+**Scope**: 정밀분석 결과 `kr_pipeline.build_scored_panel_v0`이 6개 패널 중 1개(`fund_panel`)만 사전 빌드하여 모든 토글 ON 시에도 P2/P2.5/P2.6/P3.2 시그널이 NaN/0으로 채워지던 결정적 wiring 누락을 수정. SESSION_HANDOFF의 "전 토글 ON baseline 측정" 액션이 실제 동작 가능해짐.
+
+**What landed**:
+- `kr_features.load_or_build_event_panel(cfg, tickers, refresh)` — DART event panel cache wrapper. 캐시 키: `event_panel_{start}_{end}_{n}t_{version}.parquet`.
+- `kr_flow.load_or_build_ticker_flow_panel(cfg, tickers, refresh)` — 종목별 flow signal cache wrapper.
+- `kr_flow.load_or_build_foreign_holding_panel(cfg, refresh, sample_dates)` — `sample_dates` 옵션 (월말만 fetch → 250x 빠름, 월별 rebal 충분).
+- `kr_pipeline.build_scored_panel_v0` orchestration 확장:
+  - `phase2_dart_events` ON → `event_panel` 사전 빌드
+  - `phase2_flow` ON → `market_flow_panel` + `ticker_flow_panel` + `foreign_holding_panel` 사전 빌드
+  - `phase2_derivatives` 또는 `phase3_regime` ON → `derivatives_panel` 사전 빌드
+  - `phase3_macro` 또는 `phase3_regime` ON → `macro_panel` 사전 빌드
+  - 모두 `add_universe_features(...)`로 전달
+- `tests/smoke_test.py` 새 regression guard 2개:
+  - `structural: kr_features has load_or_build_event_panel`
+  - `structural: kr_pipeline pre-builds all 6 panels in build_scored_panel_v0` (7 panel 변수 + 6 loader 호출 모두 검증)
+
+**Engine version bump**: `2026-04-28-p1-dart-fundamentals` → `2026-04-28-p3-pipeline-wired`. 기존 `scored_panel_v0_*.parquet` 캐시는 모든 P2+ 시그널이 0으로 빌드되었기에 무효화 필요.
+
+**symbols_added**: `kr_features.load_or_build_event_panel`, `kr_flow.load_or_build_ticker_flow_panel`, `kr_flow.load_or_build_foreign_holding_panel`
+**symbols_changed**: `kr_pipeline.build_scored_panel_v0` (6 panel pre-build + add_universe_features 호출 시그너처 확장), `kr_features` import (DATA_ROOT/DEFAULT_CFG/KR_ENGINE_REUSE_VERSION 추가)
+**config_fields_added**: none
+**breaking_changes**: feature_store cache invalidation only
+
+**Smoke test**: `--quick` 25/0 (이전 23/0 + new 2건) ✅
+
+---
+
 ## 2026-04-27
 
 ### 14:00 KST — p0-bootstrap-scaffolding

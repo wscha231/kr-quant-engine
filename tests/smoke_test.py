@@ -233,8 +233,39 @@ def test_flow_module():
     for fn in ("compute_ticker_flow_signals", "compute_market_flow_signals",
                "get_market_flow_snapshot", "get_ticker_flow_snapshot",
                "get_foreign_holding_snapshot", "build_market_flow_panel",
-               "build_ticker_flow_panel", "fetch_foreign_holding_for_date"):
+               "build_ticker_flow_panel", "fetch_foreign_holding_for_date",
+               "load_or_build_market_flow_panel",
+               "load_or_build_ticker_flow_panel",
+               "load_or_build_foreign_holding_panel"):
         assert f"def {fn}(" in src, f"kr_flow missing {fn}"
+
+
+@_test("structural: kr_features has load_or_build_event_panel")
+def test_features_event_panel_loader():
+    src = (PROJECT_ROOT / "kr_features.py").read_text(encoding="utf-8")
+    assert "def load_or_build_event_panel(" in src, \
+        "kr_features missing load_or_build_event_panel (P2 wiring)"
+
+
+@_test("structural: kr_pipeline pre-builds all 6 panels in build_scored_panel_v0")
+def test_pipeline_panels_wired():
+    """All-toggles-ON baseline requires pipeline to pre-build every panel
+    that add_universe_features consumes. Regression guard for the wiring fix
+    (2026-04-28-p3-pipeline-wired)."""
+    src = (PROJECT_ROOT / "kr_pipeline.py").read_text(encoding="utf-8")
+    # Each panel must be referenced AND passed to add_universe_features
+    for panel in ("fund_panel", "event_panel", "macro_panel",
+                  "market_flow_panel", "ticker_flow_panel",
+                  "foreign_holding_panel", "derivatives_panel"):
+        assert f"{panel}=" in src, f"build_scored_panel_v0 not passing {panel}"
+    # Critical loaders invoked
+    for loader in ("load_or_build_macro_panel",
+                   "load_or_build_market_flow_panel",
+                   "load_or_build_ticker_flow_panel",
+                   "load_or_build_foreign_holding_panel",
+                   "load_or_build_derivatives_panel",
+                   "load_or_build_event_panel"):
+        assert loader in src, f"build_scored_panel_v0 missing {loader} call"
 
 
 @_test("structural: kr_derivatives module exists with key functions")

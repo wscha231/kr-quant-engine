@@ -18,7 +18,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # Bump this string when any signal formula changes. cache_*, feature_store,
 # models artifacts will be regenerated.
-KR_ENGINE_REUSE_VERSION = "2026-04-28-p1-dart-fundamentals"
+KR_ENGINE_REUSE_VERSION = "2026-04-28-p3-pipeline-wired"
 
 
 # ---------------------------------------------------------------------------

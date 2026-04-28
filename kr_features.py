@@ -27,6 +27,9 @@ import pandas as pd
 from kr_config import (
     BENCHMARK_KOSPI200,
     BENCHMARK_KOSDAQ150,
+    DATA_ROOT,
+    DEFAULT_CFG,
+    KR_ENGINE_REUSE_VERSION,
     PHASE0_MOMENTUM_COLUMNS,
     PHASE1_FUNDAMENTAL_COLUMNS,
     PHASE2_DART_EVENT_COLUMNS,
@@ -702,6 +705,41 @@ def prepare_event_panel(
     log(f"[features] event_panel: {len(panel)} rows, "
         f"{panel['ticker'].nunique()} tickers, "
         f"categories={panel['event_category'].value_counts().to_dict()}")
+    return panel
+
+
+def load_or_build_event_panel(
+    cfg: Optional[dict] = None,
+    tickers: Optional[list[str]] = None,
+    refresh: bool = False,
+) -> pd.DataFrame:
+    """Cache-aware DART event panel builder.
+
+    Wraps prepare_event_panel() with a feature_store parquet cache keyed by
+    (start, end, n_tickers, engine_version). DART corp event filings rarely
+    change retroactively, so the panel is reusable across QUICK runs.
+    """
+    cfg = {**DEFAULT_CFG, **(cfg or {})}
+    start = cfg.get("start_date", "2016-01-01")
+    end = cfg.get("end_date") or datetime.now().strftime("%Y-%m-%d")
+    cache_dir = DATA_ROOT / "feature_store"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    n_tk = len(tickers) if tickers else 0
+    cache_path = cache_dir / (
+        f"event_panel_{start}_{end}_{n_tk}t_{KR_ENGINE_REUSE_VERSION}.parquet"
+    )
+    if not refresh and cache_path.exists():
+        log(f"[features] reuse event panel: {cache_path.name}")
+        return pd.read_parquet(cache_path)
+    if not tickers:
+        log("[features] load_or_build_event_panel: empty tickers", level="WARN")
+        return pd.DataFrame()
+    panel = prepare_event_panel(tickers, start, end)
+    if not panel.empty:
+        try:
+            panel.to_parquet(cache_path, index=False)
+        except Exception as e:
+            log(f"[features] event panel save fail: {e}", level="WARN")
     return panel
 
 

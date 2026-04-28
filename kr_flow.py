@@ -493,3 +493,82 @@ def load_or_build_market_flow_panel(
         except Exception as e:
             log(f"[flow] market panel save fail: {e}", level="WARN")
     return panel
+
+
+def load_or_build_ticker_flow_panel(
+    cfg: Optional[dict] = None,
+    tickers: Optional[list[str]] = None,
+    refresh: bool = False,
+) -> pd.DataFrame:
+    """Cache-aware ticker flow panel builder.
+
+    Required for `add_flow_signals` per-ticker zscore + streak signals.
+    Cache key includes ticker count so different universes don't collide.
+    """
+    cfg = {**DEFAULT_CFG, **(cfg or {})}
+    start = cfg.get("start_date", "2016-01-01")
+    end = cfg.get("end_date") or datetime.now().strftime("%Y-%m-%d")
+    cache_dir = DATA_ROOT / "feature_store"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    n_tk = len(tickers) if tickers else 0
+    cache_path = cache_dir / (
+        f"ticker_flow_panel_{start}_{end}_{n_tk}t_"
+        f"{KR_ENGINE_REUSE_VERSION}.parquet"
+    )
+    if not refresh and cache_path.exists():
+        log(f"[flow] reuse ticker panel: {cache_path.name}")
+        return pd.read_parquet(cache_path)
+    if not tickers:
+        log("[flow] load_or_build_ticker_flow_panel: empty tickers", level="WARN")
+        return pd.DataFrame()
+    panel = build_ticker_flow_panel(tickers, start, end)
+    if not panel.empty:
+        try:
+            panel.to_parquet(cache_path, index=False)
+        except Exception as e:
+            log(f"[flow] ticker panel save fail: {e}", level="WARN")
+    return panel
+
+
+def load_or_build_foreign_holding_panel(
+    cfg: Optional[dict] = None,
+    refresh: bool = False,
+    sample_dates: Optional[list[pd.Timestamp]] = None,
+) -> pd.DataFrame:
+    """Cache-aware foreign-holding panel builder.
+
+    sample_dates: explicit list of dates to fetch (e.g. month-ends only).
+    If None, fetches every business day in cfg window. Month-end is enough
+    for monthly rebalance signals — daily fetch is ~250x slower.
+    """
+    cfg = {**DEFAULT_CFG, **(cfg or {})}
+    start = cfg.get("start_date", "2016-01-01")
+    end = cfg.get("end_date") or datetime.now().strftime("%Y-%m-%d")
+    cache_dir = DATA_ROOT / "feature_store"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    label = "monthly" if sample_dates else "daily"
+    cache_path = cache_dir / (
+        f"foreign_holding_panel_{label}_{start}_{end}_"
+        f"{KR_ENGINE_REUSE_VERSION}.parquet"
+    )
+    if not refresh and cache_path.exists():
+        log(f"[flow] reuse foreign holding panel: {cache_path.name}")
+        return pd.read_parquet(cache_path)
+    if sample_dates is None:
+        from kr_pykrx_client import fetch_business_days
+        sample_dates = fetch_business_days(start, end)
+    frames = []
+    for d in sample_dates:
+        df = fetch_foreign_holding_for_date(
+            pd.Timestamp(d).strftime("%Y%m%d"), market="ALL", refresh_days=30,
+        )
+        if not df.empty:
+            frames.append(df)
+    if not frames:
+        return pd.DataFrame()
+    panel = pd.concat(frames, ignore_index=True)
+    try:
+        panel.to_parquet(cache_path, index=False)
+    except Exception as e:
+        log(f"[flow] holding panel save fail: {e}", level="WARN")
+    return panel

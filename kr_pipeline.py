@@ -67,36 +67,99 @@ def build_scored_panel_v0(
     )
     log(f"[pipeline] build scored panel: {len(month_ends)} month-ends")
 
+    # ----- Pre-build sample universe (drives all panel builders below) -----
+    sample_snap = build_universe_snapshot(month_ends[-1], cfg=cfg)
+    sample_tickers: list[str] = []
+    if not sample_snap.empty:
+        sample_tickers = (
+            sample_snap[sample_snap["eligible"]]["ticker"].astype(str).tolist()
+        )
+
+    reuse = bool(cfg.get("reuse_existing_artifacts", True))
+
     # ----- P1: pre-build full fundamentals panel once (DART bulk fetch) -----
     fund_panel = pd.DataFrame()
-    if phase_is_enabled("phase1_fundamental", default=True):
-        # Sample tickers from a recent month to drive the corp_code fetch
-        # (faster than per-month re-discovery)
+    if phase_is_enabled("phase1_fundamental", default=True) and sample_tickers:
         log("[pipeline] phase1 enabled -> pre-build DART fundamentals panel")
-        sample_snap = build_universe_snapshot(month_ends[-1], cfg=cfg)
-        if not sample_snap.empty:
-            sample_tickers = sample_snap[sample_snap["eligible"]]["ticker"].astype(str).tolist()
-            fund_start = int(cfg.get("dart_fund_start_year", 2014))
-            fund_end = pd.Timestamp(end_date).year
-            fund_cache = DATA_ROOT / "feature_store" / (
-                f"fund_panel_{fund_start}_{fund_end}_"
-                f"{KR_ENGINE_REUSE_VERSION}.parquet"
+        fund_start = int(cfg.get("dart_fund_start_year", 2014))
+        fund_end = pd.Timestamp(end_date).year
+        fund_cache = DATA_ROOT / "feature_store" / (
+            f"fund_panel_{fund_start}_{fund_end}_"
+            f"{KR_ENGINE_REUSE_VERSION}.parquet"
+        )
+        if reuse and fund_cache.exists():
+            fund_panel = pd.read_parquet(fund_cache)
+            log(f"[pipeline] reuse cached fund_panel: {len(fund_panel)} rows")
+        else:
+            fund_panel = prepare_pit_fundamentals_panel(
+                sample_tickers,
+                start_year=fund_start,
+                end_year=fund_end,
             )
-            if cfg.get("reuse_existing_artifacts", True) and fund_cache.exists():
-                fund_panel = pd.read_parquet(fund_cache)
-                log(f"[pipeline] reuse cached fund_panel: {len(fund_panel)} rows")
-            else:
-                fund_panel = prepare_pit_fundamentals_panel(
-                    sample_tickers,
-                    start_year=fund_start,
-                    end_year=fund_end,
-                )
-                if not fund_panel.empty:
-                    try:
-                        fund_panel.to_parquet(fund_cache, index=False)
-                        log(f"[pipeline] saved fund_panel ({len(fund_panel)} rows)")
-                    except Exception as e:
-                        log(f"[pipeline] fund_panel save fail: {e}", level="WARN")
+            if not fund_panel.empty:
+                try:
+                    fund_panel.to_parquet(fund_cache, index=False)
+                    log(f"[pipeline] saved fund_panel ({len(fund_panel)} rows)")
+                except Exception as e:
+                    log(f"[pipeline] fund_panel save fail: {e}", level="WARN")
+
+    # ----- P2: DART corporate events (treasury_buyback, capital_increase, ...) -----
+    event_panel = pd.DataFrame()
+    if phase_is_enabled("phase2_dart_events", default=False) and sample_tickers:
+        log("[pipeline] phase2_dart_events enabled -> pre-build event panel")
+        from kr_features import load_or_build_event_panel
+        event_panel = load_or_build_event_panel(
+            cfg=cfg, tickers=sample_tickers, refresh=not reuse,
+        )
+        log(f"[pipeline] event_panel: {len(event_panel)} rows")
+
+    # ----- P2.5: market-level + per-ticker flow + foreign holding -----
+    market_flow_panel = pd.DataFrame()
+    ticker_flow_panel = pd.DataFrame()
+    foreign_holding_panel = pd.DataFrame()
+    if phase_is_enabled("phase2_flow", default=False) and sample_tickers:
+        log("[pipeline] phase2_flow enabled -> pre-build flow panels")
+        from kr_flow import (
+            load_or_build_market_flow_panel,
+            load_or_build_ticker_flow_panel,
+            load_or_build_foreign_holding_panel,
+        )
+        market_flow_panel = load_or_build_market_flow_panel(cfg=cfg, refresh=not reuse)
+        ticker_flow_panel = load_or_build_ticker_flow_panel(
+            cfg=cfg, tickers=sample_tickers, refresh=not reuse,
+        )
+        # Use month-ends only for foreign holding (monthly rebal cadence)
+        foreign_holding_panel = load_or_build_foreign_holding_panel(
+            cfg=cfg, refresh=not reuse, sample_dates=month_ends,
+        )
+        log(f"[pipeline] flow panels: market={len(market_flow_panel)} "
+            f"ticker={len(ticker_flow_panel)} holding={len(foreign_holding_panel)}")
+
+    # ----- P2.6: derivatives (VKOSPI + foreign futures OI) -----
+    derivatives_panel = pd.DataFrame()
+    need_deriv = (
+        phase_is_enabled("phase2_derivatives", default=False)
+        or phase_is_enabled("phase3_regime", default=False)
+    )
+    if need_deriv:
+        log("[pipeline] derivatives needed -> pre-build derivatives panel")
+        from kr_derivatives import load_or_build_derivatives_panel
+        derivatives_panel = load_or_build_derivatives_panel(
+            cfg=cfg, refresh=not reuse,
+        )
+        log(f"[pipeline] derivatives_panel: {len(derivatives_panel)} rows")
+
+    # ----- P3.2: macro (BOK + FRED + yfinance) -----
+    macro_panel = pd.DataFrame()
+    need_macro = (
+        phase_is_enabled("phase3_macro", default=False)
+        or phase_is_enabled("phase3_regime", default=False)
+    )
+    if need_macro:
+        log("[pipeline] macro needed -> pre-build macro panel")
+        from kr_macro import load_or_build_macro_panel
+        macro_panel = load_or_build_macro_panel(cfg=cfg, refresh=not reuse)
+        log(f"[pipeline] macro_panel: {len(macro_panel)} rows")
 
     frames = []
     for i, me in enumerate(month_ends, 1):
@@ -108,7 +171,16 @@ def build_scored_panel_v0(
         eligible = snap[snap["eligible"]].copy()
         if eligible.empty:
             continue
-        feat = add_universe_features(eligible, me, fund_panel=fund_panel)
+        feat = add_universe_features(
+            eligible, me,
+            fund_panel=fund_panel,
+            event_panel=event_panel,
+            macro_panel=macro_panel,
+            market_flow_panel=market_flow_panel,
+            ticker_flow_panel=ticker_flow_panel,
+            foreign_holding_panel=foreign_holding_panel,
+            derivatives_panel=derivatives_panel,
+        )
         frames.append(feat)
 
     if not frames:
