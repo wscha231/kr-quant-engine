@@ -463,17 +463,22 @@ def fetch_ticker_history(ticker: str, start: str, end: str, refresh_days: int = 
                     "Change": "change_pct",
                 })
                 fdr_df["ticker"] = ticker
-                # Compute value (KRW) if missing
-                if "value" not in fdr_df.columns and "close" in fdr_df.columns \
-                        and "volume" in fdr_df.columns:
-                    fdr_df["value"] = (fdr_df["close"].astype(float)
-                                        * fdr_df["volume"].astype(float))
                 df = fdr_df
         except Exception as e:
             log(f"[pykrx_client] FDR ticker history fail {ticker}: {e}", level="WARN")
 
     if df.empty:
         return pd.DataFrame()
+
+    # Universal post-processing: derive `value` (거래대금 in KRW) if missing.
+    # Both pykrx 1.2.7 (KRX broken) and FDR omit `value`. We compute it as
+    # close × volume (close-based proxy; pykrx's actual value uses VWAP — small
+    # difference for our universe filter use case).
+    if "value" not in df.columns and "close" in df.columns and "volume" in df.columns:
+        df["value"] = (
+            pd.to_numeric(df["close"], errors="coerce").fillna(0)
+            * pd.to_numeric(df["volume"], errors="coerce").fillna(0)
+        )
 
     _save_cache(df, path)
     return df

@@ -1,0 +1,111 @@
+{
+  "args": {
+    "start": "2024-03-29",
+    "end": "2024-12-30",
+    "n": 30,
+    "universe_size": 200,
+    "combos": [
+      "P0_only",
+      "P0+P3.1_technical",
+      "ALL"
+    ]
+  },
+  "benchmark_cum_return": -0.07887143315165113,
+  "rebal_dates": [
+    "2024-03-31",
+    "2024-06-30",
+    "2024-09-30"
+  ],
+  "results": {
+    "P0_only": {
+      "combo": "P0_only",
+      "n_periods": 2,
+      "cumulative": -0.004542182000000006,
+      "annualized": -0.026945488599991907,
+      "avg_turnover": 0.7333333333333334,
+      "total_cost": 0.004546666666666667,
+      "monthly": [
+        {
+          "rd": "2024-03-31 00:00:00",
+          "next_rd": "2024-06-30 00:00:00",
+          "n_priced": 0,
+          "turnover": 1.0,
+          "gross": 0.0,
+          "cost": 0.0031,
+          "net": -0.0031,
+          "score_col_used": "p2_blended_score"
+        },
+        {
+          "rd": "2024-06-30 00:00:00",
+          "next_rd": "2024-09-30 00:00:00",
+          "n_priced": 0,
+          "turnover": 0.4666666666666667,
+          "gross": 0.0,
+          "cost": 0.0014466666666666666,
+          "net": -0.0014466666666666666,
+          "score_col_used": "p2_blended_score"
+        }
+      ]
+    },
+    "P0+P3.1_technical": {
+      "combo": "P0+P3.1_technical",
+      "n_periods": 2,
+      "cumulative": -0.004542182000000006,
+      "annualized": -0.026945488599991907,
+      "avg_turnover": 0.7333333333333334,
+      "total_cost": 0.004546666666666667,
+      "monthly": [
+        {
+          "rd": "2024-03-31 00:00:00",
+          "next_rd": "2024-06-30 00:00:00",
+          "n_priced": 0,
+          "turnover": 1.0,
+          "gross": 0.0,
+          "cost": 0.0031,
+          "net": -0.0031,
+          "score_col_used": "p2_blended_score"
+        },
+        {
+          "rd": "2024-06-30 00:00:00",
+          "next_rd": "2024-09-30 00:00:00",
+          "n_priced": 0,
+          "turnover": 0.4666666666666667,
+          "gross": 0.0,
+          "cost": 0.0014466666666666666,
+          "net": -0.0014466666666666666,
+          "score_col_used": "p2_blended_score"
+        }
+      ]
+    },
+    "ALL": {
+      "combo": "ALL",
+      "n_periods": 2,
+      "cumulative": -0.004542182000000006,
+      "annualized": -0.026945488599991907,
+      "avg_turnover": 0.7333333333333334,
+      "total_cost": 0.004546666666666667,
+      "monthly": [
+        {
+          "rd": "2024-03-31 00:00:00",
+          "next_rd": "2024-06-30 00:00:00",
+          "n_priced": 0,
+          "turnover": 1.0,
+          "gross": 0.0,
+          "cost": 0.0031,
+          "net": -0.0031,
+          "score_col_used": "p2_blended_score"
+        },
+        {
+          "rd": "2024-06-30 00:00:00",
+          "next_rd": "2024-09-30 00:00:00",
+          "n_priced": 0,
+          "turnover": 0.4666666666666667,
+          "gross": 0.0,
+          "cost": 0.0014466666666666666,
+          "net": -0.0014466666666666666,
+          "score_col_used": "p2_blended_score"
+        }
+      ]
+    }
+  }
+}

@@ -67,15 +67,23 @@ def compute_avg_trading_value_60d(
     rebalance_date: pd.Timestamp,
     lookback_days: int = 60,
     refresh_days: int = 7,
+    tickers: Optional[list[str]] = None,
 ) -> pd.DataFrame:
-    """For all KOSPI+KOSDAQ tickers, compute avg 거래대금 over last N business days
-    ending on rebalance_date.
+    """For each ticker, compute avg 거래대금 over last N business days ending
+    on rebalance_date.
+
+    Strategy:
+        1. If tickers given, use those; else fetch listing at rebalance_date.
+        2. For each ticker, fetch daily OHLCV history via fetch_ticker_history
+           (uses FDR fallback if pykrx broken).
+        3. Aggregate last N business days of `value` column.
 
     Returns DataFrame: ticker, avg_trading_value, days_observed.
 
-    Uses pykrx daily OHLCV per market for the lookback window.
     Caches per (rebalance_date, lookback_days) at cache_misc/.
     """
+    from kr_pykrx_client import fetch_listing, fetch_ticker_history
+
     cache_path = DATA_ROOT / "cache_misc" / (
         f"avg_value_{lookback_days}d_{rebalance_date.strftime('%Y%m%d')}.parquet"
     )
@@ -88,37 +96,48 @@ def compute_avg_trading_value_60d(
             except Exception as e:
                 log(f"[universe] cache read fail {cache_path.name}: {e}", level="WARN")
 
-    # Determine business day window
-    end = rebalance_date
-    start = end - timedelta(days=int(lookback_days * 1.6))   # generous, holidays
-    bdays = fetch_business_days(start.strftime("%Y%m%d"), end.strftime("%Y%m%d"))
-    bdays = sorted(d for d in bdays if d <= end)[-lookback_days:]
-    if len(bdays) < 5:
-        log(f"[universe] insufficient bdays for {end}: {len(bdays)}", level="WARN")
-        return pd.DataFrame(columns=["ticker", "avg_trading_value", "days_observed"])
+    if tickers is None:
+        listing = fetch_listing(rebalance_date.strftime("%Y%m%d"), market="ALL",
+                                  refresh_days=30)
+        if listing.empty:
+            return pd.DataFrame(columns=["ticker", "avg_trading_value", "days_observed"])
+        tickers = listing["ticker"].astype(str).tolist()
 
-    # Aggregate daily value per ticker
-    accum: dict[str, list[float]] = {}
-    for d in bdays:
-        df = fetch_daily_ohlcv_market(d.strftime("%Y%m%d"), market="ALL", refresh_days=30)
-        if df.empty or "value" not in df.columns:
-            continue
-        for tk, val in zip(df["ticker"].astype(str), df["value"].astype(float)):
-            accum.setdefault(tk, []).append(val)
+    end = rebalance_date
+    # Pull a slightly longer window than lookback*1.5 to ensure we have N
+    # business days even with holidays.
+    start = end - timedelta(days=int(lookback_days * 1.7))
+    start_str = start.strftime("%Y%m%d")
+    end_str = end.strftime("%Y%m%d")
+
+    log(f"[universe] compute_avg_trading_value_60d for {len(tickers)} tickers, "
+        f"window {start_str}~{end_str}")
 
     rows = []
-    for tk, vals in accum.items():
+    for i, tk in enumerate(tickers, 1):
+        if i % 200 == 0:
+            log(f"[universe] avg_value {i}/{len(tickers)}")
+        hist = fetch_ticker_history(tk, start_str, end_str, refresh_days=30)
+        if hist.empty or "value" not in hist.columns:
+            continue
+        # Take last N rows (≈ lookback_days business days)
+        recent = hist.sort_values("date").tail(lookback_days)
+        vals = pd.to_numeric(recent["value"], errors="coerce").dropna()
+        if len(vals) == 0:
+            continue
         rows.append({
-            "ticker": tk,
-            "avg_trading_value": float(sum(vals) / max(1, len(vals))),
-            "days_observed": len(vals),
+            "ticker": str(tk),
+            "avg_trading_value": float(vals.mean()),
+            "days_observed": int(len(vals)),
         })
+
     out = pd.DataFrame(rows)
     if not out.empty:
         try:
             out.to_parquet(cache_path, index=False)
         except Exception as e:
             log(f"[universe] cache write fail {cache_path.name}: {e}", level="WARN")
+    log(f"[universe] avg_value: {len(out)} tickers with valid data")
     return out
 
 
@@ -168,14 +187,20 @@ def build_universe_snapshot(
     exchanges = [e.upper() for e in cfg.get("exchanges", list(EXCHANGES))]
     listing = listing[listing["market"].str.upper().isin(exchanges)].copy()
 
+    # FDR fallback's `fetch_listing` returns mcap/listed_shares too, so we
+    # strip them here to avoid merge conflict with the dedicated mcap fetch.
+    listing_keep = [c for c in ("ticker", "name", "market") if c in listing.columns]
+    listing = listing[listing_keep]
+
     # 2. Market cap snapshot (already merged in mktcap fetch)
     mktcap = fetch_market_cap_market(rd.strftime("%Y%m%d"), market="ALL", refresh_days=30)
     if mktcap.empty:
         log(f"[universe] empty mktcap for {rd}", level="WARN")
         return pd.DataFrame()
 
-    # Keep only KOSPI/KOSDAQ tickers
-    mktcap = mktcap[mktcap["market"].str.upper().isin(exchanges)].copy()
+    # Keep only KOSPI/KOSDAQ tickers (mktcap may have wider scope)
+    if "market" in mktcap.columns:
+        mktcap = mktcap[mktcap["market"].str.upper().isin(exchanges)].copy()
 
     # 3. 60d avg trading value
     avg_val = compute_avg_trading_value_60d(rd, lookback_days=60)
@@ -183,11 +208,10 @@ def build_universe_snapshot(
     # 4. Listed months (P0 stub)
     listed = compute_listed_months(rd, listing["ticker"].astype(str).tolist())
 
-    # 5. Merge
-    df = listing.merge(
-        mktcap[["ticker", "market_cap", "listed_shares"]],
-        on="ticker", how="left",
-    )
+    # 5. Merge — mcap fields from mktcap only
+    mcap_keep = [c for c in ("ticker", "market_cap", "listed_shares")
+                  if c in mktcap.columns]
+    df = listing.merge(mktcap[mcap_keep], on="ticker", how="left")
     df = df.merge(avg_val[["ticker", "avg_trading_value", "days_observed"]],
                   on="ticker", how="left")
     df = df.merge(listed, on="ticker", how="left")

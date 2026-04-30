@@ -153,10 +153,11 @@ def fetch_ticker_flow_for_date_range(
 ) -> pd.DataFrame:
     """Per-ticker daily foreign + inst + individual net-buy values (KRW).
 
-    pykrx: stock.get_market_net_purchases_of_equities(start, end, market, code).
-    Note: pykrx API for single ticker over range — uses stock.get_trading_value_by_investor.
+    Tries pykrx first (broken in 1.2.7 vs current KRX site), then falls back
+    to Naver Finance scrape (kr_naver_flow.fetch_ticker_flow_range).
 
-    Returns: date, ticker, foreign_net, inst_net, individual_net.
+    Returns DataFrame: date, ticker, foreign_net, inst_net, [individual_net,
+    foreign_held_qty, foreign_holding_pct].
     """
     cache_dir = DATA_ROOT / "cache_pykrx"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -168,31 +169,68 @@ def fetch_ticker_flow_for_date_range(
         age_s = time.time() - cache_path.stat().st_mtime
         if age_s < refresh_days * 86400:
             try:
-                return pd.read_parquet(cache_path)
+                cached = pd.read_parquet(cache_path)
+                if not cached.empty:
+                    return cached
             except Exception:
                 pass
 
+    df = pd.DataFrame()
+    # 1. Try pykrx (may return empty due to KRX 2025 site changes)
     try:
         from pykrx import stock as _stock
+        try:
+            df = _stock.get_market_trading_value_by_date(s, e, ticker)
+        except Exception:
+            df = None
+        if df is not None and not df.empty:
+            df = df.reset_index()
+            rename = {"날짜": "date", "외국인합계": "foreign_net",
+                      "기관합계": "inst_net", "개인": "individual_net"}
+            df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
+            df["ticker"] = ticker
+            keep = ["date", "ticker"] + [
+                c for c in ("foreign_net", "inst_net", "individual_net")
+                if c in df.columns
+            ]
+            df = df[keep]
+        else:
+            df = pd.DataFrame()
     except ImportError:
+        df = pd.DataFrame()
+
+    # 2. Naver Finance fallback (more reliable post-KRX-2025-redesign)
+    if df.empty:
+        try:
+            from kr_naver_flow import fetch_ticker_flow_range
+            naver_df = fetch_ticker_flow_range(ticker, start, end,
+                                                  refresh_days=refresh_days)
+            if not naver_df.empty:
+                # Naver returns: date, close, volume, inst_net_qty, foreign_net_qty,
+                # foreign_held_qty, foreign_holding_pct, ticker, foreign_net_value, inst_net_value
+                df = naver_df.copy()
+                # Map to our standard schema
+                if "foreign_net_value" in df.columns:
+                    df["foreign_net"] = df["foreign_net_value"]
+                if "inst_net_value" in df.columns:
+                    df["inst_net"] = df["inst_net_value"]
+                # Individual = -(foreign + inst) approximation (KRW value-based)
+                if "foreign_net" in df.columns and "inst_net" in df.columns:
+                    df["individual_net"] = -(df["foreign_net"].fillna(0)
+                                              + df["inst_net"].fillna(0))
+                keep = ["date", "ticker"] + [
+                    c for c in ("foreign_net", "inst_net", "individual_net",
+                                 "foreign_net_qty", "inst_net_qty",
+                                 "foreign_held_qty", "foreign_holding_pct")
+                    if c in df.columns
+                ]
+                df = df[keep]
+        except Exception as ex:
+            log(f"[flow] Naver fallback fail {ticker}: {ex}", level="WARN")
+
+    if df.empty:
         return pd.DataFrame()
 
-    try:
-        df = _stock.get_market_trading_value_by_date(s, e, ticker)
-    except Exception as ex:
-        log(f"[flow] ticker flow fetch fail {ticker} {s}~{e}: {ex}", level="WARN")
-        return pd.DataFrame()
-    if df is None or df.empty:
-        return pd.DataFrame()
-
-    df = df.reset_index()
-    rename = {"날짜": "date", "외국인합계": "foreign_net",
-              "기관합계": "inst_net", "개인": "individual_net"}
-    df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
-    df["ticker"] = ticker
-    keep = ["date", "ticker"] + [c for c in ("foreign_net", "inst_net", "individual_net")
-                                  if c in df.columns]
-    df = df[keep]
     try:
         df.to_parquet(cache_path, index=False)
     except Exception:
