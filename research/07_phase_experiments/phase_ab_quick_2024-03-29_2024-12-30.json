@@ -3,11 +3,12 @@
     "start": "2024-03-29",
     "end": "2024-12-30",
     "n": 30,
-    "universe_size": 500,
+    "universe_size": 949,
     "include_kosdaq": true,
-    "kosdaq_size": 100,
+    "kosdaq_size": 200,
     "combos": [
-      "P0_only"
+      "P0_only",
+      "P0+P3.1_technical"
     ]
   },
   "benchmark_cum_return": -0.07887143315165113,
@@ -20,10 +21,10 @@
     "P0_only": {
       "combo": "P0_only",
       "n_periods": 2,
-      "cumulative": -0.004645195000000046,
-      "annualized": -0.02754950014527391,
-      "avg_turnover": 0.75,
-      "total_cost": 0.00465,
+      "cumulative": -0.005263272999999957,
+      "annualized": -0.031167011941342193,
+      "avg_turnover": 0.85,
+      "total_cost": 0.0052699999999999995,
       "monthly": [
         {
           "rd": "2024-03-31 00:00:00",
@@ -39,10 +40,40 @@
           "rd": "2024-06-30 00:00:00",
           "next_rd": "2024-09-30 00:00:00",
           "n_priced": 0,
-          "turnover": 0.5,
+          "turnover": 0.7,
           "gross": 0.0,
-          "cost": 0.00155,
-          "net": -0.00155,
+          "cost": 0.0021699999999999996,
+          "net": -0.0021699999999999996,
+          "score_col_used": "p2_blended_score"
+        }
+      ]
+    },
+    "P0+P3.1_technical": {
+      "combo": "P0+P3.1_technical",
+      "n_periods": 2,
+      "cumulative": -0.005263272999999957,
+      "annualized": -0.031167011941342193,
+      "avg_turnover": 0.85,
+      "total_cost": 0.0052699999999999995,
+      "monthly": [
+        {
+          "rd": "2024-03-31 00:00:00",
+          "next_rd": "2024-06-30 00:00:00",
+          "n_priced": 0,
+          "turnover": 1.0,
+          "gross": 0.0,
+          "cost": 0.0031,
+          "net": -0.0031,
+          "score_col_used": "p2_blended_score"
+        },
+        {
+          "rd": "2024-06-30 00:00:00",
+          "next_rd": "2024-09-30 00:00:00",
+          "n_priced": 0,
+          "turnover": 0.7,
+          "gross": 0.0,
+          "cost": 0.0021699999999999996,
+          "net": -0.0021699999999999996,
           "score_col_used": "p2_blended_score"
         }
       ]
