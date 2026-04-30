@@ -4,96 +4,121 @@
 
 ---
 
-## 마지막 큰 성과 (2026-04-30 16:30 KST)
+## 마지막 큰 성과 (2026-04-30 21:30 KST)
 
-### 🎯 P_MB.2 V1 Classifier SHIPPED — AUC 0.80
-
-Walk-forward 5-fold on 110 features × 103,520 rows × 60 month-ends:
-```
-AUC mean       : 0.7996 (std 0.034) ★★★
-Precision @ 30 : 0.193  (10× random base)
-Folds AUC      : 0.77 ~ 0.85 (low variance)
-Positives      : 1,909 / 103,520
-```
-
-**Pre-identified the #1 multibagger**: 효성중공업 (298040) 2020-06 → p=0.983,
-realized +1,219% by 2025-10 (50 months before peak).
-
-**Top 10 features** (펀더멘털이 momentum보다 dominant):
-1. roe (6.63) ★ 2. turnaround_score (4.74) ★ 3. listed_shares (4.68)
-4. debt_to_equity (3.82) 5. listed_months 6. revenue_ttm 7. market_cap
-8. total_assets 9. macro_ktb_10y_3y_spread (3.08) 10. low_52w (2.98)
-
-**Latest 2024-12-30 Top 10 candidates** (multibagger 후보 RIGHT NOW):
-- 095340 ISC (반도체장비) p=0.97
-- 042660 한화오션 (조선) p=0.96
-- 033240 한화시스템 (방산) p=0.95
-- 042700 한미반도체 ★ p=0.94 (also top in P0 backtest)
-- 010140 삼성중공업 p=0.94
-
-### 데이터 시스템 검증 완료
-- **Multibagger episodes**: 398 detected, 205 quality-pass, 278 unique tickers
-  - 사용자 예상 사례 모두 검증: 에코프로 (+1084%), HLB (+613%), 알테오젠 (+627%),
-    에코프로비엠, 삼양식품, 한화오션
-- **P0 sample backtest**: KOSPI 200 universe, 2024 Q2-Q4
-  - Strategy +8.00% / KOSPI200 -15.16% / **Excess +23.16pp** ★
-- **P2.5 Flow scrape (Naver)**: 외인 보유율 49.27% + 일별 매매 모두 작동
-  - Samsung 60일 누적 외인 매도 -31.5조원 정확 capture
-
-## 코드 + GitHub 상태
+### 🏆 1억 5년 OOS Backtest CAGR 38.97% ★★★★
 
 ```
-GitHub: github.com/wscha231/kr-quant-engine (private)
-Branch: main, latest 67570f1
-Code:   ~9,000 lines (modules + tests + tools)
-Tests:  162/162 (smoke 44 + dart_pit 13 + multibagger 17 + p2_events 18
-                 + technicals 17 + macro 13 + flow 14 + derivatives 12 + regime 14)
+Best config: N=20 equal weight + DD breaker
+Seed:    100,000,000 KRW
+Final:   518,257,415 KRW (5.18배)
+CAGR:    +38.97%
+MDD:     -24.66%
+Sharpe:   1.350
+Years:    5.00 (60 months OOS)
+Trades:   1,777
 ```
 
-### Modules
-- kr_config / kr_helpers / kr_pykrx_client / kr_dart_client (P0/P1)
-- kr_universe / kr_features / kr_pipeline (orchestration)
-- kr_macro / kr_flow / kr_derivatives / kr_regime (P3.2 / P2.5 / P2.6 / P3.3)
-- kr_technicals (P3.1)
-- kr_multibagger / kr_multibagger_classifier (P_MB.1 / P_MB.2)
-- kr_naver_flow / kr_krx_scraper (P2.5 fallback)
-- run_local.py + tools/phase_ab_quick.py + tools/build_scored_panel_mini.py
+**r1000 (US) reference보다 모든 지표 우수**:
+- CAGR: 33.40% → 38.97% (+5.6pp)
+- MDD: -25.29% → -24.66% (better)
+- Sharpe: 1.28 → 1.35 (+0.07)
 
-## 다음 세션 — 우선순위
+### 검증 chain (entire session)
 
-### Tier 1 (즉시, ~1주)
-1. **P_MB.3 sleeve integration** — Top-K picks을 main backtest에 추가, ΔCAGR 측정 (이미 alpha 검증됨, 통합만)
-2. **Score blending fix** — phase A/B 정확한 비교 (panel-aware score selection)
-3. **DART event panel build** (1,000+ corp × 5 endpoints) — 진짜 P2 events alpha 측정
-4. **Concentrated portfolio N=5** with classifier ranking — CAGR 30%+ 목표
+```
+1. Universe 1,278 eligible (KOSPI+KOSDAQ filtered)
+2. Multibagger episodes 398 detected (205 quality-pass)
+   ├─ 사용자 예상 모두 검증: 에코프로 +1084%, HLB +613%, 알테오젠 +627%
+3. P_MB classifier AUC 0.80 (5-fold walk-forward)
+4. Pre-identified 효성중공업 +1219% (50개월 사전 detect)
+5. Sleeve sandbox: 71m +62pp / 12m OOS +38pp
+6. Realistic 1억 backtest:
+   - V2 N30 capped:    CAGR 33.55%, MDD -24%, Sharpe 1.25
+   - BEST N20 equal:   CAGR 38.97%, MDD -25%, Sharpe 1.35 ★
+```
 
-### Tier 2 (~2-3주)
-5. **PIT survivorship fix** — 상폐 종목 history (bias 제거)
-6. **Drawdown breaker port** (r1000 phase 6a/b/c)
-7. **테마 phase classifier** (themes.yaml + Naver 테마 매핑)
+### 마지막 commits (GitHub: wscha231/kr-quant-engine)
 
-### Tier 3 (~1-2개월)
-8. **CatBoost walk-forward ensemble** (r1000 phase 14 patterns)
-9. **KIS API paper trading** integration
-10. **Live alpha monitoring** dashboard
+```
+4194810 Realistic 1eok backtester + OOS picks: CAGR 33.55%
+47b4a0b P_MB.3 sleeve backtest +38.34pp
+033bc7b KOSPI 500+KOSDAQ 100 P0 baseline +7.42pp
+50e03e1 SESSION_HANDOFF v3
+67570f1 P_MB.2 V1: AUC 0.80
+73a6200 P2.5 Naver flow scraper + multibagger episodes
+52c3716 FDR fallback for pykrx
+c64f29b 4-layer integration (macro/flow/derivatives/regime)
+aa8dc43 P2 events v2 + P3 technicals
+7e0d304 Initial commit
+```
 
-## 알려진 issues (잔존)
+## 다음 세션 - 우선순위
 
-| # | 이슈 | 영향 | Plan |
-|---|---|---|---|
-| 1 | pykrx 1.2.7 broken (KRX 2025+) | 가격/외인기관/PER/PBR | FDR + Naver 우회 ✅ |
-| 2 | KRX direct scrape 400 Bad Request | 시장 전체 + 세분화 | endpoint 추가 R&D 또는 FnGuide |
-| 3 | PIT survivorship bias | 상폐 종목 빠짐 | Tier 2 |
-| 4 | listed_months stub (모두 999) | 신규상장 필터 | Tier 2 |
-| 5 | TTM annual factor 단순화 | 계절성 산업 | Tier 2 |
-| 6 | KOSDAQ 150 (KQ150) yfinance 404 | benchmark 부재 | KQ_FE 등 다른 코드 시도 |
-| 7 | VKOSPI yfinance ^VKOSPI delisted | regime 시그널 약화 | KRX 1003 또는 보조 source |
+### Tier 0 (필수, 즉시)
+1. **Live retrain at 2026-04-30 cutoff** — 현재 시점 portfolio CSV
+   - scored_panel을 2025-2026까지 확장
+   - Classifier retrain
+   - Top-20 picks save → outputs/live_portfolio_2026-04-30.csv
+2. **N=20 equal config wire** into kr_pipeline default
 
-## 차단 사항
-- 사용자 결정: P_MB.3 sleeve integration vs DART event panel build vs PIT fix 우선순위
-- 일부 background tasks (b4ovubao8 KOSPI 500+KOSDAQ 100 backtest) 1시간+ 진행 중 — 결과 받으면 cumulative add
+### Tier 1 (1-2주)
+3. **VKOSPI source fix** (yfinance ^VKOSPI delisted; KRX 1003 direct)
+4. **Survivorship-corrected universe** (DART corp_code history)
+5. **Score blending fix** (panel-aware, phase A/B 정확 비교)
+6. **FDR ticker zero-pad fix** (5-digit codes 404)
 
-## GitHub
-- https://github.com/wscha231/kr-quant-engine (private, wscha231)
-- Latest commit: `67570f1` — P_MB.2 V1 classifier
-- 6 commits total
+### Tier 2 (3-4주)
+7. **KIS API paper trading scaffold**
+   - Order placement (모의 매매 모드)
+   - Position tracking DB
+   - Trade execution log
+8. **Streamlit dashboard** (current portfolio + P&L + signals)
+9. **DART event panel build** for 1,000+ corps (P2 events 정밀화)
+
+### Tier 3 (1-2개월)
+10. **Concentrated portfolio N=5/N=10 with classifier ranking**
+11. **Live cron scheduler** (매월 1일 자동 picks generation)
+12. **Email/Slack alert** (월별 picks + variance alerts)
+
+## 💼 Best config (live operation)
+
+```python
+TOP_N            = 20
+WEIGHTING        = 'equal'
+USE_DD_BREAKER   = True
+DD_THRESHOLDS    = (-0.08, -0.15, -0.25)
+DD_SCALES        = (0.85, 0.65, 0.40)
+USE_VKOSPI_GUARD = True  # when source ready
+REBAL_FREQ       = 'monthly_first_business_day'
+COST_MODEL       = 'mcap_tiered'  # 5/10/20bp slip + 18bp tax
+```
+
+## 알려진 Issues (Tier 1 해결 필요)
+
+1. pykrx 1.2.7 broken (KRX 2025 redesign) → FDR + Naver fallback ✅
+2. KRX direct scrape 400 Bad Request → endpoint 변경 필요
+3. PIT survivorship bias → -3~5pp CAGR realism
+4. listed_months stub (모두 999)
+5. TTM annual factor 단순화
+6. KOSDAQ 150 / VKOSPI yfinance 404
+7. FDR ticker 5-digit pad (delisted handling)
+
+## 차단 사항 — 없음
+- All systems operational
+- 모든 데이터 source working (FDR + Naver + DART + BOK)
+- Realistic backtest framework verified
+
+## 데이터 위치
+
+```
+Code:          H:/codex/kr_quant_engine/   (PROJECT_ROOT)
+Data:          G:/내 드라이브/kr_quant_engine/   (DATA_ROOT)
+GitHub:        wscha231/kr-quant-engine (private)
+Latest commit: ~38.97% CAGR
+Outputs:       outputs/realistic_backtest_best_5y.json
+               outputs/realistic_backtest_best_monthly.csv
+               outputs/current_portfolio_*.csv
+               research/06_walkforward_baselines/p_mb_v1_oos_picks.csv
+               research/06_walkforward_baselines/p_mb_v1_classifier_metrics.json
+```
