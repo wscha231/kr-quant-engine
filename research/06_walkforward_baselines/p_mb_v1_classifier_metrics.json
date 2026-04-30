@@ -1,0 +1,105 @@
+{
+  "n_folds": 5,
+  "fold_auc": [
+    0.7682062277994385,
+    0.8314210847951437,
+    0.8491899848225795,
+    0.769973010771322,
+    0.7790673453179293
+  ],
+  "auc_mean": 0.7995715307012825,
+  "auc_std": 0.03393128736658439,
+  "fold_precision_at_30": [
+    0.13333333333333333,
+    0.13333333333333333,
+    0.2,
+    0.1,
+    0.4
+  ],
+  "p_at_30_mean": 0.19333333333333333,
+  "n_features": 110,
+  "n_positives": 1909,
+  "n_total": 103520,
+  "feature_importance_top20": [
+    {
+      "feature": "roe",
+      "importance": 6.626160962794221
+    },
+    {
+      "feature": "turnaround_score",
+      "importance": 4.73766353012167
+    },
+    {
+      "feature": "listed_shares",
+      "importance": 4.675536247228216
+    },
+    {
+      "feature": "debt_to_equity",
+      "importance": 3.8218152433283166
+    },
+    {
+      "feature": "listed_months",
+      "importance": 3.6392577779834427
+    },
+    {
+      "feature": "revenue_ttm",
+      "importance": 3.5808180283317914
+    },
+    {
+      "feature": "market_cap",
+      "importance": 3.4220490852981933
+    },
+    {
+      "feature": "total_assets",
+      "importance": 3.2982084415689115
+    },
+    {
+      "feature": "macro_ktb_10y_3y_spread",
+      "importance": 3.078191133496562
+    },
+    {
+      "feature": "low_52w",
+      "importance": 2.979387702353984
+    },
+    {
+      "feature": "total_liabilities",
+      "importance": 2.911554656709861
+    },
+    {
+      "feature": "macro_us_10y_2y_spread",
+      "importance": 2.8210071027140557
+    },
+    {
+      "feature": "net_income_ttm",
+      "importance": 2.6050206744988142
+    },
+    {
+      "feature": "fundamentals_bsns_year",
+      "importance": 2.4180283325523315
+    },
+    {
+      "feature": "total_equity",
+      "importance": 2.353588945014336
+    },
+    {
+      "feature": "operating_income_ttm",
+      "importance": 2.0367660154307043
+    },
+    {
+      "feature": "operating_income_growth_yoy",
+      "importance": 1.6041951938912709
+    },
+    {
+      "feature": "atr_14",
+      "importance": 1.552851355222699
+    },
+    {
+      "feature": "high_52w",
+      "importance": 1.5163058764428905
+    },
+    {
+      "feature": "macro_ktb_10y_yield",
+      "importance": 1.4607832566998777
+    }
+  ]
+}
