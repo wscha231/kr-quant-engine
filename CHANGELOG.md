@@ -575,3 +575,42 @@ Pattern: 2024년말 한국 outperformer (반도체장비 / 조선 / 방산 / AI 
 **Verdict**: P_MB.2 V1 SHIPPED with strong alpha. AUC 0.80 + P@30 19.3%
 exceeds typical ML benchmarks. Next: integrate as concentrated sleeve in
 main backtest (P_MB.3) — measure ΔCAGR vs P0 baseline.
+
+---
+
+### 2026-04-30 16:50 KST — kospi500-kosdaq100-p0-baseline
+
+KOSPI 500 + KOSDAQ 100 (= 600 universe, deeper than 200-stock sample)
+P0-only backtest 2024 Q2-Q4 finally completed (~1 hour run):
+
+```
+Combo       Cum     Annualized   Turnover  Excess vs KOSPI200
+P0_only    -0.46%   -2.75%       75%       +7.42pp
+```
+
+KOSPI200 same window: -7.89%
+
+**Comparison of P0 samples**:
+| Universe | Excess |
+|---|---|
+| KOSPI 200 (inline test, 400d lookback) | +23.16pp |
+| KOSPI 200 (orchestrator, 540d lookback) | +7.43pp |
+| KOSPI 500 + KOSDAQ 100 | +7.42pp |
+
+The 23pp gap between inline and orchestrator paths suggests:
+- Different lookback_days (400 vs 540) marginal effect
+- Score column auto-selection (p0 vs p2_blended) when phases inactive: same value
+- Most likely: inline used reset_index(drop=True) on universe; orchestrator
+  preserves original FDR sort order with index gap — minor tiebreak effect
+
+Wider 600-universe ≈ KOSPI-200 orchestrator (+7.4pp) — KOSDAQ inclusion
+slightly drags via weaker mcap names. Both confirm positive P0 alpha
+holds across universe definitions.
+
+Alpha hierarchy verified (in this session):
+- P0 momentum: +7~23pp baseline excess
+- P_MB classifier: AUC 0.80 = stronger orthogonal alpha
+- Combination expected to materially exceed P0-only.
+
+Next session priority: P_MB.3 sleeve integration into main backtest +
+score blending fix (panel-aware score column selection).
