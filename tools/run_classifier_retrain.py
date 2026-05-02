@@ -41,11 +41,16 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _find_latest(glob: str, dir_path: Path) -> Path | None:
+def _find_latest(glob: str, dir_path: Path,
+                  exclude_substrings: tuple[str, ...] = ()) -> Path | None:
+    """Return most recent file matching `glob` under `dir_path`, skipping
+    paths whose name contains any string in `exclude_substrings` (e.g. 'mini').
+    """
     if not dir_path.exists():
         return None
-    paths = sorted(dir_path.glob(glob), key=lambda p: p.stat().st_mtime,
-                   reverse=True)
+    paths = [p for p in dir_path.glob(glob)
+             if not any(s in p.name for s in exclude_substrings)]
+    paths.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return paths[0] if paths else None
 
 
@@ -54,7 +59,8 @@ def main() -> int:
 
     feature_store = DATA_ROOT / "feature_store"
     panel_path = (Path(args.panel) if args.panel
-                   else _find_latest("scored_panel_*.parquet", feature_store))
+                   else _find_latest("scored_panel_*.parquet", feature_store,
+                                       exclude_substrings=("mini",)))
     eps_path = (Path(args.episodes) if args.episodes
                   else _find_latest("multibagger_episodes_*.parquet",
                                      feature_store))

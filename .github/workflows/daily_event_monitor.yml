@@ -1,0 +1,74 @@
+name: Daily Event Monitor
+
+on:
+  schedule:
+    - cron: '0 9 * * 1-5'   # weekdays 18:00 KST (UTC+9)
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DART_API_KEY: ${{ secrets.DART_API_KEY }}
+      KR_DATA_DIR: ${{ github.workspace }}/data
+      RCLONE_CFG_TEXT: ${{ secrets.RCLONE_CONFIG_GDRIVE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Setup rclone
+        if: ${{ env.RCLONE_CFG_TEXT != '' }}
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_CFG_TEXT" > ~/.config/rclone/rclone.conf
+          rclone --config ~/.config/rclone/rclone.conf listremotes
+
+      - name: Sync portfolio + cache_dart from GDrive
+        if: ${{ env.RCLONE_CFG_TEXT != '' }}
+        run: |
+          mkdir -p data/cache_dart data/outputs
+          rclone copy gdrive:kr_quant_engine/cache_dart data/cache_dart -P || true
+          rclone copy gdrive:kr_quant_engine/outputs data/outputs -P || true
+
+      - name: Run event monitor
+        id: monitor
+        run: |
+          set +e
+          python tools/daily_event_monitor.py --lookback-days 2
+          rc=$?
+          echo "exitcode=$rc" >> "$GITHUB_OUTPUT"
+          echo "Monitor exit code: $rc"
+          # Exit code 2 = high-severity alerts present (NOT a failure for the workflow)
+          if [ $rc -eq 2 ] || [ $rc -eq 0 ]; then exit 0; fi
+          exit $rc
+
+      - name: Sync alerts back to GDrive
+        if: ${{ env.RCLONE_CFG_TEXT != '' && always() }}
+        run: |
+          rclone copy data/outputs gdrive:kr_quant_engine/outputs -P || true
+
+      - name: Slack notify (HIGH severity only)
+        if: ${{ steps.monitor.outputs.exitcode == '2' && env.SLACK_WEBHOOK_URL != '' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          STAMP=$(date -u +%Y-%m-%d)
+          ALERT_JSON="data/outputs/daily_alerts_${STAMP}.json"
+          if [ -f "$ALERT_JSON" ]; then
+            N_HIGH=$(python -c "import json;d=json.load(open('$ALERT_JSON'));print(d.get('n_high_severity',0))")
+            N_TICK=$(python -c "import json;d=json.load(open('$ALERT_JSON'));print(d.get('n_tickers_watched',0))")
+            curl -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\":rotating_light: kr-quant-engine daily monitor: ${N_HIGH} HIGH-severity governance events on held tickers (watching ${N_TICK}). Run #${{ github.run_number }}.\"}" \
+              "$SLACK_WEBHOOK_URL"
+          fi

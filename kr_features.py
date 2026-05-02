@@ -208,6 +208,153 @@ def add_cross_sectional_ranks(universe: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# AQR-style sector neutralization (Section 6.1 of plan.md)
+# ---------------------------------------------------------------------------
+def _sector_group_key(row: pd.Series) -> str:
+    """Sector proxy when GICS / KRX 업종지수 코드가 없을 때.
+
+    Uses (exchange, market_cap quintile) as a coarse but PIT-safe sector proxy.
+    Real sector codes (DART induty_code or KRX 업종) can replace this when
+    populated; the calling functions fall back to this proxy automatically.
+    """
+    exchange = str(row.get("exchange") or row.get("market") or "UNK")
+    mc = row.get("market_cap")
+    if pd.isna(mc) or mc <= 0:
+        bucket = 0
+    elif mc < 5e11:        # < 5,000억
+        bucket = 1
+    elif mc < 2e12:        # < 2조
+        bucket = 2
+    elif mc < 1e13:        # < 10조
+        bucket = 3
+    else:
+        bucket = 4
+    return f"{exchange}_q{bucket}"
+
+
+def add_sector_neutral_ranks(
+    universe: pd.DataFrame,
+    columns: tuple[str, ...] = (
+        "ret_12_1m", "ret_6m", "p_pre_surge",
+    ),
+    sector_col: Optional[str] = None,
+) -> pd.DataFrame:
+    """Within-sector percentile rank for the requested signals.
+
+    Adds `<col>_sector_rank` columns. When `sector_col` is provided AND
+    present in the universe, that column is used as the sector key; otherwise
+    falls back to `_sector_group_key` (exchange + mcap-quintile proxy).
+
+    PIT-safe: operates on a single rebalance_date snapshot so no cross-time
+    leakage. Caller should pass the snapshot AFTER add_basic_momentum +
+    p_pre_surge are computed.
+    """
+    out = universe.copy()
+    if out.empty:
+        return out
+    if sector_col and sector_col in out.columns:
+        keys = out[sector_col].astype(str)
+    else:
+        keys = out.apply(_sector_group_key, axis=1)
+    out["_sector_key"] = keys
+    for col in columns:
+        if col not in out.columns:
+            continue
+        ranks = out.groupby("_sector_key")[col].rank(
+            method="average", pct=True, na_option="keep",
+        )
+        out[f"{col}_sector_rank"] = ranks
+    out = out.drop(columns=["_sector_key"], errors="ignore")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Minervini-style trend gate (Section 6.5 of plan.md)
+# ---------------------------------------------------------------------------
+def compute_trend_gate_multiplier(
+    universe: pd.DataFrame,
+    mode: str = "pre_entry",
+) -> pd.Series:
+    """Trend-template gate as a multiplier in [0.0, 1.0].
+
+    Used downstream to multiply final_rank_score so trend signals act as a
+    GATE rather than alpha (per Minervini / O'Neil). Multiple-stage modes:
+
+      mode="pre_entry":
+          gate=1 if (vol_contraction OR rsi_oversold) AND price near 52w-low/high zone.
+          Lets value/turnaround names through; blocks momentum-late names.
+      mode="continuation":
+          gate=1 if trend_template_pass AND ma_stack_aligned AND new_52w_high_flag.
+          Lets trend-up names through; blocks rolled-over names.
+      mode="exit":
+          gate=0 if MA50 break AND volume spike AND trend_template fail.
+
+    Missing column → treated as neutral (gate value 1.0). The function NEVER
+    raises; callers can safely apply the result regardless of upstream phase
+    coverage.
+    """
+    n = len(universe)
+    if n == 0:
+        return pd.Series([], dtype=float)
+    if mode == "pre_entry":
+        vc = universe.get("vol_contraction", pd.Series(False, index=universe.index))
+        rsi_os = universe.get("rsi_oversold", pd.Series(False, index=universe.index))
+        # Distance from 52w high < 25% (within striking range)
+        dist_high = universe.get("dist_from_52w_high",
+                                  pd.Series(0.0, index=universe.index))
+        near_high = pd.to_numeric(dist_high, errors="coerce").fillna(0).abs() < 0.25
+        gate = (vc.fillna(False).astype(bool) | rsi_os.fillna(False).astype(bool)) & near_high
+        return gate.astype(float)
+    elif mode == "continuation":
+        tt = universe.get("trend_template_pass",
+                           pd.Series(False, index=universe.index))
+        ma = universe.get("ma_stack_aligned",
+                           pd.Series(False, index=universe.index))
+        new_high = universe.get("new_52w_high_flag",
+                                  pd.Series(False, index=universe.index))
+        gate = (tt.fillna(False).astype(bool)
+                & ma.fillna(False).astype(bool)
+                | new_high.fillna(False).astype(bool))
+        return gate.astype(float)
+    elif mode == "exit":
+        ma_break = universe.get("dist_from_ma_50",
+                                  pd.Series(0.0, index=universe.index))
+        below_ma50 = pd.to_numeric(ma_break, errors="coerce").fillna(0) < -0.05
+        vol_spike = universe.get("volume_zscore_50",
+                                   pd.Series(0.0, index=universe.index))
+        spike = pd.to_numeric(vol_spike, errors="coerce").fillna(0) > 2.0
+        tt_fail = ~universe.get("trend_template_pass",
+                                  pd.Series(False, index=universe.index)).fillna(False).astype(bool)
+        # exit signal active -> gate goes to 0; otherwise neutral 1.0
+        exit_active = below_ma50 & spike & tt_fail
+        return (1.0 - exit_active.astype(float)).clip(0.0, 1.0)
+    else:
+        return pd.Series([1.0] * n, index=universe.index)
+
+
+def apply_trend_gate(
+    universe: pd.DataFrame,
+    score_col: str = "p_pre_surge",
+    out_col: str = "score_trend_gated",
+    mode: str = "pre_entry",
+    soft_gate: float = 0.5,
+) -> pd.DataFrame:
+    """Multiply `score_col` by trend gate, write `out_col`. Soft-gate: rows
+    failing the trend template still receive `soft_gate` × score (default
+    0.5) so the gate is dampening rather than binary-blocking — a single
+    binary cut produced too few candidates in low-trend regimes.
+    """
+    out = universe.copy()
+    if score_col not in out.columns or out.empty:
+        out[out_col] = 0.0
+        return out
+    gate_raw = compute_trend_gate_multiplier(out, mode=mode)
+    gate = gate_raw + soft_gate * (1.0 - gate_raw)
+    out[out_col] = pd.to_numeric(out[score_col], errors="coerce").fillna(0) * gate
+    return out
+
+
+# ---------------------------------------------------------------------------
 # P0 composite score
 # ---------------------------------------------------------------------------
 def compute_p0_score(universe: pd.DataFrame) -> pd.DataFrame:

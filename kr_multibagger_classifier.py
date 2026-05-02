@@ -324,6 +324,191 @@ def label_risk(
 
 
 # ---------------------------------------------------------------------------
+# Section 6.6 — Ensemble blend (CatBoost + LightGBM ranker + Logistic)
+# ---------------------------------------------------------------------------
+def train_ensemble_classifier(
+    labeled_panel: pd.DataFrame,
+    feature_cols: list[str],
+    n_folds: int = 5,
+    embargo_months: int = 9,
+    blend_weights: tuple[float, float, float] = (0.5, 0.4, 0.1),
+    cb_params: Optional[dict] = None,
+    lgbm_params: Optional[dict] = None,
+) -> dict:
+    """Ensemble of CatBoost binary + LightGBM ranker + logistic regression.
+
+    Blend formula (default):
+        p_blend = 0.5 * p_catboost + 0.4 * p_lgbm_normalized + 0.1 * p_logistic
+
+    LightGBM ranker output is rank-normalized to [0, 1] within each test fold
+    (so it is comparable to the calibrated probabilities of the other two).
+
+    Returns dict with:
+      fold_blend_aucs       per-fold AUC of the blended probability
+      blend_auc_mean
+      cb_aucs / lgbm_aucs / lr_aucs
+      n_folds
+      models                {'cb': model, 'lgbm': model, 'lr': model}
+        — fitted on full panel for production use.
+      feature_cols
+    """
+    try:
+        from catboost import CatBoostClassifier
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.metrics import roc_auc_score
+        from sklearn.preprocessing import StandardScaler
+    except ImportError:
+        return {"error": "catboost / sklearn missing"}
+    try:
+        import lightgbm as lgb
+    except ImportError:
+        return {"error": "lightgbm missing — pip install lightgbm"}
+
+    if labeled_panel.empty or "is_pre_surge" not in labeled_panel.columns:
+        return {"error": "no labeled panel"}
+    if not feature_cols:
+        return {"error": "no feature columns"}
+
+    cb_default = {
+        "iterations": 400, "depth": 6, "learning_rate": 0.05,
+        "loss_function": "Logloss", "eval_metric": "AUC",
+        "verbose": 0, "random_seed": 42, "auto_class_weights": "Balanced",
+    }
+    cb_params = {**cb_default, **(cb_params or {})}
+    lgbm_default = {
+        "objective": "lambdarank", "metric": "ndcg",
+        "ndcg_eval_at": [10, 30],
+        "n_estimators": 300, "learning_rate": 0.05, "num_leaves": 31,
+        "verbose": -1, "random_state": 42,
+    }
+    lgbm_params = {**lgbm_default, **(lgbm_params or {})}
+
+    splits = walk_forward_splits_purged(
+        labeled_panel, n_folds=n_folds, embargo_months=embargo_months,
+    )
+    if not splits:
+        return {"error": "insufficient panel for purged splits"}
+
+    cb_aucs: list[float] = []
+    lgbm_aucs: list[float] = []
+    lr_aucs: list[float] = []
+    blend_aucs: list[float] = []
+
+    panel = labeled_panel.reset_index(drop=True)
+    for k, (tr_idx, te_idx) in enumerate(splits, 1):
+        X_tr = panel.iloc[tr_idx][feature_cols].fillna(0).values
+        y_tr = panel.iloc[tr_idx]["is_pre_surge"].values.astype(int)
+        X_te = panel.iloc[te_idx][feature_cols].fillna(0).values
+        y_te = panel.iloc[te_idx]["is_pre_surge"].values.astype(int)
+        if y_tr.sum() < 5 or y_te.sum() < 1:
+            continue
+
+        # CatBoost binary
+        cb = CatBoostClassifier(**cb_params)
+        cb.fit(X_tr, y_tr)
+        p_cb = cb.predict_proba(X_te)[:, 1]
+        cb_aucs.append(float(roc_auc_score(y_te, p_cb)))
+
+        # LightGBM ranker — group by rebalance_date so listwise loss treats
+        # one month as one query.
+        train_rd = panel.iloc[tr_idx]["rebalance_date"].values
+        test_rd = panel.iloc[te_idx]["rebalance_date"].values
+        train_groups = pd.Series(train_rd).value_counts().sort_index().values
+        ranker = lgb.LGBMRanker(**lgbm_params)
+        ranker.fit(X_tr, y_tr, group=train_groups)
+        raw_lgbm = ranker.predict(X_te)
+        # Normalize to [0, 1] per test rebalance_date
+        df_lg = pd.DataFrame({"rd": test_rd, "score": raw_lgbm})
+        df_lg["normed"] = df_lg.groupby("rd")["score"].rank(pct=True)
+        p_lgbm = df_lg["normed"].values
+        lgbm_aucs.append(float(roc_auc_score(y_te, p_lgbm)))
+
+        # Logistic regression for calibration baseline
+        scaler = StandardScaler()
+        X_tr_s = scaler.fit_transform(X_tr)
+        X_te_s = scaler.transform(X_te)
+        lr = LogisticRegression(max_iter=400, class_weight="balanced",
+                                C=1.0, solver="liblinear")
+        lr.fit(X_tr_s, y_tr)
+        p_lr = lr.predict_proba(X_te_s)[:, 1]
+        lr_aucs.append(float(roc_auc_score(y_te, p_lr)))
+
+        # Blend
+        w_cb, w_lgbm, w_lr = blend_weights
+        p_blend = w_cb * p_cb + w_lgbm * p_lgbm + w_lr * p_lr
+        blend_aucs.append(float(roc_auc_score(y_te, p_blend)))
+
+    if not blend_aucs:
+        return {"error": "no folds completed"}
+
+    # Final fit on full panel for production picks
+    X_full = panel[feature_cols].fillna(0).values
+    y_full = panel["is_pre_surge"].values.astype(int)
+    rd_full = panel["rebalance_date"].values
+    groups_full = pd.Series(rd_full).value_counts().sort_index().values
+
+    cb_full = CatBoostClassifier(**cb_params)
+    cb_full.fit(X_full, y_full)
+    ranker_full = lgb.LGBMRanker(**lgbm_params)
+    ranker_full.fit(X_full, y_full, group=groups_full)
+    scaler_full = StandardScaler()
+    X_full_s = scaler_full.fit_transform(X_full)
+    lr_full = LogisticRegression(max_iter=400, class_weight="balanced",
+                                  C=1.0, solver="liblinear")
+    lr_full.fit(X_full_s, y_full)
+
+    out = {
+        "n_folds": len(blend_aucs),
+        "cb_aucs": cb_aucs, "cb_auc_mean": float(np.mean(cb_aucs)),
+        "lgbm_aucs": lgbm_aucs, "lgbm_auc_mean": float(np.mean(lgbm_aucs)),
+        "lr_aucs": lr_aucs, "lr_auc_mean": float(np.mean(lr_aucs)),
+        "fold_blend_aucs": blend_aucs,
+        "blend_auc_mean": float(np.mean(blend_aucs)),
+        "blend_weights": list(blend_weights),
+        "models": {
+            "cb": cb_full, "lgbm": ranker_full, "lr": lr_full,
+            "scaler": scaler_full,
+        },
+        "feature_cols": list(feature_cols),
+    }
+    return out
+
+
+def predict_ensemble(
+    fitted: dict,
+    panel: pd.DataFrame,
+    feature_cols: Optional[list[str]] = None,
+) -> pd.Series:
+    """Apply trained ensemble (from train_ensemble_classifier) to a new panel.
+
+    Returns Series of blended probabilities indexed by panel.index.
+    """
+    if "models" not in fitted or "blend_weights" not in fitted:
+        return pd.Series([], dtype=float)
+    fc = feature_cols or fitted.get("feature_cols", [])
+    if not fc:
+        return pd.Series([0.0] * len(panel), index=panel.index)
+    X = panel[fc].fillna(0).values
+    cb = fitted["models"]["cb"]
+    lgbm = fitted["models"]["lgbm"]
+    lr = fitted["models"]["lr"]
+    scaler = fitted["models"]["scaler"]
+    p_cb = cb.predict_proba(X)[:, 1]
+    raw_lgbm = lgbm.predict(X)
+    if "rebalance_date" in panel.columns:
+        df_lg = pd.DataFrame({"rd": panel["rebalance_date"].values,
+                                 "score": raw_lgbm})
+        p_lgbm = df_lg.groupby("rd")["score"].rank(pct=True).values
+    else:
+        p_lgbm = (raw_lgbm - raw_lgbm.min()) / max(1e-9,
+                                                     (raw_lgbm.max() - raw_lgbm.min()))
+    p_lr = lr.predict_proba(scaler.transform(X))[:, 1]
+    w_cb, w_lgbm, w_lr = fitted["blend_weights"]
+    blend = w_cb * p_cb + w_lgbm * p_lgbm + w_lr * p_lr
+    return pd.Series(blend, index=panel.index, name="p_ensemble")
+
+
+# ---------------------------------------------------------------------------
 # Calibration + adversarial validation helpers (Phase C3)
 # ---------------------------------------------------------------------------
 def calibration_curve(
@@ -425,10 +610,18 @@ def train_entry_classifier(
     feature_cols: list[str],
     n_folds: int = 5,
     cb_params: Optional[dict] = None,
+    fit_final_model: bool = True,
 ) -> dict:
     """Walk-forward train CatBoost binary classifier.
 
-    Returns dict with metrics + per-fold AUC + final model.
+    Returns dict with:
+      - n_folds, fold_auc, auc_mean, auc_std
+      - fold_precision_at_30, p_at_30_mean
+      - n_features, n_positives, n_total
+      - feature_importance_top20
+      - model: CatBoostClassifier fitted on FULL panel (when
+        fit_final_model=True). Used by run_classifier_retrain.py to persist
+        a production-ready model after CV.
     """
     try:
         from catboost import CatBoostClassifier
@@ -515,7 +708,9 @@ def train_entry_classifier(
     out = {
         "n_folds": len(fold_aucs),
         "fold_auc": fold_aucs,
+        "fold_aucs": fold_aucs,                     # legacy alias
         "auc_mean": float(np.mean(fold_aucs)),
+        "mean_auc": float(np.mean(fold_aucs)),       # legacy alias
         "auc_std": float(np.std(fold_aucs)),
         "fold_precision_at_30": fold_precision_at_30,
         "p_at_30_mean": float(np.mean(fold_precision_at_30)),
@@ -527,6 +722,21 @@ def train_entry_classifier(
             if final_importance is not None else []
         ),
     }
+
+    # Final production model: refit on the entire labeled panel so the
+    # persisted artifact has access to the most recent fold's data.
+    if fit_final_model:
+        try:
+            X_full = labeled_panel[feature_cols].fillna(0).values
+            y_full = labeled_panel["is_pre_surge"].values
+            final = CatBoostClassifier(**cb_params)
+            final.fit(X_full, y_full)
+            out["model"] = final
+            log(f"[mb-classifier] fit final model on full panel "
+                f"({len(labeled_panel)} rows, {pos} positives)")
+        except Exception as e:
+            log(f"[mb-classifier] final-model fit failed: {e}", level="WARN")
+
     return out
 
 
