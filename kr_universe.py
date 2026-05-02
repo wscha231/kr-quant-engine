@@ -30,6 +30,10 @@ from kr_config import (
     DATA_ROOT,
 )
 from kr_helpers import log
+from kr_pit_universe import (
+    compute_listed_months_pit,
+    fetch_listing_at_date,
+)
 from kr_pykrx_client import (
     fetch_business_days,
     fetch_listing,
@@ -149,16 +153,19 @@ def compute_listed_months(
     tickers: list[str],
     cache_path: Optional[Path] = None,
 ) -> pd.DataFrame:
-    """Approximate listed months by finding earliest OHLCV record per ticker.
+    """Listed months derived from PIT historical mcap snapshots.
 
-    P0 v0: cheap proxy via FinanceDataReader if available (DartReader has
-    listing dates). For now, return all tickers with listed_months = 999
-    (i.e., assume long-listed) and let pykrx OHLCV history handle the
-    "12-month lookback" check at feature time. This is conservative.
+    Replaces the legacy 999-stub with real values via kr_pit_universe.
+    Tickers whose listing predates the earliest cached snapshot are returned
+    as 999 (treated as "long-listed, exact unknown" so the
+    min_listed_months ≥ 12 filter passes them).
 
-    P1 will replace with proper DART corp listing date.
+    Tickers NOT present in listed_history get listed_months = 0 — meaning
+    they will fail the min_listed_months filter (correct behaviour: never
+    seen in the historical mcap snapshots ⇒ not eligible).
     """
-    return pd.DataFrame({"ticker": tickers, "listed_months": [999] * len(tickers)})
+    df = compute_listed_months_pit(rebalance_date, tickers)
+    return df[["ticker", "listed_months"]].copy()
 
 
 # ---------------------------------------------------------------------------
@@ -172,41 +179,52 @@ def build_universe_snapshot(
 
     Returns DataFrame: ticker, name, exchange, rebalance_date, market_cap,
     listed_shares, avg_trading_value_60d, listed_months, eligible, exclude_reason.
+
+    PIT-correct path (Phase C1, 2026-05-02): listing membership is sourced
+    strictly from cached monthly mktcap snapshots via fetch_listing_at_date.
+    The FDR-current StockListing fallback is NOT used for historical dates —
+    that path leaked currently-listed names into past universes (survivorship
+    bias). For dates earlier than the earliest cached snapshot, builder
+    returns empty DataFrame so the caller fails loudly rather than silently
+    using stale current data.
     """
     cfg = {**DEFAULT_CFG, **(cfg or {})}
     rd = pd.Timestamp(rebalance_date).normalize()
     log(f"[universe] build snapshot for {rd.strftime('%Y-%m-%d')}")
 
-    # 1. Listing (KOSPI + KOSDAQ)
-    listing = fetch_listing(rd.strftime("%Y%m%d"), market="ALL", refresh_days=30)
-    if listing.empty:
-        log(f"[universe] empty listing for {rd}", level="WARN")
-        return pd.DataFrame()
-
-    # Filter exchanges per cfg
     exchanges = [e.upper() for e in cfg.get("exchanges", list(EXCHANGES))]
-    listing = listing[listing["market"].str.upper().isin(exchanges)].copy()
 
-    # FDR fallback's `fetch_listing` returns mcap/listed_shares too, so we
-    # strip them here to avoid merge conflict with the dedicated mcap fetch.
-    listing_keep = [c for c in ("ticker", "name", "market") if c in listing.columns]
-    listing = listing[listing_keep]
-
-    # 2. Market cap snapshot (already merged in mktcap fetch)
-    mktcap = fetch_market_cap_market(rd.strftime("%Y%m%d"), market="ALL", refresh_days=30)
-    if mktcap.empty:
-        log(f"[universe] empty mktcap for {rd}", level="WARN")
+    # 1+2. PIT listing + mcap from cached snapshot at-or-before rd
+    pit_listing = fetch_listing_at_date(rd, market="ALL", name_lookup=True)
+    if pit_listing.empty:
+        log(f"[universe] PIT snapshot missing for {rd.strftime('%Y-%m-%d')} — "
+            f"caller must rebuild cache or pick a later start date.", level="WARN")
         return pd.DataFrame()
 
-    # Keep only KOSPI/KOSDAQ tickers (mktcap may have wider scope)
-    if "market" in mktcap.columns:
-        mktcap = mktcap[mktcap["market"].str.upper().isin(exchanges)].copy()
+    if "market" in pit_listing.columns:
+        pit_listing = pit_listing[
+            pit_listing["market"].str.upper().isin(exchanges)
+        ].copy()
 
-    # 3. 60d avg trading value
-    avg_val = compute_avg_trading_value_60d(rd, lookback_days=60)
+    # Split into listing (ticker, name, market) and mktcap (ticker, market_cap,
+    # listed_shares) views so the rest of the merge code keeps its shape.
+    listing_keep = [c for c in ("ticker", "name", "market") if c in pit_listing.columns]
+    if "name" not in pit_listing.columns:
+        pit_listing["name"] = ""
+        listing_keep = ["ticker", "name", "market"]
+    listing = pit_listing[listing_keep].copy()
 
-    # 4. Listed months (P0 stub)
-    listed = compute_listed_months(rd, listing["ticker"].astype(str).tolist())
+    mcap_keep_src = [c for c in ("ticker", "market_cap", "listed_shares")
+                     if c in pit_listing.columns]
+    mktcap = pit_listing[mcap_keep_src + (["market"] if "market" in pit_listing.columns else [])].copy()
+
+    # 3. 60d avg trading value — pass PIT tickers explicitly so the function
+    # does not fall back to FDR-current via its `tickers=None` branch.
+    pit_tickers = listing["ticker"].astype(str).tolist()
+    avg_val = compute_avg_trading_value_60d(rd, lookback_days=60, tickers=pit_tickers)
+
+    # 4. Listed months (PIT-correct from kr_pit_universe)
+    listed = compute_listed_months(rd, pit_tickers)
 
     # 5. Merge — mcap fields from mktcap only
     mcap_keep = [c for c in ("ticker", "market_cap", "listed_shares")

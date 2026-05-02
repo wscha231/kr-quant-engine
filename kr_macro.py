@@ -13,8 +13,30 @@ Public API:
   build_macro_panel(start, end, refresh_days=7) -> DataFrame[date, <signals>]
   load_or_build_macro_panel(cfg) -> DataFrame                    (cached)
   get_macro_snapshot(panel, as_of) -> dict[col, value]           (PIT lookup)
+  get_macro_snapshot_pit(panel, as_of) -> dict                   (PIT + pub-lag)
 
 Caching: feature_store/macro_panel_<start>_<end>_<version>.parquet
+
+PIT publication lags (Phase C1, 2026-05-02)
+-------------------------------------------
+BOK / KOSIS macro series are NOT available in real time. A backtest must use
+each series only after its public release date. PUBLICATION_LAG_DAYS captures
+the typical days between observation period-end and public release. When
+looking up the macro snapshot at rebalance_date `t`, each series
+contributes its most recent value whose period-end + lag <= t.
+
+Default lags (calibrated on BOK + KOSIS release schedules, 2024-2026):
+  bok_base_rate          0   (decision-day announcement)
+  ktb_*_yield            0   (end-of-day market data)
+  usd_krw                0   (end-of-day market data)
+  kr_pmi                 1   (released 1st business day of next month)
+  kr_industrial_prod     30  (released ~30 days after period end)
+  kr_export_yoy          5   (released ~1st-5th of next month)
+  consumer_sentiment     20  (released ~25th of survey month)
+  business_sentiment     25  (released end of month for that month)
+  household_loans        15  (released ~15 days after month end)
+  us_10y / us_2y         0   (FRED daily)
+  vix / dxy / wti        0   (market data, daily)
 """
 from __future__ import annotations
 
@@ -36,6 +58,40 @@ from kr_config import (
     PHASE3_MACRO_COLUMNS,
 )
 from kr_helpers import log
+
+
+# ---------------------------------------------------------------------------
+# Publication lag (days) per macro series — see module docstring for sources
+# ---------------------------------------------------------------------------
+# Keyed by the standardized column name (post add_derived_macro_signals rename).
+# Series not in this map default to 0 (assumed real-time).
+PUBLICATION_LAG_DAYS = {
+    # BOK / KOSIS
+    "macro_bok_base_rate":          0,
+    "macro_bok_rate_change_60d":    0,
+    "macro_ktb_3y_yield":           0,
+    "macro_ktb_10y_yield":          0,
+    "macro_ktb_10y_3y_spread":      0,
+    "macro_usd_krw":                0,
+    "macro_usd_krw_zscore_60d":     0,
+    "macro_usd_krw_change_20d":     0,
+    "macro_kr_pmi":                 1,
+    "macro_kr_pmi_diffusion":       1,
+    "macro_consumer_sentiment":     20,
+    "macro_business_sentiment":     25,
+    "macro_kr_industrial_prod":     30,
+    "macro_export_yoy":             5,
+    "macro_export_yoy_3m_avg":      5,
+    # Global (FRED + yfinance) — all daily, near-real-time
+    "macro_us_10y":                 0,
+    "macro_us_2y":                  0,
+    "macro_us_10y_2y_spread":       0,
+    "macro_dxy":                    0,
+    "macro_dxy_zscore_60d":         0,
+    "macro_vix":                    0,
+    "macro_wti_close":              0,
+    "macro_wti_zscore_60d":         0,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +429,11 @@ def load_or_build_macro_panel(
 # 6. PIT snapshot lookup
 # ---------------------------------------------------------------------------
 def get_macro_snapshot(panel: pd.DataFrame, as_of: pd.Timestamp) -> dict:
-    """Return latest macro values at-or-before as_of.
+    """Return latest macro values at-or-before as_of (legacy, no pub-lag).
+
+    DEPRECATED for backtest use — does NOT account for publication lag.
+    Kept for backwards compatibility. Prefer get_macro_snapshot_pit which
+    enforces per-series publication lag.
 
     All PHASE3_MACRO_COLUMNS keys present (NaN if no data).
     """
@@ -388,6 +448,51 @@ def get_macro_snapshot(panel: pd.DataFrame, as_of: pd.Timestamp) -> dict:
         if col in latest.index:
             v = latest[col]
             out[col] = float(v) if pd.notna(v) else np.nan
+    return out
+
+
+def get_macro_snapshot_pit(
+    panel: pd.DataFrame,
+    as_of: pd.Timestamp,
+    publication_lag_days: Optional[dict] = None,
+) -> dict:
+    """PIT-correct macro snapshot accounting for per-series publication lag.
+
+    For each series, the most recent value whose `date + lag <= as_of` is
+    returned. This prevents look-ahead from monthly KR macro series (PMI,
+    industrial production, etc.) being read at observation-period-end before
+    they were actually released.
+
+    Args:
+        panel: macro panel (date, signals).
+        as_of: rebalance date.
+        publication_lag_days: optional override of PUBLICATION_LAG_DAYS.
+
+    Returns:
+        dict keyed by PHASE3_MACRO_COLUMNS. Missing series → NaN.
+    """
+    lags = publication_lag_days if publication_lag_days is not None else PUBLICATION_LAG_DAYS
+    out = {col: np.nan for col in PHASE3_MACRO_COLUMNS}
+    if panel.empty or "date" not in panel.columns:
+        return out
+
+    panel_sorted = panel.sort_values("date")
+    as_of_ts = pd.Timestamp(as_of).normalize()
+
+    for col in PHASE3_MACRO_COLUMNS:
+        if col not in panel_sorted.columns:
+            continue
+        lag = int(lags.get(col, 0))
+        # Effective cutoff: data observation date <= as_of - lag
+        cutoff = as_of_ts - pd.Timedelta(days=lag)
+        sub = panel_sorted[
+            (panel_sorted["date"] <= cutoff) & panel_sorted[col].notna()
+        ]
+        if sub.empty:
+            continue
+        v = sub.iloc[-1][col]
+        if pd.notna(v):
+            out[col] = float(v)
     return out
 
 
