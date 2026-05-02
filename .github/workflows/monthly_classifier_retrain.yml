@@ -38,9 +38,11 @@ jobs:
       - name: Sync caches from GDrive
         if: ${{ env.RCLONE_CFG_TEXT != '' }}
         run: |
-          mkdir -p data/cache_pykrx data/cache_dart data/feature_store data/models data/data_pit data/outputs
+          # classifier retrain only needs feature_store + models (not raw cache_pykrx)
+          mkdir -p data/cache_dart data/feature_store data/models data/data_pit data/outputs
           rclone copy gdrive:kr_quant_engine/feature_store data/feature_store -P || true
           rclone copy gdrive:kr_quant_engine/models data/models -P || true
+          rclone copy gdrive:kr_quant_engine/data_pit data/data_pit -P || true
 
       - name: Retrain classifier
         run: python tools/run_classifier_retrain.py --n-folds 5 --purged --embargo-months 9

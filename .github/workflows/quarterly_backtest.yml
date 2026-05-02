@@ -38,11 +38,14 @@ jobs:
       - name: Sync caches from GDrive
         if: ${{ env.RCLONE_CFG_TEXT != '' }}
         run: |
-          mkdir -p data/cache_pykrx data/cache_dart data/cache_macro data/feature_store data/models data/data_pit data/outputs
-          rclone copy gdrive:kr_quant_engine/cache_pykrx data/cache_pykrx -P || true
+          # Skip cache_pykrx (798 MiB) — see monthly_picks.yml for rationale.
+          mkdir -p data/cache_dart data/cache_macro data/cache_misc data/feature_store data/models data/data_pit data/outputs
+          rclone copy gdrive:kr_quant_engine/data_pit data/data_pit -P || true
+          rclone copy gdrive:kr_quant_engine/cache_misc data/cache_misc -P || true
+          rclone copy gdrive:kr_quant_engine/cache_macro data/cache_macro -P || true
+          rclone copy gdrive:kr_quant_engine/cache_dart data/cache_dart -P || true
           rclone copy gdrive:kr_quant_engine/feature_store data/feature_store -P || true
           rclone copy gdrive:kr_quant_engine/models data/models -P || true
-          rclone copy gdrive:kr_quant_engine/data_pit data/data_pit -P || true
 
       - name: Run quarterly backtest
         run: python tools/run_quarterly_backtest.py --top-n 20 --weighting equal

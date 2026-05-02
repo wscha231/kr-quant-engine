@@ -301,6 +301,43 @@ def invalidate_pit_caches() -> None:
 # ---------------------------------------------------------------------------
 # PIT lookups
 # ---------------------------------------------------------------------------
+def _fetch_listing_from_historical_mcap(
+    rd: pd.Timestamp,
+    market: str = "ALL",
+) -> pd.DataFrame:
+    """Lightweight PIT listing source using only historical_mcap.parquet.
+
+    For deployment on slim runners (GitHub Actions) we want to avoid
+    syncing the full cache_pykrx folder (~800 MiB). The pre-built
+    historical_mcap panel contains the same per-ticker per-snapshot mcap
+    rows the cache_pykrx scan would have produced, so we can use it
+    directly to answer fetch_listing_at_date without touching cache_pykrx.
+
+    Returns columns: ticker, market, market_cap, listed_shares,
+    snapshot_date, rebalance_date. Empty DataFrame when historical_mcap
+    is missing or has no observation at-or-before rd.
+    """
+    panel = load_historical_mcap(rebuild_if_missing=False)
+    if panel.empty or "snapshot_date" not in panel.columns:
+        return pd.DataFrame()
+    eligible_dates = panel["snapshot_date"][panel["snapshot_date"] <= rd]
+    if eligible_dates.empty:
+        return pd.DataFrame()
+    snap_dt = eligible_dates.max()
+    sub = panel[panel["snapshot_date"] == snap_dt].copy()
+    if sub.empty:
+        return pd.DataFrame()
+    sub["ticker"] = sub["ticker"].astype(str).str.zfill(6)
+    if "market" in sub.columns and market.upper() != "ALL":
+        sub = sub[sub["market"].str.upper().isin([market.upper()])].copy()
+    keep = [c for c in ("ticker", "market", "market_cap", "listed_shares")
+            if c in sub.columns]
+    sub = sub[keep].copy()
+    sub["snapshot_date"] = snap_dt
+    sub["rebalance_date"] = rd
+    return sub
+
+
 def fetch_listing_at_date(
     rebalance_date: str | pd.Timestamp,
     market: str = "ALL",
@@ -310,60 +347,62 @@ def fetch_listing_at_date(
 
     Returns columns: ticker, market, market_cap, listed_shares, name (optional).
 
-    Strategy:
-        1. Find the most recent mktcap_ALL_*.parquet at-or-before rebalance_date.
-        2. Filter to requested market(s).
-        3. Optionally enrich with `name` from DART corp_to_ticker_map (PIT-safe
-           since corp_name is stable; falls back to listing snapshot only if
-           no DART corp_code data -- which is itself current-leaking but only
-           for the cosmetic name field, not for membership / mcap).
+    Strategy (Phase D+ optimization, 2026-05-02):
+        1. Try historical_mcap.parquet first (single 1.8 MiB file). Avoids
+           the 800 MiB cache_pykrx folder so this works on slim deployers.
+        2. If historical_mcap is empty or missing, fall back to scanning
+           cache_pykrx/mktcap_ALL_*.parquet files.
+        3. Filter to requested market(s).
+        4. Optionally enrich with `name` from DART corp_to_ticker_map.
 
     Returns EMPTY DataFrame if no snapshot exists at-or-before rebalance_date.
     Caller MUST treat empty as a hard error (no FDR fallback).
     """
     rd = pd.Timestamp(rebalance_date).normalize()
-    files = _scan_cached_mktcap_files()
-    if not files:
-        log(f"[pit] fetch_listing_at_date({rd.date()}) -- no cached snapshots",
-            level="WARN")
-        return pd.DataFrame()
 
-    # Most recent snapshot at-or-before rd
-    eligible = [(d, p) for d, p in files if d <= rd]
-    if not eligible:
-        log(f"[pit] fetch_listing_at_date({rd.date()}) -- earliest snapshot is "
-            f"{files[0][0].date()}, requested date is too early",
-            level="WARN")
-        return pd.DataFrame()
-    snap_dt, snap_path = eligible[-1]
+    # Fast path: derived historical_mcap panel
+    df = _fetch_listing_from_historical_mcap(rd, market=market)
+    source = "historical_mcap"
 
-    try:
-        df = pd.read_parquet(snap_path)
-    except Exception as e:
-        log(f"[pit] read fail {snap_path.name}: {e}", level="WARN")
-        return pd.DataFrame()
+    # Fallback: raw cache_pykrx scan (legacy path, used during PIT bootstrap)
     if df.empty:
-        return pd.DataFrame()
-    df = df.copy()
-    df["ticker"] = df["ticker"].astype(str).str.zfill(6)
-
-    # Filter by market
-    if "market" in df.columns and market.upper() != "ALL":
-        markets = [market.upper()]
-        df = df[df["market"].str.upper().isin(markets)].copy()
-
-    keep = [c for c in ("ticker", "market", "market_cap", "listed_shares",
-                          "volume", "value")
-            if c in df.columns]
-    df = df[keep]
-    df["snapshot_date"] = snap_dt
-    df["rebalance_date"] = rd
+        files = _scan_cached_mktcap_files()
+        if not files:
+            log(f"[pit] fetch_listing_at_date({rd.date()}) -- "
+                f"no historical_mcap and no cached snapshots",
+                level="WARN")
+            return pd.DataFrame()
+        eligible = [(d, p) for d, p in files if d <= rd]
+        if not eligible:
+            log(f"[pit] fetch_listing_at_date({rd.date()}) -- earliest "
+                f"snapshot is {files[0][0].date()}, requested date too early",
+                level="WARN")
+            return pd.DataFrame()
+        snap_dt, snap_path = eligible[-1]
+        try:
+            df = pd.read_parquet(snap_path)
+        except Exception as e:
+            log(f"[pit] read fail {snap_path.name}: {e}", level="WARN")
+            return pd.DataFrame()
+        if df.empty:
+            return pd.DataFrame()
+        df = df.copy()
+        df["ticker"] = df["ticker"].astype(str).str.zfill(6)
+        if "market" in df.columns and market.upper() != "ALL":
+            df = df[df["market"].str.upper().isin([market.upper()])].copy()
+        keep = [c for c in ("ticker", "market", "market_cap", "listed_shares",
+                              "volume", "value")
+                if c in df.columns]
+        df = df[keep]
+        df["snapshot_date"] = snap_dt
+        df["rebalance_date"] = rd
+        source = f"cache_pykrx/{snap_path.name}"
 
     if name_lookup:
         df = _enrich_with_name(df)
 
-    log(f"[pit] fetch_listing_at_date({rd.date()}) -> {len(df)} tickers from "
-        f"{snap_path.name}")
+    log(f"[pit] fetch_listing_at_date({rd.date()}) -> {len(df)} tickers "
+        f"from {source}")
     return df
 
 
