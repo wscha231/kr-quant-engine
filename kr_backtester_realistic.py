@@ -110,6 +110,107 @@ def generate_oos_picks(
     return out
 
 
+def generate_oos_picks_purged_3sleeve(
+    labeled_panel: pd.DataFrame,
+    feature_cols: list[str],
+    n_folds: int = 5,
+    embargo_months: int = 9,
+    k_per_month: int = 40,
+    cb_params: Optional[dict] = None,
+) -> pd.DataFrame:
+    """Phase C3 OOS picks via 3 separate purged-walk-forward models.
+
+    Three labels (kr_multibagger_classifier):
+      is_pre_entry     [-6m, -1m] from surge_start
+      is_continuation  [0, +3m]   from surge_start
+      is_risk          forward 1m return <= -20%
+
+    Trains a CatBoost binary classifier per label inside each purged fold
+    (embargo_months drops the train tail that overlaps the test fold's label
+    window). Output: rebalance_date, ticker [, name, market_cap],
+    p_pre_entry, p_continuation, p_risk, p_combined, rank_in_month, fold_id.
+
+    p_combined = 0.5 * p_pre_entry + 0.5 * p_continuation, scaled by
+    (1 - p_risk). This single composite is the default ranking signal so the
+    realistic backtester remains compatible with picks lacking sleeve flags.
+    """
+    from kr_multibagger_classifier import walk_forward_splits_purged
+    try:
+        from catboost import CatBoostClassifier
+    except ImportError:
+        log("[oos-3s] catboost not installed", level="ERROR")
+        return pd.DataFrame()
+
+    if labeled_panel.empty:
+        return pd.DataFrame()
+    label_cols = ("is_pre_entry", "is_continuation", "is_risk")
+    have = [c for c in label_cols if c in labeled_panel.columns]
+    if not have:
+        return pd.DataFrame()
+
+    cb_default = {
+        "iterations": 400, "learning_rate": 0.05, "depth": 6,
+        "loss_function": "Logloss", "eval_metric": "AUC", "verbose": 0,
+        "random_seed": 42, "auto_class_weights": "Balanced",
+    }
+    cb_params = {**cb_default, **(cb_params or {})}
+
+    splits = walk_forward_splits_purged(
+        labeled_panel, n_folds=n_folds, embargo_months=embargo_months,
+    )
+    if not splits:
+        log(f"[oos-3s] insufficient panel for purged splits "
+            f"(n_folds={n_folds}, embargo={embargo_months}m)", level="WARN")
+        return pd.DataFrame()
+
+    log(f"[oos-3s] {len(splits)} purged folds, training {len(have)} models each")
+    panel = labeled_panel.reset_index(drop=True)
+    fold_results = []
+
+    for k, (tr_idx, te_idx) in enumerate(splits, 1):
+        X_tr = panel.iloc[tr_idx][feature_cols].fillna(0).values
+        X_te = panel.iloc[te_idx][feature_cols].fillna(0).values
+        sub = panel.iloc[te_idx][["rebalance_date", "ticker"]].copy()
+        if "name" in panel.columns:
+            sub["name"] = panel.iloc[te_idx]["name"].values
+        if "market_cap" in panel.columns:
+            sub["market_cap"] = panel.iloc[te_idx]["market_cap"].values
+
+        for label in have:
+            y_tr = panel.iloc[tr_idx][label].values.astype(int)
+            if y_tr.sum() < 5:
+                log(f"[oos-3s] fold {k} label {label}: <5 positives, skip",
+                    level="WARN")
+                sub[f"p_{label.replace('is_','')}"] = 0.0
+                continue
+            model = CatBoostClassifier(**cb_params)
+            model.fit(X_tr, y_tr)
+            proba = model.predict_proba(X_te)[:, 1]
+            sub[f"p_{label.replace('is_','')}"] = proba
+
+        sub["fold_id"] = k
+        fold_results.append(sub)
+
+    if not fold_results:
+        return pd.DataFrame()
+
+    out = pd.concat(fold_results, ignore_index=True)
+    p_pre = out.get("p_pre_entry", pd.Series(0.0, index=out.index)).fillna(0)
+    p_cont = out.get("p_continuation", pd.Series(0.0, index=out.index)).fillna(0)
+    p_risk = out.get("p_risk", pd.Series(0.0, index=out.index)).fillna(0)
+    out["p_combined"] = (0.5 * p_pre + 0.5 * p_cont) * (1.0 - p_risk)
+    # Backwards-compat: realistic backtester reads `p_pre_surge` for ranking.
+    out["p_pre_surge"] = out["p_combined"]
+    out = out.sort_values(["rebalance_date", "p_combined"],
+                          ascending=[True, False])
+    out["rank_in_month"] = out.groupby("rebalance_date")["p_combined"].rank(
+        method="first", ascending=False).astype(int)
+    out = out[out["rank_in_month"] <= k_per_month].reset_index(drop=True)
+    log(f"[oos-3s] picks: {len(out)} rows × "
+        f"{out['rebalance_date'].nunique()} months")
+    return out
+
+
 # ===========================================================================
 # 2. Realistic cost model (mcap-tiered slippage)
 # ===========================================================================
@@ -243,6 +344,10 @@ def run_realistic_backtest(
     fetch_macro_for_vkospi: bool = False,
     use_governance_overlay: bool = True,    # Phase C2: hard veto + weight cap
     governance_penalty_factor: float = 0.35,  # adjusted_score = p * (1 - λ*risk)
+    use_sleeve_separation: bool = False,    # Phase C3: 3-sleeve capital split
+    sleeve_pre_entry_pct: float = 0.40,
+    sleeve_continuation_pct: float = 0.40,
+    sleeve_defensive_pct: float = 0.20,
     verbose: bool = True,
 ) -> dict:
     """End-to-end realistic 1억 backtest with mcap-tiered cost + risk mgmt.
@@ -344,7 +449,32 @@ def run_realistic_backtest(
                 log(f"[gov] {pd.Timestamp(rd).date()}: vetoed "
                     f"{n_before - n_after}/{n_before} tickers")
 
-        sel = rd_pool[rd_pool["rank_in_month"] <= top_n].copy()
+        # Phase C3 sleeve separation: when enabled and the picks DataFrame
+        # has p_pre_entry / p_continuation columns, partition top_n into
+        # equal halves selected by each sleeve's score. The defensive sleeve
+        # is realised by reducing target_invested by sleeve_defensive_pct
+        # (cash floor) below.
+        sleeve_active = (
+            use_sleeve_separation
+            and "p_pre_entry" in rd_pool.columns
+            and "p_continuation" in rd_pool.columns
+        )
+        if sleeve_active:
+            n_a = max(1, int(round(top_n * sleeve_pre_entry_pct
+                                     / (sleeve_pre_entry_pct + sleeve_continuation_pct))))
+            n_b = max(1, top_n - n_a)
+            pool_a = (rd_pool.sort_values("p_pre_entry", ascending=False)
+                       .head(n_a).copy())
+            pool_a["sleeve"] = "pre_entry"
+            remaining = rd_pool[~rd_pool["ticker"].isin(pool_a["ticker"])]
+            pool_b = (remaining.sort_values("p_continuation", ascending=False)
+                       .head(n_b).copy())
+            pool_b["sleeve"] = "continuation"
+            sel = pd.concat([pool_a, pool_b], ignore_index=True)
+            # Apply defensive cash floor on top of any DD/VKOSPI-driven scale
+            target_invested = target_invested * (1.0 - sleeve_defensive_pct)
+        else:
+            sel = rd_pool[rd_pool["rank_in_month"] <= top_n].copy()
         if sel.empty:
             monthly_log.append({"rd": rd, "capital": capital, "cash": cash,
                                   "n_holdings": len(holdings), "dd": current_dd,
