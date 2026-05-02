@@ -241,13 +241,18 @@ def run_realistic_backtest(
     use_drawdown_breaker: bool = True,
     use_vkospi_guard: bool = True,
     fetch_macro_for_vkospi: bool = False,
+    use_governance_overlay: bool = True,    # Phase C2: hard veto + weight cap
+    governance_penalty_factor: float = 0.35,  # adjusted_score = p * (1 - λ*risk)
     verbose: bool = True,
 ) -> dict:
     """End-to-end realistic 1억 backtest with mcap-tiered cost + risk mgmt.
 
     Args:
         picks: DataFrame with rebalance_date, ticker, p_pre_surge,
-               rank_in_month [, market_cap].
+               rank_in_month [, market_cap]. Optional governance columns:
+               governance_risk_score, governance_hard_veto_flag — when
+               present and use_governance_overlay=True, picks are filtered
+               by veto and re-ranked / weight-capped.
 
     Returns:
         dict with metrics + monthly equity curve + trades log.
@@ -314,8 +319,32 @@ def run_realistic_backtest(
         target_invested = capital * sleeve_scale
 
         # 4. Select picks at this rd
-        sel = picks[(picks["rebalance_date"] == rd)
-                     & (picks["rank_in_month"] <= top_n)].copy()
+        # Phase C2 governance overlay: veto hard-flagged tickers and
+        # re-rank by adjusted_score = p * (1 - penalty * risk). When the
+        # picks DataFrame lacks governance columns we fall back to plain
+        # rank_in_month behaviour.
+        rd_pool = picks[picks["rebalance_date"] == rd].copy()
+        if (use_governance_overlay
+                and "governance_hard_veto_flag" in rd_pool.columns):
+            n_before = len(rd_pool)
+            rd_pool = rd_pool[
+                rd_pool["governance_hard_veto_flag"].fillna(0).astype(float) < 0.5
+            ].copy()
+            if "governance_risk_score" in rd_pool.columns:
+                risk = rd_pool["governance_risk_score"].fillna(0).astype(float)
+                rd_pool["adjusted_score"] = (
+                    rd_pool["p_pre_surge"].fillna(0).astype(float)
+                    * (1.0 - governance_penalty_factor * risk)
+                )
+                rd_pool = rd_pool.sort_values("adjusted_score", ascending=False)
+                rd_pool["rank_in_month_adj"] = range(1, len(rd_pool) + 1)
+                rd_pool["rank_in_month"] = rd_pool["rank_in_month_adj"]
+            n_after = len(rd_pool)
+            if n_before != n_after:
+                log(f"[gov] {pd.Timestamp(rd).date()}: vetoed "
+                    f"{n_before - n_after}/{n_before} tickers")
+
+        sel = rd_pool[rd_pool["rank_in_month"] <= top_n].copy()
         if sel.empty:
             monthly_log.append({"rd": rd, "capital": capital, "cash": cash,
                                   "n_holdings": len(holdings), "dd": current_dd,
@@ -337,6 +366,17 @@ def run_realistic_backtest(
             w = s / s.sum() if s.sum() > 0 else pd.Series(1.0/len(sel), index=sel.index)
             w = w.clip(upper=weight_cap)
             sel["weight"] = w / w.sum()
+        # Phase C2: per-ticker governance weight cap (tier-based) — applied
+        # only when governance columns present.
+        if use_governance_overlay and "governance_risk_score" in sel.columns:
+            from kr_governance import governance_weight_cap as _gov_cap
+            risk_arr = sel["governance_risk_score"].fillna(0).astype(float)
+            sel["weight"] = [
+                _gov_cap(r, w) for r, w in zip(risk_arr, sel["weight"].astype(float))
+            ]
+            tot = float(sel["weight"].sum())
+            if tot > 0:
+                sel["weight"] = sel["weight"] / tot
         weights = dict(zip(sel["ticker"].astype(str).str.zfill(6), sel["weight"]))
 
         # 6. Get prices at rd — for BOTH new picks AND old holdings (critical

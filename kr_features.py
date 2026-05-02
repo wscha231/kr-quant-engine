@@ -1152,6 +1152,11 @@ def add_universe_features(
         df, rebalance_date, event_panel, lookback_days=event_lookback_days,
     )
 
+    # P2 Governance overlay (Phase C2 — risk side, complements DART events)
+    # Always on when event_panel present; zero-fills 11 columns otherwise.
+    from kr_governance import add_governance_signals
+    df = add_governance_signals(df, rebalance_date, event_panel=event_panel)
+
     # P2.5: Flow signals (default OFF)
     df = add_flow_signals(
         df, rebalance_date,

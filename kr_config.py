@@ -211,11 +211,29 @@ PHASE2_THEME_SAFETY_COLUMNS = (
     "overheating_avoidance_flag",
 )
 
+# P2 governance risk overlay (Phase C2, 2026-05-02 — kr_governance.py)
+# Korean-specific risk side: dilution, treasury sale, related-party leakage,
+# spinoff/물적분할, succession, capital reduction. See kr_governance docs.
+PHASE2_GOVERNANCE_COLUMNS = (
+    "governance_risk_score",                    # aggregate composite [0, 1]
+    "governance_quality_score",                  # quality side [0, 1]
+    "owner_dilution_risk_score",                 # 유상증자 + CB + BW
+    "treasury_sale_overhang_score",              # 자사주 처분
+    "related_party_leakage_score",               # 특수관계자 — placeholder for C2_b
+    "succession_risk_score",                     # 승계 proxy
+    "minority_shareholder_discount_score",       # composite tail
+    "spinoff_listing_risk_score",                # 물적분할 + 자회사 상장
+    "capital_allocation_quality_score",          # 자사주 buyback + 배당
+    "governance_watchlist_flag",                 # bool [0, 1]
+    "governance_hard_veto_flag",                 # bool [0, 1]
+)
+
 # Aggregated P2 column whitelist (for keep_cols + hard_sanitize)
 PHASE2_KOREA_ALPHA_COLUMNS = (
     PHASE2_DART_EVENT_COLUMNS
     + PHASE2_FLOW_COLUMNS
     + PHASE2_THEME_SAFETY_COLUMNS
+    + PHASE2_GOVERNANCE_COLUMNS
 )
 
 # P2.6 Derivatives sentiment (kr_derivatives.py): VKOSPI + foreign futures

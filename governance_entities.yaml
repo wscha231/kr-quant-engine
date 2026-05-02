@@ -1,0 +1,222 @@
+# governance_entities.yaml — Korean chaebol & governance-watch registry
+#
+# Phase C2 — used by kr_governance.add_governance_signals to flag
+# tickers whose controlling shareholder structure increases governance
+# risk. Initial registry covers 15 major groups; expand via:
+#
+# 1) Add a `groups: <key>:` block with required fields:
+#    - listed_tickers: 6-digit ticker list (KOSPI/KOSDAQ)
+#    - controlling_family: list of identifying owner names (optional)
+#    - private_affiliates: list of unlisted subsidiaries (for related-party
+#      detection — placeholder until P_C2_b wired)
+#    - watch_keywords: list of keywords to trigger DART monitoring
+#    - risk_override: optional structured fields:
+#         base_governance_risk: float in [0, 1] (prior, blended into score)
+#
+# 2) Reload via `from kr_governance import load_governance_entities;
+#                load_governance_entities()`
+#
+# Sources:
+#   - 대규모 기업집단 지정 (KFTC, 2024)
+#   - 기업집단 포털 (KFTC opc.go.kr)
+#
+# This list is intentionally conservative — only confirmed major
+# chaebols / families. Smaller mid-cap controlled groups (with reform-
+# driven discount) can be added incrementally.
+
+groups:
+  samsung_group:
+    listed_tickers:
+      - "005930"   # 삼성전자
+      - "005935"   # 삼성전자우
+      - "207940"   # 삼성바이오로직스
+      - "006400"   # 삼성SDI
+      - "028260"   # 삼성물산
+      - "032830"   # 삼성생명
+      - "010140"   # 삼성중공업
+      - "009150"   # 삼성전기
+      - "018260"   # 삼성에스디에스
+      - "029780"   # 삼성카드
+      - "000810"   # 삼성화재
+      - "001360"   # 삼성제약
+      - "010060"   # OCI홀딩스 (구 삼성정밀화학 분사)
+    controlling_family: ["이재용", "이부진", "이서현"]
+    watch_keywords: ["승계", "물적분할", "제3자배정", "자사주처분"]
+    risk_override:
+      base_governance_risk: 0.10
+
+  sk_group:
+    listed_tickers:
+      - "000660"   # SK하이닉스
+      - "034730"   # SK
+      - "017670"   # SK텔레콤
+      - "096770"   # SK이노베이션
+      - "326030"   # SK바이오팜
+      - "285130"   # SK케미칼
+      - "011790"   # SK디스커버리
+      - "036490"   # SK스퀘어
+      - "402340"   # SK스퀘어 (관련)
+    controlling_family: ["최태원", "최기원"]
+    watch_keywords: ["승계", "물적분할", "지주사", "자회사상장"]
+    risk_override:
+      base_governance_risk: 0.20    # 물적분할 이력 다수 → premium 상향
+
+  hyundai_motor_group:
+    listed_tickers:
+      - "005380"   # 현대자동차
+      - "000270"   # 기아
+      - "012330"   # 현대모비스
+      - "086280"   # 현대글로비스
+      - "010620"   # 현대미포조선
+      - "005490"   # POSCO홀딩스 (지분 관계 — 약한 관련)
+      - "011210"   # 현대위아
+      - "017800"   # 현대엘리베이터 (별도 그룹이지만 명목상 관련)
+      - "267250"   # HD현대 (구 현대중공업지주)
+    controlling_family: ["정의선", "정몽구"]
+    watch_keywords: ["승계", "물적분할", "자사주", "지배구조개선"]
+    risk_override:
+      base_governance_risk: 0.15
+
+  lg_group:
+    listed_tickers:
+      - "003550"   # LG (지주)
+      - "066570"   # LG전자
+      - "051910"   # LG화학
+      - "373220"   # LG에너지솔루션  (LG화학 물적분할 — 모회사 -30%)
+      - "032640"   # LG유플러스
+      - "108860"   # 셀바스AI (관련 약함)
+      - "034220"   # LG디스플레이
+      - "011170"   # 롯데케미칼 (별도 그룹)
+      - "018880"   # 한온시스템 (구 한라공조)
+    controlling_family: ["구광모", "구본준"]
+    watch_keywords: ["승계", "물적분할"]
+    risk_override:
+      base_governance_risk: 0.20    # LGES 사례 강한 학습
+
+  hanwha_group:
+    listed_tickers:
+      - "009830"   # 한화솔루션
+      - "012450"   # 한화에어로스페이스
+      - "000880"   # 한화
+      - "000370"   # 한화손해보험
+      - "088350"   # 한화생명
+      - "377300"   # 한화시스템
+    controlling_family: ["김승연", "김동관", "김동원", "김동선"]
+    watch_keywords: ["승계", "방위산업", "에너지"]
+    risk_override:
+      base_governance_risk: 0.15
+
+  lotte_group:
+    listed_tickers:
+      - "004990"   # 롯데지주
+      - "011170"   # 롯데케미칼
+      - "023530"   # 롯데쇼핑
+      - "005300"   # 롯데칠성음료
+      - "280360"   # 롯데웰푸드
+      - "000400"   # 롯데손해보험
+      - "071840"   # 롯데하이마트
+    controlling_family: ["신동빈", "신동주"]
+    watch_keywords: ["승계", "지주사", "구조조정"]
+    risk_override:
+      base_governance_risk: 0.20
+
+  cj_group:
+    listed_tickers:
+      - "001040"   # CJ
+      - "097950"   # CJ제일제당
+      - "035760"   # CJ ENM
+      - "078930"   # GS (별도 그룹이지만 자주 언급)
+      - "000120"   # CJ대한통운
+      - "079160"   # CJ CGV
+    controlling_family: ["이재현", "이미경"]
+    watch_keywords: ["승계", "물적분할", "자사주"]
+    risk_override:
+      base_governance_risk: 0.15
+
+  doosan_group:
+    listed_tickers:
+      - "000150"   # 두산
+      - "034020"   # 두산에너빌리티
+      - "241560"   # 두산밥캣
+      - "298040"   # 효성중공업
+      - "042700"   # 한미반도체
+      - "454910"   # 두산로보틱스
+    controlling_family: ["박정원", "박지원"]
+    watch_keywords: ["분할합병", "구조조정", "승계"]
+    risk_override:
+      base_governance_risk: 0.25    # 두산밥캣-로보틱스 합병 이력
+
+  kakao_group:
+    listed_tickers:
+      - "035720"   # 카카오
+      - "323410"   # 카카오뱅크
+      - "377300"   # 카카오페이 (?)
+      - "293490"   # 카카오게임즈
+    controlling_family: ["김범수", "김상헌"]
+    watch_keywords: ["물적분할", "자회사상장", "수사"]
+    risk_override:
+      base_governance_risk: 0.40    # SM엔터, 자회사 상장 등
+
+  naver_group:
+    listed_tickers:
+      - "035420"   # NAVER
+    controlling_family: ["이해진"]
+    watch_keywords: ["사업분할", "자회사"]
+    risk_override:
+      base_governance_risk: 0.10
+
+  posco_group:
+    listed_tickers:
+      - "005490"   # POSCO홀딩스
+      - "047050"   # 포스코인터내셔널
+      - "003670"   # 포스코퓨처엠 (구 포스코케미칼)
+      - "058430"   # 포스코강판
+    controlling_family: []
+    watch_keywords: ["민영화", "포스코홀딩스 분할", "지배구조"]
+    risk_override:
+      base_governance_risk: 0.15
+
+  shinsegae_group:
+    listed_tickers:
+      - "004170"   # 신세계
+      - "139480"   # 이마트
+      - "031430"   # 신세계인터내셔날
+      - "012750"   # S1
+      - "035250"   # 강원랜드
+    controlling_family: ["이명희", "정용진", "정유경"]
+    watch_keywords: ["승계", "분할"]
+    risk_override:
+      base_governance_risk: 0.15
+
+  kb_financial:
+    listed_tickers:
+      - "105560"   # KB금융
+      - "024110"   # 기업은행
+      - "138040"   # 메리츠금융지주
+      - "086790"   # 하나금융지주
+      - "316140"   # 우리금융지주
+    controlling_family: []
+    watch_keywords: ["주주환원", "자사주소각"]
+    risk_override:
+      base_governance_risk: 0.05
+
+  kt_group:
+    listed_tickers:
+      - "030200"   # KT
+      - "058470"   # 리노공업 (관련 약함)
+      - "032560"   # 황금에스티
+    controlling_family: []
+    watch_keywords: ["민영화", "주주환원"]
+    risk_override:
+      base_governance_risk: 0.10
+
+  hd_hyundai_group:
+    listed_tickers:
+      - "267250"   # HD현대
+      - "329180"   # HD현대중공업
+      - "010140"   # 삼성중공업 (별도 그룹이지만 비교 대상)
+      - "457190"   # HD현대마린엔진
+    controlling_family: ["정몽준", "정기선"]
+    watch_keywords: ["승계", "물적분할", "조선"]
+    risk_override:
+      base_governance_risk: 0.20
