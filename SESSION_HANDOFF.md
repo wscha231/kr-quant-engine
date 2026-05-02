@@ -8,114 +8,283 @@
 
 ```
 1. 이 파일 (SESSION_HANDOFF.md) 읽기
-2. plan.md 읽기 (Phase C 계획 + 사용자 결정 옵션)
-3. research/ 5개 노트 read 가능 (선택, 필요시만):
-   - research/00_data_sources_audit/pit_survivorship_audit.md
-   - research/02_factor_zoo/institutional_methods_import_map.md
-   - research/03_korea_specific_signals/governance_risk_overlay_research.md
-   - research/06_walkforward_baselines/purged_oos_protocol.md
-   - research/08_deployment/github_actions_deployment_plan.md
-4. 사용자 질문: "Phase C 어느 옵션으로 진행?" (A/B/C/D)
+2. plan.md 읽기 (Phase C/D/E 로드맵)
+3. (선택) research/ 5개 노트
+4. 사용자 확인:
+   - Phase E (Paper trading) 진행 여부
+   - 또는 A/B 실험 (D1-D3 / A1-A6 / G0-G4) 즉시 실행 여부
+   - 또는 GDrive sync + GitHub Secrets 설정 후 첫 cron 실행
 ```
 
-**현재 Status (2026-04-30 마감)**: Phase A 완료, Phase B plan.md 작성 완료, **Phase C 사용자 승인 대기**.
+**현재 Status (2026-05-02)**: **Phase C 전체 완료 + Phase D 완료 (코드 사이드만)**.
+GitHub Actions secrets 설정 + 첫 cron 실행 = 사용자 액션 대기.
 
 ---
 
-## 마지막 큰 성과 (2026-04-30 21:30 KST)
+## 마지막 큰 성과 (2026-05-02)
 
-### 🏆 1억 5년 OOS Backtest CAGR 38.97% ★★★★
-
-```
-Best config: N=20 equal weight + DD breaker
-Seed:    100,000,000 KRW
-Final:   518,257,415 KRW (5.18배)
-CAGR:    +38.97%
-MDD:     -24.66%
-Sharpe:   1.350
-Years:    5.00 (60 months OOS)
-Trades:   1,777
-```
-
-**r1000 (US) reference보다 모든 지표 우수**:
-- CAGR: 33.40% → 38.97% (+5.6pp)
-- MDD: -25.29% → -24.66% (better)
-- Sharpe: 1.28 → 1.35 (+0.07)
-
-### 검증 chain (entire session)
+### 🏆 Phase C 완전 종료 (4 sub-phases)
 
 ```
-1. Universe 1,278 eligible (KOSPI+KOSDAQ filtered)
-2. Multibagger episodes 398 detected (205 quality-pass)
-   ├─ 사용자 예상 모두 검증: 에코프로 +1084%, HLB +613%, 알테오젠 +627%
-3. P_MB classifier AUC 0.80 (5-fold walk-forward)
-4. Pre-identified 효성중공업 +1219% (50개월 사전 detect)
-5. Sleeve sandbox: 71m +62pp / 12m OOS +38pp
-6. Realistic 1억 backtest:
-   - V2 N30 capped:    CAGR 33.55%, MDD -24%, Sharpe 1.25
-   - BEST N20 equal:   CAGR 38.97%, MDD -25%, Sharpe 1.35 ★
+post-c1 : PIT survivorship + macro publication-lag
+post-c2 : Korean governance risk overlay (15 chaebol groups)
+post-c3 : Purged walk-forward + 3-sleeve label / picks
+post-c4 : VKOSPI fetch + realized-vol fallback + PIT integration
 ```
 
-### 마지막 commits (GitHub: wscha231/kr-quant-engine)
+### Test 통과 현황 (regression-clean)
 
 ```
-4194810 Realistic 1eok backtester + OOS picks: CAGR 33.55%
-47b4a0b P_MB.3 sleeve backtest +38.34pp
-033bc7b KOSPI 500+KOSDAQ 100 P0 baseline +7.42pp
-50e03e1 SESSION_HANDOFF v3
-67570f1 P_MB.2 V1: AUC 0.80
-73a6200 P2.5 Naver flow scraper + multibagger episodes
-52c3716 FDR fallback for pykrx
-c64f29b 4-layer integration (macro/flow/derivatives/regime)
-aa8dc43 P2 events v2 + P3 technicals
-7e0d304 Initial commit
+44/44  smoke_test
+ 7/7   test_pit_universe        (Phase C1)
+ 8/8   test_governance          (Phase C2)
+ 8/8   test_walkforward         (Phase C3)
+ 5/5   test_vkospi              (Phase C4)
+-----
+72/72  TOTAL
 ```
+
+### Phase D — GitHub Actions deployment 완료 (코드 사이드)
+
+```
+.github/workflows/
+  smoke_test.yml                   (push hook)
+  monthly_picks.yml                (1st 04:00 KST cron)
+  quarterly_backtest.yml           (분기 1일 06:00 KST)
+  monthly_classifier_retrain.yml   (1st 02:00 KST cron)
+
+tools/
+  generate_monthly_picks.py        (CLI: PIT universe -> features -> classifier -> picks CSV)
+  run_quarterly_backtest.py        (CLI: realistic backtest -> JSON+CSV)
+  run_classifier_retrain.py        (CLI: walk-forward retrain -> .cbm + metrics)
+  build_pit_universe_history.py    (Phase C1, 이미 작성)
+
+streamlit_app.py                   (Streamlit Cloud entry; 자동 picks/backtest 표시)
+secrets.toml.example               (Streamlit Secrets 템플릿)
+requirements.txt                   (streamlit + lightgbm 추가)
+.gitignore                         (secrets.toml + data_pit 제외)
+```
+
+---
 
 ## Phase A 산출물 (2026-04-30 완료, read-only)
 
-5개 research notes 작성 + plan.md 작성. 사용자 두 개선안(Governance Risk Overlay + Codex Agent Instruction) 분석 통합:
-
 ```
-✅ research/00_data_sources_audit/pit_survivorship_audit.md
-   → 3 critical leakage paths (FDR current listing / current mcap / listed_months stub)
-   → Reported CAGR 38.97% 중 +5-9pp inflated 추정
-
-✅ research/02_factor_zoo/institutional_methods_import_map.md
-   → AQR / Two Sigma / Renaissance / Citadel / O'Neil-Minervini / Kaggle 6 패턴 매핑
-   → Top 6 우선순위 도입 plan
-
-✅ research/03_korea_specific_signals/governance_risk_overlay_research.md
-   → 7 governance risk types
-   → 11 PHASE2_GOVERNANCE_COLUMNS 설계
-   → Weight cap 추천 (vs hard veto / soft penalty)
-
-✅ research/06_walkforward_baselines/purged_oos_protocol.md
-   → walk_forward_splits embargo 미적용 진단
-   → 3 separate models 설계 (pre-entry / continuation / risk)
-
-✅ research/08_deployment/github_actions_deployment_plan.md
-   → 4 cron workflows (smoke / monthly_picks / quarterly_backtest / classifier_retrain)
-   → Streamlit Cloud + GDrive(rclone) + Slack
-   → 비용 $0/월
-
-✅ plan.md
-   → Phase C1-C4 (3-4주) + Phase D (3일) + Phase E (1-2개월)
-   → A/B 실험 설계 (D1-D3 / A1-A6 / G0-G4)
-   → Final ship gate
+research/00_data_sources_audit/pit_survivorship_audit.md             ✅
+research/02_factor_zoo/institutional_methods_import_map.md           ✅
+research/03_korea_specific_signals/governance_risk_overlay_research.md ✅
+research/06_walkforward_baselines/purged_oos_protocol.md             ✅
+research/08_deployment/github_actions_deployment_plan.md             ✅
+plan.md                                                               ✅
 ```
 
-## Phase C 사용자 결정 대기 (plan.md 참조)
+---
+
+## Phase C 작업 요약
+
+### C1 — PIT survivorship fix (2026-05-02 commit 852085b)
 
 ```
-Option A — 전체 Phase C 자동 (4주, 추천)
-Option B — research notes 검토 먼저
-Option C — Phase 부분 선택 (C1만 / C2만 / C3만)
-Option D — 즉시 GitHub deployment (현재 in-sample biased state로)
+kr_pit_universe.py                   (NEW, 360 lines)
+  build_listed_history_from_cache    -- 108 mktcap snapshot 스캔
+  build_historical_mcap_panel
+  fetch_listing_at_date               -- PIT-strict, no FDR-current 폴백
+  compute_listed_months_pit
+  get_mcap_at_date
+
+kr_universe.py                       (modified)
+  build_universe_snapshot             -- PIT path 통합
+  compute_listed_months               -- 999 stub 제거
+
+kr_macro.py                          (modified)
+  PUBLICATION_LAG_DAYS                -- BOK/KOSIS pub-lag map
+  get_macro_snapshot_pit              -- per-series cutoff
+
+tools/build_pit_universe_history.py  (NEW)
+tests/test_pit_universe.py           (NEW, 7 tests)
+
+artifacts:
+  data_pit/listed_history.parquet    (3,299 tickers)
+  data_pit/historical_mcap.parquet   (287,910 rows)
 ```
 
-**다음 세션 첫 액션**: 사용자에게 Option 확인 후 진행.
+### C2 — Korean governance risk overlay (commit 44fcdf7)
 
-## 💼 Best config (live operation)
+```
+kr_governance.py                     (NEW, 450 lines)
+  compute_owner_dilution_risk         -- 유상증자 + CB + BW + 제3자배정
+  compute_treasury_overhang_risk      -- 자사주 처분 (=! 매입)
+  compute_spinoff_risk                -- 물적분할
+  compute_capital_reduction_risk      -- 감자
+  compute_succession_proxy            -- chaebol membership × insider activity
+  compute_capital_allocation_quality  -- 자사주 매입 + 무상증자
+  compute_governance_score_for_ticker -- 11 PHASE2_GOVERNANCE_COLUMNS aggregator
+  is_hard_veto                       -- 5 hard-veto rules
+  governance_weight_cap              -- tier-based (0.40 / 0.60 / 0.80)
+  add_governance_signals             -- universe-level wiring
+
+governance_entities.yaml             (NEW, 15 chaebol groups)
+kr_config.py                         (PHASE2_GOVERNANCE_COLUMNS x11 추가)
+kr_features.py                       (add_governance_signals 통합)
+kr_backtester_realistic.py           (use_governance_overlay flag)
+
+tests/test_governance.py             (NEW, 8 tests)
+```
+
+### C3 — Purged walk-forward + 3-sleeve (commit afe97ec)
+
+```
+kr_multibagger_classifier.py         (modified)
+  walk_forward_splits_purged          -- 9-month embargo strict
+  label_pre_entry                     -- [-6m, -1m)
+  label_continuation                  -- [0, +3m]
+  label_risk                          -- forward DD <= -20%
+  calibration_curve                   -- predicted vs actual rate
+  adversarial_validation              -- distribution shift detector
+
+kr_backtester_realistic.py           (modified)
+  generate_oos_picks_purged_3sleeve   -- 3 separate models, p_combined ranking
+  run_realistic_backtest              -- use_sleeve_separation flag (40/40/20)
+
+tests/test_walkforward.py            (NEW, 8 tests)
+```
+
+### C4 — VKOSPI source fix + risk integration (commit 8fbaa6f)
+
+```
+kr_derivatives.py                    (modified)
+  _compute_realized_vol_proxy         -- KOSPI std × sqrt(252)
+  fetch_vkospi                        -- pykrx -> yfinance -> proxy
+  get_vkospi_at_date                  -- PIT lookup helper
+
+kr_backtester_realistic.py           (modified)
+  derivatives_panel                   -- new arg, replaces hardcoded 18.0
+  vkospi_default_level
+
+tests/test_vkospi.py                 (NEW, 5 tests)
+```
+
+---
+
+## Phase D — GitHub Actions deployment
+
+### 사용자가 해야 할 액션 (코드는 완료됨)
+
+```
+1. GitHub Secrets 설정 (Settings -> Secrets and variables -> Actions):
+   DART_API_KEY            = (현재 .env 값)
+   BOK_ECOS_API_KEY        = (현재 .env 값)
+   RCLONE_CONFIG_GDRIVE    = `rclone config show` 출력 전체
+   SLACK_WEBHOOK_URL       = (선택)
+
+2. GDrive 폴더 구조 확인 (rclone remote name = `gdrive`):
+   gdrive:kr_quant_engine/
+     ├ cache_pykrx/
+     ├ cache_dart/
+     ├ cache_macro/
+     ├ feature_store/
+     ├ models/
+     ├ data_pit/
+     └ outputs/
+
+3. 첫 수동 trigger:
+   - GitHub UI -> Actions -> Monthly Picks -> Run workflow
+   - 또는 cron 다음 1일까지 대기
+
+4. Streamlit Cloud (선택):
+   - https://share.streamlit.io 에서 repo 등록
+   - Entry point: streamlit_app.py
+   - Secrets에 DART_API_KEY 등 설정
+```
+
+### 체크리스트
+
+```
+✅ 4 workflows 작성 (.github/workflows/)
+✅ 3 CLI tools (tools/)
+✅ streamlit_app.py
+✅ secrets.toml.example
+✅ requirements.txt 업데이트 (streamlit, lightgbm)
+✅ .gitignore 업데이트
+☐ GitHub Secrets 설정 (사용자)
+☐ rclone GDrive auth (사용자)
+☐ 첫 monthly_picks 수동 trigger
+☐ Slack workspace + webhook (사용자)
+☐ Streamlit Cloud 등록 (선택)
+```
+
+---
+
+## 알려진 Issues (Phase C 후 잔존)
+
+| # | Issue | Phase 적용 | 상태 |
+|---|---|---|---|
+| 1 | pykrx 1.2.7 broken (KRX 2025 redesign) | C4 (realized-vol proxy) | ✅ |
+| 2 | KRX direct scrape 400 Bad Request | (deferred) | ⚠️ |
+| 3 | PIT survivorship bias | C1 | ✅ |
+| 4 | listed_months stub (모두 999) | C1 | ✅ |
+| 5 | TTM annual factor 단순화 | (deferred) | ⚠️ |
+| 6 | KOSDAQ 150 / VKOSPI yfinance 404 | C4 (proxy fallback) | ✅ |
+| 7 | FDR ticker 5-digit pad (delisted handling) | C1 | ✅ |
+| 8 | walk_forward embargo 미적용 | C3 | ✅ |
+| 9 | Single-model label window mixing | C3 | ✅ |
+| 10 | Hardcoded vkospi_level=18.0 | C4 | ✅ |
+
+---
+
+## 다음 단계 옵션
+
+### Option A — 즉시 첫 monthly_picks 실행
+- Secrets 설정 → Actions UI에서 manual trigger
+- 결과 CSV 확인 후 다음 cron까지 대기
+
+### Option B — A/B 실험 즉시 시작 (plan.md)
+- D1-D3 (PIT/historical mcap/purged) 단계별 baseline
+- A1-A6 (alpha layers)
+- G0-G4 (governance)
+- 5년 OOS CAGR 측정 → Final ship gate
+
+### Option C — Phase E 직접 진입
+- KIS API 모의매매 setup
+- 1-2개월 paper trading
+- 신뢰도 확인 후 live 소액
+
+### Option D — TTM annual factor + KRX direct scrape 추가 fix
+- 잔존 Issue #2 #5 해결
+
+**추천**: B (A/B 실험) → C (Paper trading). A는 secrets 설정 후 자동 진행.
+
+---
+
+## 시스템 상태
+
+- All Phase C-D code committed + tagged.
+- 72/72 tests pass (regression-clean).
+- GitHub Actions ready (코드만, secrets/run = 사용자 액션).
+- Streamlit dashboard ready (cloud 등록만).
+- Paper trading 준비 가능 (KIS API key 필요).
+
+## 데이터 위치
+
+```
+Code:          H:/codex/kr_quant_engine/                       (PROJECT_ROOT)
+Data:          G:/내 드라이브/kr_quant_engine/                   (DATA_ROOT)
+GitHub:        wscha231/kr-quant-engine (private)
+
+Latest tags:   post-c1, post-c2, post-c3, post-c4
+Latest commit: Phase C4 VKOSPI fix (8fbaa6f) + Phase D pending commit
+
+PIT artifacts: G:/내 드라이브/kr_quant_engine/data_pit/
+  listed_history.parquet     (3,299 tickers)
+  historical_mcap.parquet    (287,910 rows, 108 snapshots)
+
+Outputs:       G:/내 드라이브/kr_quant_engine/outputs/
+  realistic_backtest_best_5y.json
+  realistic_backtest_best_monthly.csv
+  current_portfolio_*.csv
+```
+
+## 참고 — Best config (live 운영 기준값)
 
 ```python
 TOP_N            = 20
@@ -123,43 +292,9 @@ WEIGHTING        = 'equal'
 USE_DD_BREAKER   = True
 DD_THRESHOLDS    = (-0.08, -0.15, -0.25)
 DD_SCALES        = (0.85, 0.65, 0.40)
-USE_VKOSPI_GUARD = True  # when source ready
+USE_VKOSPI_GUARD = True
+USE_GOVERNANCE   = True   # Phase C2 신규
+USE_SLEEVE       = True   # Phase C3 신규 (picks에 p_pre_entry/p_continuation 있을 때)
 REBAL_FREQ       = 'monthly_first_business_day'
 COST_MODEL       = 'mcap_tiered'  # 5/10/20bp slip + 18bp tax
-```
-
-## 알려진 Issues (Tier 1 해결 필요)
-
-1. pykrx 1.2.7 broken (KRX 2025 redesign) → FDR + Naver fallback ✅
-2. KRX direct scrape 400 Bad Request → endpoint 변경 필요
-3. PIT survivorship bias → -3~5pp CAGR realism
-4. listed_months stub (모두 999)
-5. TTM annual factor 단순화
-6. KOSDAQ 150 / VKOSPI yfinance 404
-7. FDR ticker 5-digit pad (delisted handling)
-
-## 차단 사항 — 사용자 결정 대기
-
-- 사용자가 plan.md Option A/B/C/D 결정 필요
-- 결정 후 즉시 Phase C1 (PIT survivorship fix) 시작 가능
-
-## 시스템 상태
-
-- All data sources operational (FDR + Naver + DART + BOK)
-- Realistic backtest framework verified
-- Phase A research 완료, Phase B plan 완료
-- Phase C 구현 미시작 (사용자 승인 후)
-
-## 데이터 위치
-
-```
-Code:          H:/codex/kr_quant_engine/   (PROJECT_ROOT)
-Data:          G:/내 드라이브/kr_quant_engine/   (DATA_ROOT)
-GitHub:        wscha231/kr-quant-engine (private)
-Latest commit: ~38.97% CAGR
-Outputs:       outputs/realistic_backtest_best_5y.json
-               outputs/realistic_backtest_best_monthly.csv
-               outputs/current_portfolio_*.csv
-               research/06_walkforward_baselines/p_mb_v1_oos_picks.csv
-               research/06_walkforward_baselines/p_mb_v1_classifier_metrics.json
 ```

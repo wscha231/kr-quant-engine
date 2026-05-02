@@ -1,0 +1,68 @@
+name: Monthly Classifier Retrain
+
+on:
+  schedule:
+    - cron: '0 17 1 * *'   # 1st of month, 02:00 KST (UTC+9)
+  workflow_dispatch:
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DART_API_KEY: ${{ secrets.DART_API_KEY }}
+      BOK_ECOS_API_KEY: ${{ secrets.BOK_ECOS_API_KEY }}
+      KR_DATA_DIR: ${{ github.workspace }}/data
+      RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG_GDRIVE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Setup rclone
+        if: ${{ env.RCLONE_CONFIG != '' }}
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone
+          echo "$RCLONE_CONFIG" > ~/.config/rclone/rclone.conf
+
+      - name: Sync caches from GDrive
+        if: ${{ env.RCLONE_CONFIG != '' }}
+        run: |
+          mkdir -p data/cache_pykrx data/cache_dart data/feature_store data/models data/data_pit data/outputs
+          rclone copy gdrive:kr_quant_engine/feature_store data/feature_store -P || true
+          rclone copy gdrive:kr_quant_engine/models data/models -P || true
+
+      - name: Retrain classifier
+        run: python tools/run_classifier_retrain.py --n-folds 5 --purged --embargo-months 9
+
+      - name: Sync model + metrics to GDrive
+        if: ${{ env.RCLONE_CONFIG != '' }}
+        run: |
+          rclone copy data/models gdrive:kr_quant_engine/models -P || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: classifier-${{ github.run_number }}
+          path: |
+            data/models/p_mb_v_*.cbm
+            data/models/classifier_metrics_*.json
+          retention-days: 365
+
+      - name: Slack notify
+        if: success() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\":robot_face: kr-quant-engine classifier retrained for $(date -u +%Y-%m). Run #${{ github.run_number }}.\"}" \
+            "$SLACK_WEBHOOK_URL"

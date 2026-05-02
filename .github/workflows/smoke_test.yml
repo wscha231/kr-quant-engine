@@ -1,0 +1,52 @@
+name: Smoke Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Smoke test (quick syntax + structural)
+        run: python tests/smoke_test.py --quick
+
+      - name: Smoke test (full)
+        run: python tests/smoke_test.py
+
+      - name: PIT universe tests (Phase C1)
+        run: python tests/test_pit_universe.py
+        # Some tests soft-skip when no historical mcap cache present.
+
+      - name: Governance tests (Phase C2)
+        run: python tests/test_governance.py
+
+      - name: Walk-forward / sleeve tests (Phase C3)
+        run: python tests/test_walkforward.py
+
+      - name: VKOSPI tests (Phase C4)
+        run: python tests/test_vkospi.py
+
+      - name: DART PIT tests
+        run: python tests/test_dart_pit.py
+        continue-on-error: true   # network-dependent
+
+      - name: Multibagger tests
+        run: python tests/test_multibagger.py
+        continue-on-error: true

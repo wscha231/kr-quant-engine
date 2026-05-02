@@ -6,6 +6,12 @@
 *.pem
 api_keys.json
 credentials.json
+secrets.toml
+.streamlit/secrets.toml
+!secrets.toml.example
+
+# Phase C1 PIT artifacts (large, regenerable via tools/build_pit_universe_history.py)
+data_pit/
 
 # Python
 __pycache__/
