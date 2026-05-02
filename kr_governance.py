@@ -155,13 +155,22 @@ def compute_owner_dilution_risk(
     cb = sub[sub["event_category"] == "convertible_bond"]
     bw = sub[sub["event_category"] == "warrant_bond"]
 
-    # Capital-increase dilution: nstk_ostk_qy * bdis_pric / mcap
+    # Capital-increase dilution: nstk_ostk_qy * bdis_pric / mcap.
+    # Defensive: pd.DataFrame.get(col, default) returns SCALAR default when
+    # column is absent, which then breaks .fillna(). Guard with explicit
+    # column-presence check.
     dilution_amt = 0.0
     if not cap_inc.empty:
-        qty = pd.to_numeric(cap_inc.get("nstk_ostk_qy", 0),
-                            errors="coerce").fillna(0)
-        pric = pd.to_numeric(cap_inc.get("bdis_pric", 0),
-                              errors="coerce").fillna(0)
+        if "nstk_ostk_qy" in cap_inc.columns:
+            qty = pd.to_numeric(cap_inc["nstk_ostk_qy"],
+                                  errors="coerce").fillna(0)
+        else:
+            qty = pd.Series(0.0, index=cap_inc.index)
+        if "bdis_pric" in cap_inc.columns:
+            pric = pd.to_numeric(cap_inc["bdis_pric"],
+                                   errors="coerce").fillna(0)
+        else:
+            pric = pd.Series(0.0, index=cap_inc.index)
         dilution_amt = float((qty * pric).sum())
     dilution_pct = (dilution_amt / mcap) if mcap > 0 else 0.0
 
@@ -178,9 +187,10 @@ def compute_owner_dilution_risk(
     for sub_df in (cb, bw):
         if sub_df.empty:
             continue
-        amt = pd.to_numeric(sub_df.get("bd_fta", 0),
-                             errors="coerce").fillna(0).sum()
-        cb_bw_amt += float(amt)
+        if "bd_fta" in sub_df.columns:
+            amt = pd.to_numeric(sub_df["bd_fta"],
+                                 errors="coerce").fillna(0).sum()
+            cb_bw_amt += float(amt)
     cb_bw_pct = (cb_bw_amt / mcap) if mcap > 0 else 0.0
 
     # Composite risk:
@@ -218,8 +228,11 @@ def compute_treasury_overhang_risk(
             "treasury_sale_overhang_score": 0.0,
             "treasury_sale_pct_12m": 0.0,
         }
-    amt = pd.to_numeric(sales.get("dppln_prc_ostk", 0),
-                          errors="coerce").fillna(0).sum()
+    if "dppln_prc_ostk" in sales.columns:
+        amt = pd.to_numeric(sales["dppln_prc_ostk"],
+                              errors="coerce").fillna(0).sum()
+    else:
+        amt = 0.0
     pct = (float(amt) / mcap) if mcap > 0 else 0.0
     # 5% mcap sale = max risk
     score = min(1.0, pct / 0.05)
@@ -316,8 +329,11 @@ def compute_capital_allocation_quality(
     bonus = sub[sub["event_category"] == "bonus_issue"]
     buyback_pct = 0.0
     if not buyback.empty:
-        amt = pd.to_numeric(buyback.get("aqpln_prc_ostk", 0),
-                              errors="coerce").fillna(0).sum()
+        if "aqpln_prc_ostk" in buyback.columns:
+            amt = pd.to_numeric(buyback["aqpln_prc_ostk"],
+                                  errors="coerce").fillna(0).sum()
+        else:
+            amt = 0.0
         buyback_pct = (float(amt) / mcap) if mcap > 0 else 0.0
     quality = 0.6 * min(1.0, buyback_pct / 0.02)         # 2% buyback = max
     quality += 0.3 * (1 if not bonus.empty else 0)

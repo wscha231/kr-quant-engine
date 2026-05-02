@@ -55,10 +55,14 @@ jobs:
       - name: Generate monthly picks
         run: python tools/generate_monthly_picks.py --top-n 20
 
-      - name: Sync outputs back to GDrive
-        if: ${{ env.RCLONE_CFG_TEXT != '' }}
+      - name: Sync outputs + cache back to GDrive (preserve partial work)
+        if: ${{ env.RCLONE_CFG_TEXT != '' && always() }}
         run: |
+          # Run on success AND failure so partial caches (like newly-computed
+          # avg_value_60d_*.parquet) survive workflow crashes for the next run.
           rclone copy data/outputs gdrive:kr_quant_engine/outputs -P || true
+          rclone copy data/cache_misc gdrive:kr_quant_engine/cache_misc -P || true
+          rclone copy data/cache_macro gdrive:kr_quant_engine/cache_macro -P || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
