@@ -4,6 +4,24 @@
 
 ---
 
+## ⚠️ NEXT SESSION 시작 순서 (필수)
+
+```
+1. 이 파일 (SESSION_HANDOFF.md) 읽기
+2. plan.md 읽기 (Phase C 계획 + 사용자 결정 옵션)
+3. research/ 5개 노트 read 가능 (선택, 필요시만):
+   - research/00_data_sources_audit/pit_survivorship_audit.md
+   - research/02_factor_zoo/institutional_methods_import_map.md
+   - research/03_korea_specific_signals/governance_risk_overlay_research.md
+   - research/06_walkforward_baselines/purged_oos_protocol.md
+   - research/08_deployment/github_actions_deployment_plan.md
+4. 사용자 질문: "Phase C 어느 옵션으로 진행?" (A/B/C/D)
+```
+
+**현재 Status (2026-04-30 마감)**: Phase A 완료, Phase B plan.md 작성 완료, **Phase C 사용자 승인 대기**.
+
+---
+
 ## 마지막 큰 성과 (2026-04-30 21:30 KST)
 
 ### 🏆 1억 5년 OOS Backtest CAGR 38.97% ★★★★
@@ -53,33 +71,49 @@ aa8dc43 P2 events v2 + P3 technicals
 7e0d304 Initial commit
 ```
 
-## 다음 세션 - 우선순위
+## Phase A 산출물 (2026-04-30 완료, read-only)
 
-### Tier 0 (필수, 즉시)
-1. **Live retrain at 2026-04-30 cutoff** — 현재 시점 portfolio CSV
-   - scored_panel을 2025-2026까지 확장
-   - Classifier retrain
-   - Top-20 picks save → outputs/live_portfolio_2026-04-30.csv
-2. **N=20 equal config wire** into kr_pipeline default
+5개 research notes 작성 + plan.md 작성. 사용자 두 개선안(Governance Risk Overlay + Codex Agent Instruction) 분석 통합:
 
-### Tier 1 (1-2주)
-3. **VKOSPI source fix** (yfinance ^VKOSPI delisted; KRX 1003 direct)
-4. **Survivorship-corrected universe** (DART corp_code history)
-5. **Score blending fix** (panel-aware, phase A/B 정확 비교)
-6. **FDR ticker zero-pad fix** (5-digit codes 404)
+```
+✅ research/00_data_sources_audit/pit_survivorship_audit.md
+   → 3 critical leakage paths (FDR current listing / current mcap / listed_months stub)
+   → Reported CAGR 38.97% 중 +5-9pp inflated 추정
 
-### Tier 2 (3-4주)
-7. **KIS API paper trading scaffold**
-   - Order placement (모의 매매 모드)
-   - Position tracking DB
-   - Trade execution log
-8. **Streamlit dashboard** (current portfolio + P&L + signals)
-9. **DART event panel build** for 1,000+ corps (P2 events 정밀화)
+✅ research/02_factor_zoo/institutional_methods_import_map.md
+   → AQR / Two Sigma / Renaissance / Citadel / O'Neil-Minervini / Kaggle 6 패턴 매핑
+   → Top 6 우선순위 도입 plan
 
-### Tier 3 (1-2개월)
-10. **Concentrated portfolio N=5/N=10 with classifier ranking**
-11. **Live cron scheduler** (매월 1일 자동 picks generation)
-12. **Email/Slack alert** (월별 picks + variance alerts)
+✅ research/03_korea_specific_signals/governance_risk_overlay_research.md
+   → 7 governance risk types
+   → 11 PHASE2_GOVERNANCE_COLUMNS 설계
+   → Weight cap 추천 (vs hard veto / soft penalty)
+
+✅ research/06_walkforward_baselines/purged_oos_protocol.md
+   → walk_forward_splits embargo 미적용 진단
+   → 3 separate models 설계 (pre-entry / continuation / risk)
+
+✅ research/08_deployment/github_actions_deployment_plan.md
+   → 4 cron workflows (smoke / monthly_picks / quarterly_backtest / classifier_retrain)
+   → Streamlit Cloud + GDrive(rclone) + Slack
+   → 비용 $0/월
+
+✅ plan.md
+   → Phase C1-C4 (3-4주) + Phase D (3일) + Phase E (1-2개월)
+   → A/B 실험 설계 (D1-D3 / A1-A6 / G0-G4)
+   → Final ship gate
+```
+
+## Phase C 사용자 결정 대기 (plan.md 참조)
+
+```
+Option A — 전체 Phase C 자동 (4주, 추천)
+Option B — research notes 검토 먼저
+Option C — Phase 부분 선택 (C1만 / C2만 / C3만)
+Option D — 즉시 GitHub deployment (현재 in-sample biased state로)
+```
+
+**다음 세션 첫 액션**: 사용자에게 Option 확인 후 진행.
 
 ## 💼 Best config (live operation)
 
@@ -104,10 +138,17 @@ COST_MODEL       = 'mcap_tiered'  # 5/10/20bp slip + 18bp tax
 6. KOSDAQ 150 / VKOSPI yfinance 404
 7. FDR ticker 5-digit pad (delisted handling)
 
-## 차단 사항 — 없음
-- All systems operational
-- 모든 데이터 source working (FDR + Naver + DART + BOK)
+## 차단 사항 — 사용자 결정 대기
+
+- 사용자가 plan.md Option A/B/C/D 결정 필요
+- 결정 후 즉시 Phase C1 (PIT survivorship fix) 시작 가능
+
+## 시스템 상태
+
+- All data sources operational (FDR + Naver + DART + BOK)
 - Realistic backtest framework verified
+- Phase A research 완료, Phase B plan 완료
+- Phase C 구현 미시작 (사용자 승인 후)
 
 ## 데이터 위치
 
