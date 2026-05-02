@@ -348,6 +348,8 @@ def run_realistic_backtest(
     sleeve_pre_entry_pct: float = 0.40,
     sleeve_continuation_pct: float = 0.40,
     sleeve_defensive_pct: float = 0.20,
+    derivatives_panel: Optional[pd.DataFrame] = None,  # Phase C4: PIT VKOSPI
+    vkospi_default_level: float = 18.0,
     verbose: bool = True,
 ) -> dict:
     """End-to-end realistic 1억 backtest with mcap-tiered cost + risk mgmt.
@@ -417,8 +419,28 @@ def run_realistic_backtest(
         peak = max(peak, capital)
         current_dd = (capital / peak) - 1.0
 
-        # 3. VKOSPI guard (placeholder — needs macro panel)
-        vkospi_level = 18.0  # default; would fetch from panel here
+        # 3. VKOSPI guard — Phase C4: PIT lookup on derivatives panel.
+        if derivatives_panel is not None and not derivatives_panel.empty:
+            from kr_derivatives import get_vkospi_at_date
+            vkospi_level = get_vkospi_at_date(
+                derivatives_panel, rd, default=vkospi_default_level,
+            )
+        elif fetch_macro_for_vkospi:
+            from kr_derivatives import fetch_vkospi
+            vk_df = fetch_vkospi(
+                pd.Timestamp(rd) - pd.Timedelta(days=120),
+                pd.Timestamp(rd) + pd.Timedelta(days=1),
+                refresh_days=7,
+            )
+            if not vk_df.empty:
+                from kr_derivatives import get_vkospi_at_date
+                vkospi_level = get_vkospi_at_date(
+                    vk_df, rd, default=vkospi_default_level,
+                )
+            else:
+                vkospi_level = vkospi_default_level
+        else:
+            vkospi_level = vkospi_default_level
         scale_info = compute_sleeve_scale(current_dd, vkospi_level)
         sleeve_scale = scale_info["sleeve_scale"] if (use_drawdown_breaker or use_vkospi_guard) else 1.0
         target_invested = capital * sleeve_scale
