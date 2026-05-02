@@ -124,9 +124,14 @@ def main() -> int:
         "n_positive": int(labeled.get("is_pre_surge", pd.Series()).sum()),
         "fold_aucs": result.get("fold_aucs"),
         "mean_auc": result.get("mean_auc"),
+        "feature_cols": list(feat_cols),    # critical for inference alignment
     }
     metrics_path = models_dir / f"classifier_metrics_{stamp}.json"
     with open(metrics_path, "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=2, default=str)
+    # Always-overwrite latest pointer for inference
+    latest_metrics = models_dir / "classifier_latest_metrics.json"
+    with open(latest_metrics, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2, default=str)
 
     log(f"[retrain] wrote {model_path.name} + {latest_path.name}")

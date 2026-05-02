@@ -143,13 +143,36 @@ def main() -> int:
                 from catboost import CatBoostClassifier
                 model = CatBoostClassifier()
                 model.load_model(str(classifier_path))
-                from kr_multibagger_classifier import select_feature_columns
-                feat_cols = select_feature_columns(enriched)
-                X = enriched[feat_cols].fillna(0).values
+
+                # Feature alignment — load the training-time feature_cols list
+                # so that inference uses the EXACT same columns in the same
+                # order. Missing features in `enriched` are zero-filled rather
+                # than silently dropped (which previously triggered
+                # "Feature N is present in model but not in pool").
+                feat_cols = _load_classifier_feature_cols(classifier_path)
+                if feat_cols is None:
+                    from kr_multibagger_classifier import select_feature_columns
+                    feat_cols = select_feature_columns(enriched)
+                    log("[picks] no feature_cols metadata -> selecting from live "
+                        f"features ({len(feat_cols)} cols, may misalign)",
+                        level="WARN")
+
+                aligned = pd.DataFrame(0.0, index=enriched.index,
+                                        columns=feat_cols)
+                shared = [c for c in feat_cols if c in enriched.columns]
+                aligned[shared] = enriched[shared].astype(float).fillna(0.0)
+                missing = [c for c in feat_cols if c not in enriched.columns]
+                if missing:
+                    log(f"[picks] {len(missing)}/{len(feat_cols)} features "
+                        f"missing in inference (zero-filled): "
+                        f"{missing[:5]}...", level="WARN")
+
+                X = aligned.values
                 proba = model.predict_proba(X)[:, 1]
                 enriched["p_pre_surge"] = proba
                 log(f"[picks] classifier scored {len(enriched)} rows from "
-                    f"{classifier_path.name} ({len(feat_cols)} features)")
+                    f"{classifier_path.name} ({len(feat_cols)} features, "
+                    f"{len(shared)} shared, {len(missing)} zero-filled)")
             except Exception as ex:
                 log(f"[picks] classifier load fail: {ex} -> momentum fallback",
                     level="WARN")
@@ -250,6 +273,36 @@ def _find_classifier() -> Path | None:
         reverse=True,
     )
     return candidates[0] if candidates else None
+
+
+def _load_classifier_feature_cols(classifier_path: Path) -> list[str] | None:
+    """Locate the feature_cols list saved alongside the classifier.
+
+    Looks for (in order):
+      1. <models>/classifier_latest_metrics.json
+      2. <models>/classifier_metrics_<YYYY-MM>.json (most recent)
+    Returns the feature_cols list, or None when neither exists / lacks the key.
+    """
+    models_dir = classifier_path.parent
+    candidates = [
+        models_dir / "classifier_latest_metrics.json",
+    ] + sorted(
+        models_dir.glob("classifier_metrics_*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for p in candidates:
+        if not p.exists():
+            continue
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception:
+            continue
+        cols = meta.get("feature_cols")
+        if cols and isinstance(cols, list):
+            return list(cols)
+    return None
 
 
 if __name__ == "__main__":
