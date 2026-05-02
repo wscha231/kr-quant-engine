@@ -13,7 +13,7 @@ jobs:
       DART_API_KEY: ${{ secrets.DART_API_KEY }}
       BOK_ECOS_API_KEY: ${{ secrets.BOK_ECOS_API_KEY }}
       KR_DATA_DIR: ${{ github.workspace }}/data
-      RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG_GDRIVE }}
+      RCLONE_CFG_TEXT: ${{ secrets.RCLONE_CONFIG_GDRIVE }}
     steps:
       - uses: actions/checkout@v4
 
@@ -28,14 +28,15 @@ jobs:
           pip install -r requirements.txt
 
       - name: Setup rclone
-        if: ${{ env.RCLONE_CONFIG != '' }}
+        if: ${{ env.RCLONE_CFG_TEXT != '' }}
         run: |
           curl https://rclone.org/install.sh | sudo bash
           mkdir -p ~/.config/rclone
-          echo "$RCLONE_CONFIG" > ~/.config/rclone/rclone.conf
+          printf '%s' "$RCLONE_CFG_TEXT" > ~/.config/rclone/rclone.conf
+          rclone --config ~/.config/rclone/rclone.conf listremotes
 
       - name: Sync caches from GDrive
-        if: ${{ env.RCLONE_CONFIG != '' }}
+        if: ${{ env.RCLONE_CFG_TEXT != '' }}
         run: |
           mkdir -p data/cache_pykrx data/cache_dart data/cache_macro data/cache_misc data/feature_store data/models data/data_pit data/outputs
           rclone copy gdrive:kr_quant_engine/cache_pykrx data/cache_pykrx -P || true
@@ -50,7 +51,7 @@ jobs:
         run: python tools/generate_monthly_picks.py --top-n 20
 
       - name: Sync outputs back to GDrive
-        if: ${{ env.RCLONE_CONFIG != '' }}
+        if: ${{ env.RCLONE_CFG_TEXT != '' }}
         run: |
           rclone copy data/outputs gdrive:kr_quant_engine/outputs -P || true
 
