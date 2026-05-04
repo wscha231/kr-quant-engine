@@ -1,0 +1,90 @@
+name: Monthly Dip Classifier Retrain
+
+# Phase F monthly automation: re-mines dip episodes (last 5 years),
+# rebuilds the 42-feature panel, trains the shake-out classifier and
+# runs the backtest validator. Result lands in GDrive under
+# gdrive:kr_quant_engine/models/dip_classifier_*.
+
+on:
+  schedule:
+    - cron: '0 18 1 * *'   # 1st of month, 03:00 KST
+  workflow_dispatch:
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180   # 3h cap; mining is the long step
+    env:
+      DART_API_KEY: ${{ secrets.DART_API_KEY }}
+      KR_DATA_DIR: ${{ github.workspace }}/data
+      RCLONE_CFG_TEXT: ${{ secrets.RCLONE_CONFIG_GDRIVE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Setup rclone
+        if: ${{ env.RCLONE_CFG_TEXT != '' }}
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_CFG_TEXT" > ~/.config/rclone/rclone.conf
+          rclone --config ~/.config/rclone/rclone.conf listremotes
+
+      - name: Sync caches from GDrive
+        if: ${{ env.RCLONE_CFG_TEXT != '' }}
+        run: |
+          mkdir -p data/cache_pykrx data/cache_misc data/cache_macro \
+                    data/cache_dart data/data_pit data/models data/outputs
+          # Bring data_pit + cache_misc + the smaller artifacts; cache_pykrx
+          # ticker_*.parquet is needed for mining. ~800 MiB. Tolerable for
+          # a monthly job.
+          rclone copy gdrive:kr_quant_engine/data_pit data/data_pit -P || true
+          rclone copy gdrive:kr_quant_engine/cache_misc data/cache_misc -P || true
+          rclone copy gdrive:kr_quant_engine/cache_macro data/cache_macro -P || true
+          rclone copy gdrive:kr_quant_engine/cache_dart data/cache_dart -P || true
+          rclone copy gdrive:kr_quant_engine/models data/models -P || true
+          rclone copy gdrive:kr_quant_engine/cache_pykrx data/cache_pykrx -P || true
+
+      - name: Run Phase F pipeline (mine -> features -> train -> backtest)
+        run: |
+          # Limit mining to ~500 mid-large caps for monthly retrain so the
+          # workflow finishes inside its 3h cap. Full universe mining is
+          # done locally once.
+          python tools/run_phase_f_pipeline.py --mine \
+            --start 2019-01-01 --end "$(date -u -d '60 days ago' +%Y-%m-%d)" \
+            --limit 800
+
+      - name: Sync results back to GDrive
+        if: ${{ env.RCLONE_CFG_TEXT != '' && always() }}
+        run: |
+          rclone copy data/data_pit gdrive:kr_quant_engine/data_pit -P || true
+          rclone copy data/models gdrive:kr_quant_engine/models -P || true
+          rclone copy data/outputs gdrive:kr_quant_engine/outputs -P || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dip-retrain-${{ github.run_number }}
+          path: |
+            data/models/dip_classifier_*.cbm
+            data/models/dip_classifier_*_metrics.json
+            data/outputs/dip_strategy_backtest.json
+          retention-days: 365
+
+      - name: Slack notify
+        if: success() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\":bar_chart: kr-quant-engine dip classifier retrained ($(date -u +%Y-%m)). Run #${{ github.run_number }}.\"}" \
+            "$SLACK_WEBHOOK_URL"
