@@ -31,6 +31,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -59,8 +60,13 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Monthly picks generator")
     p.add_argument("--rebalance-date", default=None,
                    help="Override (YYYY-MM-DD). Default = previous month-end.")
-    p.add_argument("--top-n", type=int, default=20,
-                   help="Number of picks to produce (default 20).")
+    # Concentrated portfolio defaults (Phase D-fix v3, 2026-05-04). User
+    # explicitly requested high-conviction concentration: <10 picks with
+    # the top name carrying 40%+ of the book to maximize expected return
+    # per name. Use --top-n / --weighting / --weight-cap to revert to the
+    # diversified preset.
+    p.add_argument("--top-n", type=int, default=8,
+                   help="Number of picks (default 8 = concentrated portfolio).")
     p.add_argument("--no-classifier", action="store_true",
                    help="Skip classifier; rank by p0_momentum_score only.")
     p.add_argument("--no-governance", action="store_true",
@@ -80,13 +86,17 @@ def parse_args() -> argparse.Namespace:
                    help="Weight on classifier p_pre_surge in composite score (0..1).")
     p.add_argument("--composite-momentum-weight", type=float, default=0.4,
                    help="Weight on momentum z-score in composite score (0..1).")
-    p.add_argument("--weighting", default="capped",
-                   choices=("equal", "score", "score_power", "capped"),
-                   help="Position weighting: equal | score | score_power | capped (default).")
+    p.add_argument("--weighting", default="concentrated",
+                   choices=("equal", "score", "score_power", "capped",
+                              "concentrated"),
+                   help="Position weighting (default concentrated for high-conviction book).")
     p.add_argument("--score-power", type=float, default=1.5,
-                   help="Power for score_power / capped weighting (default 1.5).")
-    p.add_argument("--weight-cap", type=float, default=0.10,
-                   help="Per-name weight cap for capped mode (default 0.10 = 10pct).")
+                   help="Power for score_power / capped weighting.")
+    p.add_argument("--weight-cap", type=float, default=0.45,
+                   help="Per-name weight cap (default 0.45 for concentrated mode).")
+    p.add_argument("--concentrated-power", type=float, default=1.1,
+                   help="Rank-decay power for concentrated mode "
+                        "(1.0 -> top ~37pct, 1.1 -> ~41pct, 1.2 -> ~45pct).")
     return p.parse_args()
 
 
@@ -306,7 +316,24 @@ def main() -> int:
                 if pool > 0:
                     w = w.where(~others, w + slack * w / pool)
         picks["weight"] = w
-    log(f"[picks] weighting='{weighting}', top weight = "
+    elif weighting == "concentrated":
+        # High-conviction concentration: rank-power decay so the top pick
+        # carries 35-45pct of the book. Power 1.0 -> top ~37pct,
+        # 1.1 -> ~41pct, 1.2 -> ~45pct (for top_n=8).
+        # Sorted picks already by composite_score descending, so rank 1
+        # is the strongest signal.
+        n = len(picks)
+        ranks = np.arange(1, n + 1, dtype=float)
+        raw = ranks ** (-float(args.concentrated_power))
+        w = raw / raw.sum()
+        # Hard cap at --weight-cap (default 0.45) to bound single-name risk
+        cap = float(args.weight_cap)
+        w = np.minimum(w, cap)
+        if w.sum() > 0:
+            w = w / w.sum()
+        picks["weight"] = w
+    log(f"[picks] weighting='{weighting}' "
+        f"(top {len(picks)} picks): top weight = "
         f"{float(picks['weight'].max() if len(picks) else 0):.3f}, "
         f"bottom = {float(picks['weight'].min() if len(picks) else 0):.3f}")
 

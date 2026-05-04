@@ -173,16 +173,20 @@ def main() -> int:
         log("[dip] no tickers to monitor -- soft exit", level="WARN")
         return 0
 
-    # 2. Pull recent OHLCV + flow per ticker
+    # 2. Pull recent OHLCV + flow per ticker.
+    # Primary path uses fetch_foreign_inst_flow (KRX bulk daily), but pykrx
+    # 1.2.7 + KRX 2025 redesign breaks it. Fallback to per-ticker Naver
+    # Finance scrape via kr_naver_flow.fetch_ticker_flow_naver (cached).
     from kr_pykrx_client import (
         fetch_ticker_history,
         fetch_foreign_inst_flow,
     )
+    from kr_naver_flow import fetch_ticker_flow_naver
 
     end = today.strftime("%Y%m%d")
     start = (today - timedelta(days=args.lookback_days * 2 + 5)).strftime("%Y%m%d")
 
-    # Bulk flow per business day (cheaper than per-ticker)
+    # Try KRX bulk first (one call per day instead of per ticker).
     flow_panel = pd.DataFrame()
     for d in pd.date_range(today - timedelta(days=args.lookback_days),
                             today, freq="B"):
@@ -194,14 +198,15 @@ def main() -> int:
                 df["date"] = pd.to_datetime(d).normalize()
                 flow_panel = pd.concat([flow_panel, df], ignore_index=True)
         except Exception as e:
-            log(f"[dip] flow fetch fail {ds}: {e}", level="WARN")
+            log(f"[dip] KRX flow fetch fail {ds}: {e}", level="WARN")
 
-    if flow_panel.empty:
-        log("[dip] no flow data fetched -- flow checks will be neutral",
+    krx_flow_works = not flow_panel.empty
+    if krx_flow_works:
+        log(f"[dip] KRX flow panel: {len(flow_panel)} rows, "
+            f"{flow_panel['date'].nunique()} days")
+    else:
+        log("[dip] KRX flow empty -- using per-ticker Naver scrape fallback",
             level="WARN")
-
-    log(f"[dip] flow panel: {len(flow_panel)} rows, "
-        f"{flow_panel['date'].nunique() if not flow_panel.empty else 0} days")
 
     # 3. Iterate tickers
     alerts: list[dict] = []
@@ -224,22 +229,43 @@ def main() -> int:
         five_day_peak = float(last_5["high"].max() if "high" in last_5.columns
                                else last_5["close"].max())
 
-        # Flow aggregation for this ticker
-        if not flow_panel.empty:
+        # Flow aggregation for this ticker.
+        # Priority 1: KRX bulk (when working); Priority 2: Naver per-ticker
+        # scrape, which converts qty * close into approximate KRW value.
+        foreign_net_5d = 0.0
+        inst_net_5d = 0.0
+        individual_net_5d = 0.0
+        if krx_flow_works:
             sub = flow_panel[flow_panel["ticker"] == tk]
-            foreign_net_5d = float(sub.get("foreign_net_buy_value",
-                                             pd.Series(dtype=float))
-                                    .fillna(0).sum())
-            inst_net_5d = float(sub.get("inst_net_buy_value",
-                                          pd.Series(dtype=float))
-                                  .fillna(0).sum())
-            individual_net_5d = float(sub.get("individual_net_buy_value",
-                                                pd.Series(dtype=float))
-                                       .fillna(0).sum())
-        else:
-            foreign_net_5d = 0.0
-            inst_net_5d = 0.0
-            individual_net_5d = 0.0
+            if not sub.empty:
+                foreign_net_5d = float(sub.get("foreign_net_buy_value",
+                                                 pd.Series(dtype=float))
+                                         .fillna(0).sum())
+                inst_net_5d = float(sub.get("inst_net_buy_value",
+                                              pd.Series(dtype=float))
+                                      .fillna(0).sum())
+                individual_net_5d = float(sub.get("individual_net_buy_value",
+                                                    pd.Series(dtype=float))
+                                           .fillna(0).sum())
+        if foreign_net_5d == 0.0 and inst_net_5d == 0.0:
+            try:
+                naver = fetch_ticker_flow_naver(tk, pages=2, refresh_days=1)
+            except Exception as e:
+                log(f"[dip] naver flow fail {tk}: {e}", level="WARN")
+                naver = pd.DataFrame()
+            if not naver.empty and "close" in naver.columns:
+                # Newest 5 rows = last 5 trading days
+                sub = naver.sort_values("date", ascending=False).head(5)
+                if "foreign_net_qty" in sub.columns and "close" in sub.columns:
+                    foreign_net_5d = float(
+                        (sub["foreign_net_qty"].fillna(0)
+                         * sub["close"].fillna(0)).sum()
+                    )
+                if "inst_net_qty" in sub.columns and "close" in sub.columns:
+                    inst_net_5d = float(
+                        (sub["inst_net_qty"].fillna(0)
+                         * sub["close"].fillna(0)).sum()
+                    )
 
         # Threshold proportional to mcap
         if mcap > 0:
