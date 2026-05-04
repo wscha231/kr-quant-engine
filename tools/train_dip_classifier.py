@@ -221,8 +221,25 @@ def main() -> int:
         lgbm_full.fit(X_full, y_full)
         lgbm_path = out_dir / f"dip_classifier_lgbm_{stamp}.txt"
         lgbm_latest = out_dir / "dip_classifier_lgbm_latest.txt"
-        lgbm_full.booster_.save_model(str(lgbm_path))
-        lgbm_full.booster_.save_model(str(lgbm_latest))
+        # LightGBM C library cannot write to paths containing non-ASCII
+        # characters on Windows. Workaround: write to a temp ASCII path
+        # and copy to the destination.
+        try:
+            lgbm_full.booster_.save_model(str(lgbm_path))
+            lgbm_full.booster_.save_model(str(lgbm_latest))
+        except Exception as e:
+            log(f"[trainer] direct LGBM save failed ({e}); using temp+copy",
+                level="WARN")
+            import tempfile, shutil
+            tmp = Path(tempfile.gettempdir()) / f"dip_classifier_lgbm_{stamp}.txt"
+            try:
+                lgbm_full.booster_.save_model(str(tmp))
+                shutil.copy2(tmp, lgbm_path)
+                shutil.copy2(tmp, lgbm_latest)
+                tmp.unlink(missing_ok=True)
+                log(f"[trainer] LGBM saved via temp")
+            except Exception as e2:
+                log(f"[trainer] LGBM save failed: {e2}", level="WARN")
 
     metrics = {
         "stamp": stamp,

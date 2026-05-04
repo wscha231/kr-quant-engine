@@ -146,13 +146,16 @@ def main() -> int:
                 log(f"[chain]   ohlcv {tk} fail: {e}", level="WARN")
                 ohlcv_cache[tk] = pd.DataFrame()
 
-        # Naver flow (slow per-ticker; skip if no internet)
+        # Naver flow (slow per-ticker; skip if no internet). pages=5 covers
+        # ~50 trading days (sufficient for 30-60d feature windows).
+        # polite_sleep_s=0.15 keeps us under Naver rate limit while moving
+        # ~5x faster than the default 0.30.
         for k, tk in enumerate(unique_tk, 1):
             if k % 50 == 0:
                 log(f"[chain]   naver flow {k}/{len(unique_tk)}")
             try:
                 flow_cache[tk] = fetch_ticker_flow_naver(
-                    tk, pages=10, refresh_days=30,
+                    tk, pages=5, refresh_days=30, polite_sleep_s=0.15,
                 )
             except Exception:
                 flow_cache[tk] = pd.DataFrame()
