@@ -65,6 +65,28 @@ def parse_args() -> argparse.Namespace:
                    help="Skip classifier; rank by p0_momentum_score only.")
     p.add_argument("--no-governance", action="store_true",
                    help="Skip governance overlay.")
+    # Picks selection knobs (Phase D-fix v3, 2026-05-02). User feedback:
+    # mega-caps (Samsung, SK Hynix) DO produce multibagger-scale returns over
+    # multi-year windows AND are real quality. Conversely a 1억 -> 30억 jump
+    # is "30x" but the company is still micro-cap junk. So we set a
+    # MINIMUM mcap (default 5,000억) and NO maximum. This aligns the live
+    # universe with the multibagger training distribution
+    # (multibagger_min_mcap_krw = 5e11) and removes fake-multibagger noise.
+    p.add_argument("--min-mcap-krw", type=float, default=5e11,
+                   help="Mcap LOWER bound for picks (default 5,000억 = quality filter).")
+    p.add_argument("--max-mcap-krw", type=float, default=None,
+                   help="Mcap upper bound for picks. Default = no cap (allow mega-caps).")
+    p.add_argument("--composite-alpha-weight", type=float, default=0.6,
+                   help="Weight on classifier p_pre_surge in composite score (0..1).")
+    p.add_argument("--composite-momentum-weight", type=float, default=0.4,
+                   help="Weight on momentum z-score in composite score (0..1).")
+    p.add_argument("--weighting", default="capped",
+                   choices=("equal", "score", "score_power", "capped"),
+                   help="Position weighting: equal | score | score_power | capped (default).")
+    p.add_argument("--score-power", type=float, default=1.5,
+                   help="Power for score_power / capped weighting (default 1.5).")
+    p.add_argument("--weight-cap", type=float, default=0.10,
+                   help="Per-name weight cap for capped mode (default 0.10 = 10pct).")
     return p.parse_args()
 
 
@@ -204,22 +226,101 @@ def main() -> int:
     else:
         enriched["adjusted_score"] = enriched["p_pre_surge"]
 
-    enriched = enriched.sort_values("adjusted_score", ascending=False)
+    # Mcap LOWER bound — strip micro-caps that produce fake multibaggers
+    # (1억 -> 30억 = "30x" but company is still junk). Aligns live universe
+    # with multibagger training distribution.
+    if args.min_mcap_krw and args.min_mcap_krw > 0 and "market_cap" in enriched.columns:
+        n_pre = len(enriched)
+        min_mcap = float(args.min_mcap_krw)
+        enriched = enriched[
+            enriched["market_cap"].fillna(0).astype(float) >= min_mcap
+        ].copy()
+        log(f"[picks] mcap floor (>= {min_mcap:,.0f} KRW): "
+            f"{n_pre} -> {len(enriched)}")
+    # Optional mcap cap (off by default; mega-caps allowed).
+    if args.max_mcap_krw is not None and "market_cap" in enriched.columns:
+        n_pre = len(enriched)
+        max_mcap = float(args.max_mcap_krw)
+        enriched = enriched[
+            enriched["market_cap"].fillna(0).astype(float) <= max_mcap
+        ].copy()
+        log(f"[picks] mcap cap (<= {max_mcap:,.0f} KRW): "
+            f"{n_pre} -> {len(enriched)}")
+
+    # Composite score = alpha (classifier) + momentum z. The two halves are
+    # rank-normalised within the universe so they have comparable scale even
+    # when classifier probabilities are clustered around the prevalence
+    # (~1.8%) and momentum z is wide.
+    aw = float(args.composite_alpha_weight)
+    mw = float(args.composite_momentum_weight)
+    if (aw + mw) <= 0:
+        aw, mw = 1.0, 0.0
+    rank_alpha = enriched["adjusted_score"].rank(pct=True, method="average")
+    if "ret_12_1m_z" in enriched.columns:
+        mom_raw = enriched["ret_12_1m_z"].fillna(0)
+    elif "ret_12_1m" in enriched.columns:
+        mom_raw = enriched["ret_12_1m"].fillna(0)
+    else:
+        mom_raw = enriched.get("p0_momentum_score",
+                                pd.Series(0.0, index=enriched.index)).fillna(0)
+    rank_mom = mom_raw.rank(pct=True, method="average")
+    enriched["composite_score"] = (
+        (aw * rank_alpha + mw * rank_mom) / max(aw + mw, 1e-9)
+    )
+    log(f"[picks] composite_score = {aw:.2f}*rank(p_pre_surge) + "
+        f"{mw:.2f}*rank(momentum_z), univ {len(enriched)}")
+
+    enriched = enriched.sort_values("composite_score", ascending=False)
     picks = enriched.head(args.top_n).copy()
 
-    # Equal-weight by default; cap by governance tier
-    picks["weight_raw"] = 1.0 / max(1, len(picks))
+    # Weighting (defaults to `capped` for differentiated allocation; previously
+    # equal-weight gave every name 5%, which felt unsatisfying when picks have
+    # similar p_pre_surge values). Uses composite_score so high-conviction
+    # picks (where alpha and momentum agree) get larger weight.
+    weighting = args.weighting
+    score_for_weighting = picks["composite_score"]
+    if len(picks) == 0:
+        picks["weight"] = 0.0
+    elif weighting == "equal":
+        picks["weight"] = 1.0 / len(picks)
+    elif weighting == "score":
+        s = score_for_weighting.clip(lower=1e-9)
+        picks["weight"] = s / s.sum()
+    elif weighting == "score_power":
+        s = score_for_weighting.clip(lower=1e-9) ** float(args.score_power)
+        picks["weight"] = s / s.sum()
+    elif weighting == "capped":
+        s = score_for_weighting.clip(lower=1e-9) ** float(args.score_power)
+        w = s / s.sum()
+        cap = float(args.weight_cap)
+        # Iterative water-filling so cap-constrained weights still sum to 1.
+        for _ in range(20):
+            over = w > cap
+            if not over.any():
+                break
+            slack = float((w[over] - cap).sum())
+            w = w.where(~over, cap)
+            others = ~over
+            if others.any() and slack > 0:
+                pool = float(w[others].sum())
+                if pool > 0:
+                    w = w.where(~others, w + slack * w / pool)
+        picks["weight"] = w
+    log(f"[picks] weighting='{weighting}', top weight = "
+        f"{float(picks['weight'].max() if len(picks) else 0):.3f}, "
+        f"bottom = {float(picks['weight'].min() if len(picks) else 0):.3f}")
+
+    # Apply governance per-name cap on top of the weighting (further cap risky
+    # names; renormalize to sum 1).
     if "governance_risk_score" in picks.columns:
         picks["weight"] = [
             governance_weight_cap(float(r), float(w))
             for r, w in zip(picks["governance_risk_score"].fillna(0),
-                             picks["weight_raw"])
+                             picks["weight"])
         ]
         tot = float(picks["weight"].sum())
         if tot > 0:
             picks["weight"] = picks["weight"] / tot
-    else:
-        picks["weight"] = picks["weight_raw"]
 
     # 6. Persist outputs
     out_dir = DATA_ROOT / "outputs"
@@ -230,7 +331,8 @@ def main() -> int:
     keep_cols = [
         c for c in (
             "rebalance_date", "ticker", "name", "exchange", "market_cap",
-            "p_pre_surge", "adjusted_score",
+            "p_pre_surge", "adjusted_score", "composite_score",
+            "ret_12_1m", "ret_3m",
             "governance_risk_score", "governance_hard_veto_flag",
             "weight",
         ) if c in picks.columns
