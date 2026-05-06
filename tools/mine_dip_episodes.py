@@ -63,7 +63,7 @@ from kr_helpers import log  # noqa: E402
 DEFAULT_DIP_1D = -0.05
 DEFAULT_DIP_5D = -0.10
 DEFAULT_PEAK_LOOKBACK = 30        # business days for local-peak window
-DEFAULT_OUTCOME_WINDOW = 30       # business days forward for triple barrier
+DEFAULT_OUTCOME_WINDOW = 60       # business days forward for triple barrier
 DEFAULT_UPPER_PCT = 0.05          # within 5pct of peak = shake-out
 DEFAULT_LOWER_PCT = 0.20          # additional -20pct from dip low = distribution
 DEFAULT_MIN_MCAP_KRW = 5e11       # 5,000억 (consistent with picks generator)

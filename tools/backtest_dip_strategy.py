@@ -103,6 +103,41 @@ def _strategy_classifier(panel: pd.DataFrame, p_shakeout: np.ndarray,
     return pd.Series(out, index=panel.index)
 
 
+def _strategy_hybrid(panel: pd.DataFrame, p_shakeout: np.ndarray,
+                       hold_th: float, sell_th: float, stop_pct: float,
+                       cost_bp: float) -> pd.Series:
+    """Hybrid: classifier verdict + ALWAYS-ON stop-loss override.
+
+    Decision tree per event:
+      drawdown_pct <= stop_pct                      -> SELL at stop_pct (stop fires before classifier reads, no cost premium)
+      P >= hold_th                                   -> HOLD (full eps return)
+      P <  sell_th                                   -> SELL at dip close (realize drawdown - cost)
+      else (uncertain)                               -> REDUCE 50pct at dip close
+
+    The stop-loss is applied unconditionally: even when the classifier
+    says HOLD, an 8pct drawdown still triggers the sell. Mirrors a
+    sensible operator policy where ML is one input but hard stops
+    protect against tail outcomes.
+    """
+    eps_return = _episode_returns(panel)
+    cost = cost_bp / 10000.0
+    out = []
+    for i, r in enumerate(eps_return):
+        dd = float(panel.iloc[i].get("drawdown_pct") or 0)
+        p = p_shakeout[i]
+        # Hard stop fires first
+        if dd <= stop_pct:
+            out.append(stop_pct - cost)
+            continue
+        if p >= hold_th:
+            out.append(r)
+        elif p < sell_th:
+            out.append(dd - cost)
+        else:
+            out.append(0.5 * (dd - cost) + 0.5 * r)
+    return pd.Series(out, index=panel.index)
+
+
 def _summary(name: str, returns: pd.Series, labels: pd.Series) -> dict:
     arr = returns.dropna().values
     res = {
@@ -180,11 +215,19 @@ def main() -> int:
         sell_th=args.sell_threshold,
         cost_bp=args.cost_bp,
     )
+    r_hybrid = _strategy_hybrid(
+        labeled, proba,
+        hold_th=args.hold_threshold,
+        sell_th=args.sell_threshold,
+        stop_pct=-0.08,
+        cost_bp=args.cost_bp,
+    )
 
     summaries = [
         _summary("HOLD_ALL", r_hold, labeled["label"]),
         _summary("STOP_8PCT", r_stop, labeled["label"]),
         _summary("CLASSIFIER", r_cls, labeled["label"]),
+        _summary("HYBRID_CLS_STOP8", r_hybrid, labeled["label"]),
     ]
 
     # Confusion matrix vs ground-truth labels (interpret HOLD as predicting 1)

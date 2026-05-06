@@ -177,11 +177,52 @@ def main() -> int:
                     return None
                 return float(g.iloc[idx]["market_cap"])
 
+        # Load shared panels (KOSPI index + DART events) so the context
+        # and event feature groups light up too.
+        kospi_index = pd.DataFrame()
+        try:
+            from kr_pykrx_client import fetch_index_ohlcv
+            kospi_index = fetch_index_ohlcv(
+                "1001",
+                pd.Timestamp(args.start).strftime("%Y%m%d"),
+                pd.Timestamp(args.end).strftime("%Y%m%d"),
+                refresh_days=30,
+            )
+            log(f"[chain]   KOSPI index: {len(kospi_index)} days")
+        except Exception as e:
+            log(f"[chain]   KOSPI index fail: {e}", level="WARN")
+
+        # DART event panel — the existing feature_store cache (built by
+        # kr_features.prepare_event_panel during prior runs) is reused.
+        dart_event_panel = pd.DataFrame()
+        feature_store = DATA_ROOT / "feature_store"
+        if feature_store.exists():
+            for pq in feature_store.glob("event_panel_*.parquet"):
+                try:
+                    dart_event_panel = pd.read_parquet(pq)
+                    log(f"[chain]   reuse event_panel {pq.name} "
+                        f"({len(dart_event_panel)} rows)")
+                    break
+                except Exception:
+                    continue
+
+        # VKOSPI panel (or realized-vol proxy)
+        vkospi_panel = pd.DataFrame()
+        try:
+            from kr_derivatives import fetch_vkospi
+            vkospi_panel = fetch_vkospi(args.start, args.end, refresh_days=30)
+            log(f"[chain]   VKOSPI panel: {len(vkospi_panel)} days")
+        except Exception as e:
+            log(f"[chain]   VKOSPI fail: {e}", level="WARN")
+
         feat_panel = prepare_dip_feature_panel(
             episodes,
             ohlcv_lookup=lambda t: ohlcv_cache.get(t, pd.DataFrame()),
             flow_lookup=lambda t: flow_cache.get(t, pd.DataFrame()),
             mcap_lookup=mcap_lookup,
+            kospi_index=kospi_index if not kospi_index.empty else None,
+            vkospi_panel=vkospi_panel if not vkospi_panel.empty else None,
+            dart_event_panel=dart_event_panel if not dart_event_panel.empty else None,
         )
         feat_panel.to_parquet(feat_path, index=False)
         log(f"[chain]   wrote {feat_path}")
