@@ -135,6 +135,74 @@ def _rolling_metrics(returns_series: pd.Series,
     return out
 
 
+def build_krx_industry_strength_panel(
+    themes_cfg: dict,
+    start: str,
+    end: str,
+    benchmark_ticker: str = "1028",
+    include_kosdaq: bool = False,
+) -> pd.DataFrame:
+    """Daily strength panel for the KRX 27 KOSPI 업종지수.
+
+    AUTO-DISCOVERY layer — does NOT require any leader stock list. The KRX
+    publishes 일별 업종지수 OHLCV directly, so we can rank sectors by RS
+    against KOSPI200 every day without any hardcoded ticker mapping.
+
+    Returns:
+        Long-format frame with columns:
+          date, krx_code, sector_name, return,
+          abs_return_5d/20d/60d/120d/252d,
+          rs_kospi_5d/20d/60d/252d,
+          rs_kospi_20d_zscore_60d, stage
+    """
+    from kr_pykrx_client import fetch_index_ohlcv
+
+    industries: dict[str, str] = themes_cfg.get("krx_kospi_industries") or {}
+    if not industries:
+        return pd.DataFrame()
+
+    bench = fetch_index_ohlcv(
+        benchmark_ticker,
+        pd.Timestamp(start).strftime("%Y%m%d"),
+        pd.Timestamp(end).strftime("%Y%m%d"),
+        refresh_days=30,
+    )
+    if bench.empty or "close" not in bench.columns:
+        return pd.DataFrame()
+    bench = bench.sort_values("date").set_index("date")["close"].astype(float)
+    bench_ret = bench.pct_change()
+
+    out_frames = []
+    for code, name in industries.items():
+        idx = fetch_index_ohlcv(
+            code,
+            pd.Timestamp(start).strftime("%Y%m%d"),
+            pd.Timestamp(end).strftime("%Y%m%d"),
+            refresh_days=30,
+        )
+        if idx.empty or "close" not in idx.columns:
+            continue
+        s = idx.sort_values("date").set_index("date")["close"].astype(float)
+        ret = s.pct_change()
+        metrics = _rolling_metrics(ret, bench_ret)
+        df = metrics.copy()
+        df["return"] = ret.values
+        df["krx_code"] = code
+        df["sector_name"] = name
+        df["theme_key"] = f"krx_{code}"
+        df["theme_name_kr"] = name
+        out_frames.append(df)
+
+    if not out_frames:
+        return pd.DataFrame()
+    panel = pd.concat(out_frames, ignore_index=True)
+    thresholds = themes_cfg.get("lifecycle_thresholds") or {}
+    panel["stage"] = panel.apply(
+        lambda r: classify_lifecycle_stage(r.to_dict(), thresholds), axis=1
+    )
+    return panel
+
+
 def build_theme_strength_panel(
     themes_cfg: dict,
     start: str,

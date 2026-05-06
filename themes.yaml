@@ -95,8 +95,25 @@ themes:
       - "042700"   # 한미반도체
       - "058470"   # 리노공업
       - "108860"   # 셀바스AI
+      - "240810"   # 원익IPS (semi 장비)
+      - "095340"   # ISC (반도체 검사)
     drivers: ["dram_price", "dxi_index", "ai_capex", "samsung_hbm"]
     period_start: "2023-01"
+    period_end: null
+
+  power_grid:
+    name_kr: "전력기기/송배전"
+    description: "전력기기, AI 데이터센터 전력수요, SMR 그리드"
+    tickers:
+      - "267260"   # HD현대일렉트릭 (전력기기 1위)
+      - "010120"   # LS ELECTRIC (전력기기)
+      - "298040"   # 효성중공업 (변압기, 전력기기)
+      - "001440"   # 대한전선 (전력케이블)
+      - "012630"   # HDC (HD현대인프라코어)
+      - "008970"   # 동양철관 (송배전)
+      - "036530"   # NICE
+    drivers: ["data_center_power_demand", "smr_grid_buildout", "kepco_capex"]
+    period_start: "2024-01"
     period_end: null
 
   # === Recent (peaked / rolled over) ===
