@@ -1,0 +1,84 @@
+name: Weekly Theme Dashboard
+
+# Phase G live theme dashboard — runs every Monday after KRX market open
+# (~10:00 KST) to publish the latest theme leaderboard + cluster discovery
+# + stage transitions to Slack.
+
+on:
+  schedule:
+    - cron: '0 1 * * 1'    # Monday 10:00 KST (UTC+9)
+  workflow_dispatch:
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DART_API_KEY: ${{ secrets.DART_API_KEY }}
+      KR_DATA_DIR: ${{ github.workspace }}/data
+      RCLONE_CFG_TEXT: ${{ secrets.RCLONE_CONFIG_GDRIVE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Setup rclone
+        if: ${{ env.RCLONE_CFG_TEXT != '' }}
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_CFG_TEXT" > ~/.config/rclone/rclone.conf
+
+      - name: Sync caches from GDrive
+        if: ${{ env.RCLONE_CFG_TEXT != '' }}
+        run: |
+          mkdir -p data/cache_pykrx data/cache_misc data/data_pit data/outputs
+          rclone copy gdrive:kr_quant_engine/data_pit data/data_pit -P || true
+          rclone copy gdrive:kr_quant_engine/cache_misc data/cache_misc -P || true
+          rclone copy gdrive:kr_quant_engine/cache_pykrx data/cache_pykrx -P || true
+
+      - name: Run named-theme dashboard
+        run: |
+          python tools/theme_strength_today.py --no-krx --top-n 12 --show-bottom
+
+      - name: Run cluster discovery
+        run: |
+          python tools/discover_themes_clustering.py \
+            --max-tickers 300 --n-clusters 15
+
+      - name: Sync outputs back to GDrive
+        if: ${{ env.RCLONE_CFG_TEXT != '' && always() }}
+        run: |
+          rclone copy data/outputs gdrive:kr_quant_engine/outputs -P || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-dashboard-${{ github.run_number }}
+          path: |
+            data/outputs/theme_today_*.json
+            data/outputs/discovered_themes_*.json
+          retention-days: 365
+
+      - name: Slack notify
+        if: success() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          STAMP=$(date -u +%Y-%m-%d)
+          THEME_JSON="data/outputs/theme_today_${STAMP}.json"
+          if [ -f "$THEME_JSON" ]; then
+            TOP1=$(python -c "import json;d=json.load(open('$THEME_JSON'));t=d.get('top',[{}])[0];print(f\"{t.get('theme_name_kr','')}: rs60d {t.get('rs_kospi_60d',0)*100:.1f}%, stage {t.get('stage','')}\")" 2>/dev/null || echo "")
+            N_TRANS=$(python -c "import json;d=json.load(open('$THEME_JSON'));print(len(d.get('transitions',[])))" 2>/dev/null || echo "0")
+            curl -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\":bar_chart: kr-quant-engine theme dashboard ${STAMP}\\nTop theme: ${TOP1}\\nStage transitions today: ${N_TRANS}\\nFull report in artifacts.\"}" \
+              "$SLACK_WEBHOOK_URL"
+          fi

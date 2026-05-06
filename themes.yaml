@@ -14,6 +14,10 @@ phase_thresholds:
   rolling_over: { peak_drop_pct: -0.15, peak_within_months: 3 }   # AVOID
 
 # Lifecycle stage classifier thresholds (Wyckoff)
+# v2 (2026-05-06): tuned based on AI/반도체 false-markdown observation.
+# 60d RS positive but 20d -13% triggered emergency_exit. Now require BOTH
+# 60d AND 20d to be negative before declaring markdown so a healthy uptrend
+# survives short pullbacks.
 lifecycle_thresholds:
   markup_entry:
     rs_kospi_20d_min: 0.05         # +5% RS over 20d
@@ -24,11 +28,15 @@ lifecycle_thresholds:
     abs_return_60d_max: 0.0
     vol_z_60d_min: 0.5              # high churn volume
   markdown_entry:
-    rs_kospi_60d_max: -0.05
+    rs_kospi_60d_max: -0.05         # 60d RS negative
     abs_return_120d_max: 0.0
     breadth_max: 0.30               # < 30% leaders rising
   emergency_exit:
-    rs_kospi_20d_zscore_max: -2.0   # RS z-score < -2 = panic exit
+    # v2: stricter emergency exit -- requires both very deep z-score
+    # AND 60d RS already negative. Prevents premature exit on healthy
+    # but volatile uptrends.
+    rs_kospi_20d_zscore_max: -2.5   # was -2.0
+    rs_kospi_60d_max: 0.0           # AND 60d RS negative
 
 # === 핵심 테마 (Phase G — leader stocks + active period) ===
 themes:

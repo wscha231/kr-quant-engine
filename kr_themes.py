@@ -279,9 +279,12 @@ def classify_lifecycle_stage(metrics: dict, thresholds: dict) -> str:
     abs20 = metrics.get("abs_return_20d") or 0
     rs20_z = metrics.get("rs_kospi_20d_zscore_60d") or 0
 
-    # Emergency exit
-    if rs20_z <= em.get("rs_kospi_20d_zscore_max", -2.0):
-        return "markdown"  # treat as immediate markdown
+    # Emergency exit (v2): requires BOTH deep z-score AND 60d RS already
+    # turned negative. Prevents premature exit during healthy but volatile
+    # uptrends (e.g., AI/반도체 with 60d +3.7pct but 20d -13pct).
+    if (rs20_z <= em.get("rs_kospi_20d_zscore_max", -2.5)
+            and rs60 <= em.get("rs_kospi_60d_max", 0.0)):
+        return "markdown"
     # Markdown
     if (rs60 < md.get("rs_kospi_60d_max", -0.05)
             and abs120 < md.get("abs_return_120d_max", 0.0)):
