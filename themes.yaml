@@ -1,10 +1,11 @@
 # themes.yaml — 한국시장 테마 분류 + phase classifier
-# r1000 themes.yaml 패턴 차용. P2에서 본격 활용.
+# r1000 themes.yaml 패턴 차용 + Phase G theme rotation strategy.
 
-version: "0.1"
-last_updated: "2026-04-27"
+version: "0.2"
+last_updated: "2026-05-06"
 
-# Phase classifier thresholds
+# Phase classifier thresholds (Phase G — Wyckoff lifecycle stages)
+# accumulate (축적) -> markup (상승초입) -> distribute (분배) -> markdown (약화)
 phase_thresholds:
   dormant: { return_3m_max: 0.0 }
   emerging: { return_3m_min: 0.0, return_3m_max: 0.15, volume_zscore_min: 1.0 }
@@ -12,84 +13,207 @@ phase_thresholds:
   parabolic: { return_3m_min: 0.50 }                  # AVOID
   rolling_over: { peak_drop_pct: -0.15, peak_within_months: 3 }   # AVOID
 
-# === 핵심 테마 (P2 시점 확장 예정) ===
-# tickers는 런타임에 KRX 분류 + Naver 테마 + 수동 라벨링으로 채움
+# Lifecycle stage classifier thresholds (Wyckoff)
+lifecycle_thresholds:
+  markup_entry:
+    rs_kospi_20d_min: 0.05         # +5% RS over 20d
+    abs_return_20d_min: 0.0
+    new_high_count_pct_min: 0.30   # 30%+ leaders at 52w high
+  distribute_entry:
+    rs_kospi_60d_max: -0.02         # RS turning negative
+    abs_return_60d_max: 0.0
+    vol_z_60d_min: 0.5              # high churn volume
+  markdown_entry:
+    rs_kospi_60d_max: -0.05
+    abs_return_120d_max: 0.0
+    breadth_max: 0.30               # < 30% leaders rising
+  emergency_exit:
+    rs_kospi_20d_zscore_max: -2.0   # RS z-score < -2 = panic exit
+
+# === 핵심 테마 (Phase G — leader stocks + active period) ===
 themes:
-  semiconductor:
-    name_kr: "반도체"
-    description: "메모리 + 비메모리 + 장비 + 소재"
-    tickers: []      # e.g. ["005930", "000660", "042700", ...]
-    drivers: ["dram_price", "dxi_index", "ai_capex"]
 
-  battery:
-    name_kr: "2차전지"
-    description: "양극재, 음극재, 분리막, 전해질, 셀"
-    tickers: []
-    drivers: ["lithium_price", "ev_sales", "ira_subsidy"]
-
-  ai_software:
-    name_kr: "AI"
-    description: "AI 솔루션, LLM, 데이터센터"
-    tickers: []
-    drivers: ["nvidia_capex", "samsung_hbm", "data_center_demand"]
-
-  bio:
-    name_kr: "바이오"
-    description: "신약, 바이오시밀러, 진단"
-    tickers: []
-    drivers: ["fda_approvals", "clinical_trials"]
-
+  # === Currently active (2024-2026) ===
   shipbuilding:
     name_kr: "조선"
     description: "LNG선, 컨테이너선, 해양플랜트"
-    tickers: []
+    tickers:
+      - "329180"   # HD현대중공업
+      - "010140"   # 삼성중공업
+      - "010620"   # 현대미포조선
+      - "009540"   # HD한국조선해양
+      - "067390"   # 코메론
     drivers: ["clarksons_index", "lng_demand", "imo_regulation"]
+    period_start: "2024-06"
+    period_end: null
 
   defense:
     name_kr: "방산"
     description: "항공, 미사일, 통신, 사이버"
-    tickers: []
+    tickers:
+      - "012450"   # 한화에어로스페이스
+      - "064350"   # 현대로템
+      - "047810"   # 한국항공우주
+      - "079550"   # LIG넥스원
+      - "377300"   # 한화시스템
     drivers: ["nato_spending", "kr_export_orders"]
+    period_start: "2024-01"
+    period_end: null
 
   nuclear:
-    name_kr: "원전"
+    name_kr: "원전/SMR"
     description: "SMR, 대형원전, 후속비용"
-    tickers: []
+    tickers:
+      - "034020"   # 두산에너빌리티
+      - "267260"   # HD현대일렉트릭
+      - "104100"   # 한전기술
+      - "036530"   # NICE
+      - "057880"   # 필링크
     drivers: ["smr_orders", "energy_policy"]
+    period_start: "2024-09"
+    period_end: null
 
-  display:
-    name_kr: "디스플레이"
-    description: "OLED, LCD, 마이크로LED"
-    tickers: []
-    drivers: ["apple_orders", "panel_pricing"]
+  bio:
+    name_kr: "바이오"
+    description: "신약, 바이오시밀러, 진단"
+    tickers:
+      - "207940"   # 삼성바이오로직스
+      - "068270"   # 셀트리온
+      - "326030"   # SK바이오팜
+      - "048410"   # 현대바이오
+      - "196170"   # 알테오젠
+    drivers: ["fda_approvals", "clinical_trials"]
+    period_start: "2020-01"
+    period_end: null
 
+  ai_semiconductor:
+    name_kr: "AI/반도체"
+    description: "메모리 + HBM + 장비 + AI"
+    tickers:
+      - "005930"   # 삼성전자
+      - "000660"   # SK하이닉스
+      - "042700"   # 한미반도체
+      - "058470"   # 리노공업
+      - "108860"   # 셀바스AI
+    drivers: ["dram_price", "dxi_index", "ai_capex", "samsung_hbm"]
+    period_start: "2023-01"
+    period_end: null
+
+  # === Recent (peaked / rolled over) ===
+  battery_secondary_wave:
+    name_kr: "2차전지 (2023-24 광기)"
+    description: "에코프로 광기 후 markdown"
+    tickers:
+      - "086520"   # 에코프로
+      - "247540"   # 에코프로비엠
+      - "373220"   # LG에너지솔루션
+      - "066970"   # 엘앤에프
+      - "003670"   # 포스코퓨처엠
+    drivers: ["lithium_price", "ev_sales", "ira_subsidy"]
+    period_start: "2023-07"
+    period_end: "2024-03"
+
+  # === Historical (검증 + sector rotation 학습용) ===
+  battery_primary_wave:
+    name_kr: "2차전지 (2020-21 1차파동)"
+    description: "1차 EV 광기"
+    tickers:
+      - "051910"   # LG화학
+      - "006400"   # 삼성SDI
+      - "247540"   # 에코프로비엠
+      - "066970"   # 엘앤에프
+    period_start: "2020-01"
+    period_end: "2021-09"
+
+  metaverse:
+    name_kr: "메타버스/NFT"
+    description: "2021 광기"
+    tickers:
+      - "112040"   # 위메이드
+      - "078340"   # 컴투스
+      - "036570"   # NCSOFT
+    period_start: "2021-01"
+    period_end: "2022-06"
+
+  iron_steel:
+    name_kr: "철강/원자재"
+    description: "2022 인플레/원자재 cycle"
+    tickers:
+      - "005490"   # POSCO홀딩스
+      - "004020"   # 현대제철
+      - "058430"   # 포스코강판
+    period_start: "2022-01"
+    period_end: "2022-12"
+
+  contactless:
+    name_kr: "비대면/언택트 (COVID)"
+    description: "COVID 비대면 boom"
+    tickers:
+      - "035420"   # NAVER
+      - "035720"   # 카카오
+      - "036570"   # NCSOFT
+    period_start: "2020-03"
+    period_end: "2021-06"
+
+  # === Long-running (less seasonal) ===
   automotive:
     name_kr: "자동차"
     description: "완성차, 부품, 전장"
-    tickers: []
+    tickers:
+      - "005380"   # 현대자동차
+      - "000270"   # 기아
+      - "012330"   # 현대모비스
     drivers: ["us_auto_sales", "chip_supply", "ev_transition"]
+    period_start: "2020-01"
+    period_end: null
 
   internet_platform:
     name_kr: "인터넷·플랫폼"
     description: "포털, 커머스, 핀테크, 게임"
-    tickers: []
+    tickers:
+      - "035420"   # NAVER
+      - "035720"   # 카카오
     drivers: ["consumer_spending", "ad_revenue"]
+    period_start: "2020-01"
+    period_end: null
 
-# === Phase 4 등가 — regime별 테마 가중 (P3 정의) ===
+
+# === KRX 27 업종지수 baseline (passive tracker) ===
+krx_kospi_industries:
+  "1003": 음식료품
+  "1004": 섬유의복
+  "1005": 종이목재
+  "1006": 화학
+  "1007": 의약품
+  "1008": 비금속광물
+  "1009": 철강금속
+  "1010": 기계
+  "1011": 전기전자
+  "1012": 의료정밀
+  "1013": 운수장비
+  "1014": 유통업
+  "1015": 전기가스업
+  "1016": 건설업
+  "1017": 운수창고
+  "1018": 통신업
+  "1019": 금융업
+  "1020": 은행
+  "1021": 증권
+  "1022": 보험
+  "1023": 서비스업
+  "1024": 제조업
+
+
+# === regime-별 테마 가중 (P3 active) ===
 regime_theme_multipliers:
   bull_trending:
-    semiconductor: 1.20
-    ai_software: 1.30
-    battery: 1.10
+    ai_semiconductor: 1.30
+    battery_primary_wave: 1.20
+    shipbuilding: 1.20
   bear_falling:
     defense: 1.20
     nuclear: 1.15
-    bio: 1.05    # defensive
+    bio: 1.05
   recovery:
     automotive: 1.20
-    semiconductor: 1.15
-
-# === 추가 후보 (P2 시점 enrich) ===
-# 화장품, 음식료, 건설, 철강, 화학, 유통, 통신, 보험, 은행, 증권, 미디어,
-# 게임, 엔터, 콘텐츠, 항공, 해운, 물류, 식자재유통, 전자결제, 보안, 로봇,
-# 우주항공, 수소, 풍력, 태양광, 식품, 의료기기, 농업, 펫, 메타버스, 헬스케어
+    ai_semiconductor: 1.15
