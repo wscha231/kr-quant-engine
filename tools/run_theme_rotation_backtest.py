@@ -54,6 +54,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--stocks-per-theme", type=int, default=3)
     p.add_argument("--rebalance-day", default="Mon",
                    help="Day of week for rebalance (Mon/Tue/.../Fri).")
+    # Anti-shake-out hold logic — Korean market shakes positions hard;
+    # short markdowns are often noise. Require N consecutive weeks of bad
+    # stage before exiting a held theme.
+    p.add_argument("--exit-confirmation-weeks", type=int, default=3,
+                   help="Hold a position even if stage flips bad until "
+                        "the bad stage persists for N weeks (default 3).")
+    p.add_argument("--hard-stop-pct", type=float, default=-0.25,
+                   help="Hard stop loss per holding (default -25pct). "
+                        "Bypasses shake-out resistance.")
     p.add_argument("--out-prefix", default=None)
     return p.parse_args()
 
@@ -197,33 +206,53 @@ def main() -> int:
         markup_themes = [t for t, s in stages.items() if s == "markup"]
         bad_themes = [t for t, s in stages.items() if s in ("distribute", "markdown")]
 
-        # 3. Sell holdings whose theme has gone bad
+        # 3. Sell holdings — Korean market specific anti-shake-out logic:
+        #    a) Hard-stop firing if drawdown <= --hard-stop-pct (always)
+        #    b) Theme bad-stage streak >= --exit-confirmation-weeks
+        #       (default 3 weeks → ignore single-week noise)
         sells_this_week = 0
         for tk in list(holdings.keys()):
             h = holdings[tk]
-            if h["theme_key"] in bad_themes:
-                px = _fetch_close(tk, day, prices_cache,
-                                window_start=bt_start_ts,
-                                window_end=bt_end_ts)
-                if px is None:
-                    continue
-                proceeds = h["qty"] * px * (1 - cost)
-                cash += proceeds
-                realized_ret = (px / h["entry_price"] - 1) - cost
-                trade_log.append({
-                    "date": day.date(),
-                    "ticker": tk,
-                    "action": "SELL",
-                    "reason": "theme_exit_" + stages.get(h["theme_key"], "?"),
-                    "theme_key": h["theme_key"],
-                    "qty": h["qty"],
-                    "price": px,
-                    "value_krw": proceeds,
-                    "holding_days": (day - h["entry_date"]).days,
-                    "realized_return": realized_ret,
-                })
-                del holdings[tk]
-                sells_this_week += 1
+            px = _fetch_close(tk, day, prices_cache,
+                            window_start=bt_start_ts,
+                            window_end=bt_end_ts)
+            if px is None:
+                continue
+            position_dd = px / h["entry_price"] - 1.0
+
+            # (a) Hard stop — bypass anti-shake-out
+            hard_stop_fire = position_dd <= float(args.hard_stop_pct)
+
+            # (b) Bad-stage streak tracker
+            theme_now_bad = h["theme_key"] in bad_themes
+            h["bad_stage_streak"] = (
+                (h.get("bad_stage_streak", 0) + 1) if theme_now_bad else 0
+            )
+            confirmed_bad = h["bad_stage_streak"] >= int(args.exit_confirmation_weeks)
+
+            sell_now = hard_stop_fire or confirmed_bad
+            if not sell_now:
+                continue
+
+            proceeds = h["qty"] * px * (1 - cost)
+            cash += proceeds
+            realized_ret = position_dd - cost
+            reason = ("hard_stop" if hard_stop_fire
+                       else f"theme_exit_{stages.get(h['theme_key'], '?')}_streak{h['bad_stage_streak']}w")
+            trade_log.append({
+                "date": day.date(),
+                "ticker": tk,
+                "action": "SELL",
+                "reason": reason,
+                "theme_key": h["theme_key"],
+                "qty": h["qty"],
+                "price": px,
+                "value_krw": proceeds,
+                "holding_days": (day - h["entry_date"]).days,
+                "realized_return": realized_ret,
+            })
+            del holdings[tk]
+            sells_this_week += 1
 
         # 4. Determine target themes (held + new markup)
         held_themes = {h["theme_key"] for h in holdings.values()}
