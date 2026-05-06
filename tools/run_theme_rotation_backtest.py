@@ -63,6 +63,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--hard-stop-pct", type=float, default=-0.25,
                    help="Hard stop loss per holding (default -25pct). "
                         "Bypasses shake-out resistance.")
+    p.add_argument("--g5-classifier-weight", type=float, default=0.0,
+                   help="Phase G5: blend multibagger classifier into "
+                        "leader scoring (0 = theme-only, 0.4 recommended).")
     p.add_argument("--out-prefix", default=None)
     return p.parse_args()
 
@@ -110,9 +113,19 @@ def _theme_active_today(theme_panel: pd.DataFrame, day: pd.Timestamp,
 
 
 def _select_leader_stocks(theme_key: str, themes_cfg: dict,
-                            as_of: pd.Timestamp, n: int = 3) -> list[str]:
-    from kr_themes import select_theme_leaders
-    rows = select_theme_leaders(theme_key, themes_cfg, as_of, n=n)
+                            as_of: pd.Timestamp, n: int = 3,
+                            classifier_weight: float = 0.0) -> list[str]:
+    """Phase G5: when classifier_weight > 0, route through the blended
+    selector. Otherwise keep the legacy theme-only ranking."""
+    if classifier_weight > 0:
+        from kr_themes import select_theme_leaders_with_classifier
+        rows = select_theme_leaders_with_classifier(
+            theme_key, themes_cfg, as_of, n=n,
+            classifier_weight=classifier_weight,
+        )
+    else:
+        from kr_themes import select_theme_leaders
+        rows = select_theme_leaders(theme_key, themes_cfg, as_of, n=n)
     return [r["ticker"] for r in rows]
 
 
@@ -269,6 +282,7 @@ def main() -> int:
             for theme in new_target_themes:
                 leaders = _select_leader_stocks(
                     theme, themes_cfg, day, n=args.stocks_per_theme,
+                    classifier_weight=float(args.g5_classifier_weight),
                 )
                 for tk in leaders:
                     if tk in holdings or cash < target_per_stock * 0.5:

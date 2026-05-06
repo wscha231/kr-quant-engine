@@ -306,6 +306,142 @@ def classify_lifecycle_stage(metrics: dict, thresholds: dict) -> str:
 # ---------------------------------------------------------------------------
 # Stock selection within a theme
 # ---------------------------------------------------------------------------
+def select_theme_leaders_with_classifier(
+    theme_key: str,
+    themes_cfg: dict,
+    as_of: pd.Timestamp,
+    n: int = 3,
+    classifier_path: Optional[Path] = None,
+    classifier_weight: float = 0.4,
+    benchmark_ticker: str = "1028",
+) -> list[dict]:
+    """G5: Theme leader scoring blended with multibagger classifier P_pre_surge.
+
+    Combines:
+        - Within-theme momentum signals (52w-high proximity, vol_z, RS)
+        - Multibagger classifier output P(pre_surge) loaded from disk
+
+    Final composite score:
+        composite = (1 - w) * theme_proximity_score + w * p_pre_surge_normalized
+
+    where w = classifier_weight (default 0.4). Set w=0 to disable classifier
+    blend (= legacy select_theme_leaders behaviour).
+
+    Returns:
+        Top-N list of {ticker, name, p_pre_surge, theme_score,
+                        composite_score, market_cap, dist_from_52w_high}.
+    """
+    from kr_pykrx_client import fetch_ticker_history
+    import numpy as np
+
+    meta = themes_cfg.get("themes", {}).get(theme_key)
+    if not meta:
+        return []
+    tickers = [str(t).zfill(6) for t in meta.get("tickers") or []]
+    if not tickers:
+        return []
+    end = pd.Timestamp(as_of).strftime("%Y%m%d")
+    start = (pd.Timestamp(as_of) - pd.Timedelta(days=400)).strftime("%Y%m%d")
+
+    # Try loading classifier
+    cb_model = None
+    feat_cols = None
+    if classifier_weight > 0:
+        from kr_config import DATA_ROOT
+        cls_path = (Path(classifier_path) if classifier_path
+                     else (DATA_ROOT / "models" / "classifier_latest.cbm"))
+        metrics_path = (DATA_ROOT / "models" / "classifier_latest_metrics.json")
+        if cls_path.exists():
+            try:
+                from catboost import CatBoostClassifier
+                cb_model = CatBoostClassifier()
+                cb_model.load_model(str(cls_path))
+                if metrics_path.exists():
+                    import json
+                    with open(metrics_path, "r", encoding="utf-8") as f:
+                        feat_cols = json.load(f).get("feature_cols")
+            except Exception as e:
+                log(f"[g5] classifier load fail: {e}", level="WARN")
+                cb_model = None
+
+    rows = []
+    for tk in tickers:
+        try:
+            h = fetch_ticker_history(tk, start, end, refresh_days=30)
+        except Exception:
+            continue
+        if h.empty or "close" not in h.columns or len(h) < 60:
+            continue
+        h = h.sort_values("date")
+        closes = h["close"].astype(float).values
+        cur = closes[-1]
+        if len(closes) >= 252:
+            high_252 = float(closes[-252:].max())
+            dist_high = (cur / high_252 - 1.0) if high_252 > 0 else np.nan
+        else:
+            dist_high = np.nan
+        if len(closes) >= 60 and "volume" in h.columns:
+            vols = h["volume"].astype(float).fillna(0).values
+            vw = vols[-60:]
+            mu = float(vw.mean())
+            sd = float(vw.std(ddof=1)) if len(vw) > 1 else 0
+            vol_z = (vols[-1] - mu) / sd if sd > 0 else 0
+        else:
+            vol_z = 0
+        rows.append({
+            "ticker": tk,
+            "name": "",
+            "close_today": cur,
+            "dist_from_52w_high": dist_high,
+            "vol_z_60d": vol_z,
+            "p_pre_surge": np.nan,   # filled below if classifier active
+        })
+
+    if not rows:
+        return []
+    df = pd.DataFrame(rows)
+    df["proximity_score"] = (1 + df["dist_from_52w_high"].fillna(-0.5)).clip(0, 1)
+    df["vol_z_score"] = df["vol_z_60d"].fillna(0).rank(pct=True)
+    df["theme_score"] = (
+        0.7 * df["proximity_score"]
+        + 0.3 * df["vol_z_score"]
+    )
+
+    # Optional classifier blend
+    if cb_model is not None and feat_cols is not None and len(feat_cols):
+        # Build feature row per ticker. We do not have the full universe-
+        # feature pipeline here, so we zero-fill the row and let the
+        # classifier produce a probability based on whatever features
+        # match the live universe. This is approximate but matches what
+        # generate_monthly_picks does when many phases are disabled.
+        X = pd.DataFrame(0.0, index=df.index, columns=feat_cols)
+        # Populate the columns we DO know
+        if "market_cap" in feat_cols:
+            X["market_cap"] = df["close_today"] * 100_000_000  # rough proxy
+        if "dist_from_52w_high" in feat_cols:
+            X["dist_from_52w_high"] = df["dist_from_52w_high"].fillna(0)
+        if "volume_zscore_50" in feat_cols:
+            X["volume_zscore_50"] = df["vol_z_60d"].fillna(0)
+        try:
+            df["p_pre_surge"] = cb_model.predict_proba(X.values)[:, 1]
+        except Exception as e:
+            log(f"[g5] predict fail: {e}", level="WARN")
+            df["p_pre_surge"] = 0.0
+
+    if cb_model is not None and not df["p_pre_surge"].isna().all():
+        # Rank-normalize p_pre_surge for blending with theme_score
+        df["classifier_score"] = df["p_pre_surge"].fillna(0).rank(pct=True)
+        df["composite_score"] = (
+            (1 - classifier_weight) * df["theme_score"]
+            + classifier_weight * df["classifier_score"]
+        )
+    else:
+        df["composite_score"] = df["theme_score"]
+
+    df = df.sort_values("composite_score", ascending=False)
+    return df.head(n).to_dict(orient="records")
+
+
 def select_theme_leaders(
     theme_key: str,
     themes_cfg: dict,
