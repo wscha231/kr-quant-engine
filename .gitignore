@@ -61,6 +61,11 @@ desktop.ini
 *.log
 logs/
 
+# Local portfolio state (private)
+state/current_holdings.csv
+state/manual_overrides.csv
+!state/current_holdings.example.csv
+
 # Temporary
 tmp_*/
 *_tmp.py

@@ -1,0 +1,3 @@
+as_of_date,account_id,ticker,name,shares,avg_cost,last_price,market_value,weight,unrealized_pnl_pct,thesis_tag,manual_lock
+2026-05-30,paper,005930,Samsung Electronics,10,70000,72000,720000,0.50,0.0286,example,false
+2026-05-30,paper,000660,SK Hynix,2,180000,190000,380000,0.50,0.0556,example,false

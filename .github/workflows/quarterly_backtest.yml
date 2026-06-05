@@ -50,6 +50,21 @@ jobs:
       - name: Run quarterly backtest
         run: python tools/run_quarterly_backtest.py --top-n 20 --weighting equal
 
+      - name: Run KR1000 validation diagnostic
+        run: |
+          set +e
+          python tools/run_kr1000_validation_gate.py \
+            --periods official_8y,full_2016,stress_2020_2022,stress_2023_current \
+            --profiles full \
+            --skip-daily-check \
+            --allow-blocked-backtest
+          rc=$?
+          # Keep the legacy quarterly report available even if the KR1000
+          # diagnostic is blocked by stale feature_store or price coverage.
+          if [ "$rc" != "0" ]; then
+            echo "::warning::KR1000 validation diagnostic exited with status $rc"
+          fi
+
       - name: Sync outputs back to GDrive
         if: ${{ env.RCLONE_CFG_TEXT != '' }}
         run: |
@@ -62,6 +77,7 @@ jobs:
           path: |
             data/outputs/quarterly_backtest_*.json
             data/outputs/quarterly_backtest_*_monthly.csv
+            data/outputs/kr1000_validation_gate_*/**
           retention-days: 365
 
       - name: Slack notify

@@ -18,7 +18,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # Bump this string when any signal formula changes. cache_*, feature_store,
 # models artifacts will be regenerated.
-KR_ENGINE_REUSE_VERSION = "2026-04-28-p1-dart-fundamentals"
+KR_ENGINE_REUSE_VERSION = "2026-06-05-p1-pit-data-audit"
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +308,32 @@ PHASE3_REGIME_COLUMNS = (
     "regime_sleeve_multiplier_early",
 )
 
+# P4 KR1000 Leader Alpha (stock-first production layer)
+PHASE4_KR1000_LEADER_COLUMNS = (
+    "kr1000_liquidity_rank",
+    "kr1000_market_cap_rank",
+    "in_kr1000",
+    "rs_1m",
+    "rs_3m",
+    "rs_6m",
+    "rs_composite",
+    "beta_adjusted_rs_3m",
+    "beta_adjusted_rs_6m",
+    "rs_score",
+    "flow_score",
+    "technical_score",
+    "quality_growth_score",
+    "valuation_score",
+    "theme_sector_score",
+    "event_governance_score",
+    "leader_score",
+    "leader_rank",
+    "eligible_final",
+    "risk_veto_flag",
+    "hard_exit_flag",
+    "max_weight",
+)
+
 # All phase columns combined (for keep_cols total)
 ALL_PHASE_COLUMNS = (
     PHASE0_MOMENTUM_COLUMNS
@@ -317,6 +343,7 @@ ALL_PHASE_COLUMNS = (
     + PHASE3_TECHNICAL_COLUMNS
     + PHASE3_MACRO_COLUMNS
     + PHASE3_REGIME_COLUMNS
+    + PHASE4_KR1000_LEADER_COLUMNS
 )
 
 
@@ -430,6 +457,59 @@ DEFAULT_CFG: dict[str, Any] = {
     "multibagger_post_surge_include_months": 3,  # surge-still-detectable window
     "multibagger_surge_breakout_pct": 0.20,      # surge_start = first +20% from entry
 }
+
+
+def kr1000_leader_alpha_cfg(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Preset for KR1000 Leader Alpha.
+
+    KR1000 is a PIT liquidity-ranked KOSPI+KOSDAQ production universe. The
+    full market remains available for discovery, but live targets and the
+    ledger backtest use the top 1000 by 60-day trading value.
+    """
+    cfg = dict(DEFAULT_CFG)
+    cfg.update({
+        "strategy_name": "KR1000 Leader Alpha",
+        "universe_name": "KR1000",
+        "kr1000_size": 1000,
+        "kr_all_discovery_enabled": True,
+        "universe_rank_by": "avg_trading_value_60d",
+        "universe_tiebreaker": "market_cap",
+        "benchmark_ticker": BENCHMARK_KOSPI200,
+        "benchmark_name": "KOSPI200",
+        "portfolio_size": 20,
+        "top_holdings": 20,
+        "buy_rank_threshold": 20,
+        "hold_rank_threshold": 40,
+        "weekly_rebalance_day": 0,          # Monday
+        "daily_hard_exit_enabled": True,
+        "single_stock_max_weight": 0.07,
+        "sector_theme_max_weight": 0.25,
+        "gross_exposure_min": 0.45,
+        "gross_exposure_max": 1.00,
+        "gross_exposure_default": 1.00,
+        "target_cagr_gate": 0.30,
+        "target_mdd_gate": -0.25,
+        "target_excess_cagr_gate": 0.0,
+        "target_sharpe_gate": 1.0,
+        "target_information_ratio_gate": 0.5,
+        "target_min_backtest_years": 8.0,
+        "score_profile": "full",
+        "hold_band_weight": 0.01,
+        "min_notional_krw": 100000.0,
+        "metric_mode": "broker_ledger_next_close",
+        "execution_price": "next_close",
+        "signal_timing": "after_close",
+        "execution_timing": "next_trading_day_close",
+        "apply_no_fill_rules": True,
+        "integer_shares": True,
+        "no_negative_cash": True,
+        "no_leverage": True,
+        "hard_stop_loss_pct": 0.15,
+        "avg_value_refresh_days": 3650,
+    })
+    if overrides:
+        cfg.update(overrides)
+    return cfg
 
 
 # ---------------------------------------------------------------------------

@@ -58,6 +58,58 @@ REPRT_CODES = {
 }
 REPRT_NAMES = {v: k for k, v in REPRT_CODES.items()}
 
+CALENDAR_PERIOD_END_BY_REPRT_CODE = {
+    "11013": (3, 31),
+    "11012": (6, 30),
+    "11014": (9, 30),
+    "11011": (12, 31),
+}
+
+
+def _calendar_period_end(bsns_year: int, reprt_code: str) -> pd.Timestamp:
+    """Calendar-year period end implied by DART report code."""
+    month, day = CALENDAR_PERIOD_END_BY_REPRT_CODE[str(reprt_code)]
+    return pd.Timestamp(year=int(bsns_year), month=month, day=day)
+
+
+def _previous_calendar_quarter_end(ts: pd.Timestamp) -> pd.Timestamp:
+    """Latest Mar/Jun/Sep/Dec quarter-end strictly before ts."""
+    anchor = pd.Timestamp(ts).normalize() - pd.Timedelta(days=1)
+    candidates = []
+    for year in (anchor.year - 1, anchor.year):
+        for month, day in ((3, 31), (6, 30), (9, 30), (12, 31)):
+            cand = pd.Timestamp(year=year, month=month, day=day)
+            if cand <= anchor:
+                candidates.append(cand)
+    return max(candidates)
+
+
+def infer_report_period_end(
+    bsns_year: int,
+    reprt_code: str,
+    rcept_dt: Optional[pd.Timestamp] = None,
+) -> tuple[pd.Timestamp, bool]:
+    """Infer non-future period_end metadata for DART financial reports.
+
+    DART report codes are fiscal-period codes, not always calendar-period
+    codes. For non-December fiscal-year companies, the naive calendar mapping
+    can produce impossible metadata such as Q3 period_end after rcept_dt. The
+    filing date remains the PIT timestamp; this helper only prevents future
+    period metadata from contaminating TTM/order logic.
+
+    Returns:
+        (period_end, adjusted_from_calendar)
+    """
+    period_end = _calendar_period_end(int(bsns_year), str(reprt_code))
+    if rcept_dt is None or pd.isna(rcept_dt):
+        return period_end, False
+
+    rd = pd.Timestamp(rcept_dt).normalize()
+    if period_end <= rd:
+        return period_end, False
+
+    return _previous_calendar_quarter_end(rd), True
+
 # Account ID mapping — XBRL standard (IFRS) + DART extension
 # Used for fast account_id lookup in financial statements
 KEY_ACCOUNTS = {
@@ -501,7 +553,6 @@ def build_universe_quarterly_panel(
     rows = []
     # Process in batches of 100
     batches = [corp_codes[i:i+100] for i in range(0, len(corp_codes), 100)]
-    pe_map = {"11013": "03-31", "11012": "06-30", "11014": "09-30", "11011": "12-31"}
 
     for year in range(start_year, end_year + 1):
         for reprt_code in REPRT_CODES.values():
@@ -514,16 +565,20 @@ def build_universe_quarterly_panel(
                 # Pivot into one row per corp_code
                 # (account names: 매출액, 영업이익, 당기순이익, 자산총계, 부채총계, 자본총계)
                 for cc, g in df.groupby("corp_code"):
+                    rcept_dt = pd.NaT
+                    if "rcept_dt" in g.columns:
+                        rd = g["rcept_dt"].dropna()
+                        rcept_dt = rd.iloc[0] if not rd.empty else pd.NaT
+                    period_end, adjusted = infer_report_period_end(year, reprt_code, rcept_dt)
                     row = {
                         "corp_code": cc,
                         "bsns_year": year,
                         "reprt_code": reprt_code,
-                        "period_end": pd.Timestamp(f"{year}-{pe_map[reprt_code]}"),
+                        "period_end": period_end,
+                        "period_end_adjusted_from_calendar": adjusted,
                     }
                     # Most recent rcept_dt within group
-                    if "rcept_dt" in g.columns:
-                        rd = g["rcept_dt"].dropna()
-                        row["rcept_dt"] = rd.iloc[0] if not rd.empty else pd.NaT
+                    row["rcept_dt"] = rcept_dt
 
                     # Map account_nm -> standard
                     nm_amt = dict(zip(g.get("account_nm", []), g.get("thstrm_amount", [])))
@@ -579,9 +634,10 @@ def build_corp_quarterly_panel(
             row["reprt_code"] = reprt_code
             row["fs_div"] = fs_div
 
-            # Compute period_end from year + reprt_code (approximate, KR fiscal = calendar)
-            pe_map = {"11013": "03-31", "11012": "06-30", "11014": "09-30", "11011": "12-31"}
-            row["period_end"] = pd.Timestamp(f"{year}-{pe_map[reprt_code]}")
+            # Compute non-future period metadata; rcept_dt remains the PIT timestamp.
+            period_end, adjusted = infer_report_period_end(year, reprt_code, row.get("rcept_dt"))
+            row["period_end"] = period_end
+            row["period_end_adjusted_from_calendar"] = adjusted
             rows.append(row)
 
     if not rows:

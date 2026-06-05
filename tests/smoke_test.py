@@ -65,7 +65,11 @@ def _test(name: str):
 # ---------------------------------------------------------------------------
 @_test("syntax: all .py files parse")
 def test_syntax_all_py():
-    py_files = list(PROJECT_ROOT.glob("*.py")) + list((PROJECT_ROOT / "tests").glob("*.py"))
+    py_files = (
+        list(PROJECT_ROOT.glob("*.py"))
+        + list((PROJECT_ROOT / "tests").glob("*.py"))
+        + list((PROJECT_ROOT / "tools").glob("*.py"))
+    )
     bad = []
     for p in py_files:
         try:
@@ -288,6 +292,21 @@ def test_multibagger_config_constants():
         assert f'"{key}"' in src, f"DEFAULT_CFG missing {key}"
 
 
+@_test("structural: KR1000 Leader Alpha module + config registered")
+def test_kr1000_leader_registered():
+    cfg_src = (PROJECT_ROOT / "kr_config.py").read_text(encoding="utf-8")
+    mod_src = (PROJECT_ROOT / "kr1000_leader.py").read_text(encoding="utf-8")
+    assert "PHASE4_KR1000_LEADER_COLUMNS" in cfg_src
+    assert "def kr1000_leader_alpha_cfg(" in cfg_src
+    assert "target_cagr_gate" in cfg_src
+    assert "target_mdd_gate" in cfg_src
+    for fn in ("build_kr1000_universe", "compute_kospi200_relative_strength",
+               "apply_kr1000_score_profile", "compute_leader_scores", "generate_trade_plan",
+               "run_event_driven_backtest"):
+        assert f"def {fn}(" in mod_src, f"kr1000_leader missing {fn}"
+    assert (PROJECT_ROOT / "tools" / "run_kr1000_validation_gate.py").exists()
+
+
 # Quick mode stops here
 if QUICK:
     print(f"\nQUICK: {PASSED} passed, {FAILED} failed.")
@@ -393,6 +412,16 @@ def test_import_p3_modules():
     assert callable(kr_flow.compute_ticker_flow_signals)
     assert callable(kr_derivatives.build_derivatives_panel)
     assert callable(kr_regime.classify_regime)
+
+
+@_test("import: kr1000_leader module")
+def test_import_kr1000_leader():
+    import kr1000_leader
+    from kr_config import kr1000_leader_alpha_cfg
+    cfg = kr1000_leader_alpha_cfg()
+    assert cfg["universe_name"] == "KR1000"
+    assert callable(kr1000_leader.build_kr1000_universe)
+    assert callable(kr1000_leader.generate_trade_plan)
 
 
 @_test("import: kr_features new add_* functions (flow, derivatives, macro, regime)")

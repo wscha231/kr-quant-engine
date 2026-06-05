@@ -1238,9 +1238,9 @@ def add_macro_signals(
             out[col] = np.nan
         return out
 
-    from kr_macro import get_macro_snapshot
+    from kr_macro import get_macro_snapshot_pit
 
-    snap = get_macro_snapshot(macro_panel, rebalance_date)
+    snap = get_macro_snapshot_pit(macro_panel, rebalance_date)
     for col in PHASE3_MACRO_COLUMNS:
         out[col] = snap.get(col, np.nan)
 

@@ -1,0 +1,99 @@
+# KR1000 GitHub Operations
+
+## Objective
+
+KR1000 Leader Alpha is accepted only when the official broker-ledger path
+passes the current gate:
+
+- 8y+ backtest from `2018-01-01`
+- CAGR `>= 30%`
+- MDD `>= -25%`
+- KOSPI200 excess CAGR `> 0`
+- Sharpe `> 1.0`
+- Information Ratio `> 0.5`
+- `metric_mode = broker_ledger_next_close`
+- `fill_mode = next_close`
+
+Do not treat vectorized or next-open runs as production metrics.
+
+## GitHub Workflows
+
+`KR1000 Data Update and Validation`
+
+- Weekday light run after KRX close:
+  - refresh latest market-cap/PIT snapshot
+  - skip full `avg_value_60d`
+  - run data-integrity and daily broker readiness gates
+  - sync refreshed PIT/cache/output artifacts back to GDrive
+- Weekly full run:
+  - refresh market data
+  - rebuild `scored_panel_v0` through the latest observable close
+  - update DART/fundamental-derived feature store when the full rebuild needs it
+  - run official 8y broker-ledger validation
+  - run component A/B: `full`, `rs_only`, `rs_flow`, `rs_flow_technical`
+
+`Daily KR1000 Broker Check`
+
+- Lightweight daily operating bridge.
+- Produces the latest current-holdings trade plan.
+- It may be `blocked` when the scored panel is stale; that is expected and
+  should be fixed by the weekly/full validation workflow.
+
+`Quarterly Backtest`
+
+- Keeps the legacy quarterly report.
+- Also runs a KR1000 validation diagnostic without hard-coded end dates.
+
+## Required Secrets
+
+- `RCLONE_CONFIG_GDRIVE`: rclone config text with `gdrive:` remote.
+- `DART_API_KEY`: DART Open API key.
+- `BOK_ECOS_API_KEY`: BOK ECOS API key.
+- Optional `SLACK_WEBHOOK_URL` for legacy notification workflows.
+
+## Manual Runs
+
+Light daily gate:
+
+```bash
+python tools/run_kr1000_validation_gate.py --refresh-data --skip-avg-value-refresh --skip-backtests
+```
+
+Full rebuild and official validation:
+
+```bash
+python tools/run_kr1000_validation_gate.py --refresh-data --rebuild-scored-panel --full-rebuild --component-ab
+```
+
+Dry-run command manifest:
+
+```bash
+python tools/run_kr1000_validation_gate.py --component-ab --dry-run
+```
+
+## How Other Agents Should Improve Performance
+
+1. Check `SESSION_HANDOFF.md` first.
+2. Inspect the latest `kr1000_validation_gate_*/kr1000_validation_gate.json`.
+3. If data gate is blocked, fix data freshness/PIT leakage before tuning.
+4. If data gate passes but performance fails, compare component A/B:
+   - `rs_only`
+   - `rs_flow`
+   - `rs_flow_technical`
+   - `full`
+5. Only change factor weights or features after identifying which component
+   improves CAGR without breaking MDD.
+6. Run at least:
+
+```bash
+python tests/smoke_test.py --quick
+python tests/test_kr1000_leader.py
+python tests/test_kr1000_validation_gate.py
+python tools/run_kr1000_validation_gate.py --component-ab --dry-run
+```
+
+## Current Known Blocker
+
+As of the 2026-06-05 handoff, the latest `scored_panel_v0` signal is stale
+(`2024-12-30`). The next production step is a full scored-panel rebuild through
+the latest observable KRX close, then rerun the official validation gate.

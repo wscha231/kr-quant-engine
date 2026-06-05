@@ -221,7 +221,12 @@ def build_universe_snapshot(
     # 3. 60d avg trading value — pass PIT tickers explicitly so the function
     # does not fall back to FDR-current via its `tickers=None` branch.
     pit_tickers = listing["ticker"].astype(str).tolist()
-    avg_val = compute_avg_trading_value_60d(rd, lookback_days=60, tickers=pit_tickers)
+    avg_val = compute_avg_trading_value_60d(
+        rd,
+        lookback_days=60,
+        refresh_days=int(cfg.get("avg_value_refresh_days", 7)),
+        tickers=pit_tickers,
+    )
 
     # 4. Listed months (PIT-correct from kr_pit_universe)
     listed = compute_listed_months(rd, pit_tickers)

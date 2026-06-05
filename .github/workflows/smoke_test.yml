@@ -31,8 +31,12 @@ jobs:
         run: python tests/smoke_test.py
 
       - name: PIT universe tests (Phase C1)
-        run: python tests/test_pit_universe.py
-        # Some tests soft-skip when no historical mcap cache present.
+        run: |
+          if [ -f data_pit/historical_mcap.parquet ] || ls cache_pykrx/mktcap_ALL_*.parquet >/dev/null 2>&1; then
+            python tests/test_pit_universe.py
+          else
+            echo "Skipping PIT universe tests: no historical_mcap or mktcap cache in CI checkout."
+          fi
 
       - name: Governance tests (Phase C2)
         run: python tests/test_governance.py

@@ -4,6 +4,302 @@
 
 ---
 
+## 2026-06-05
+
+### 11:45 KST - github-data-update-validation-automation
+
+**Scope**: Added GitHub-side automation so other agents can run KR1000 data
+updates, scored-panel rebuilds, broker validation, and performance diagnostics
+from the repository instead of relying only on local state.
+
+**What landed**:
+- Added `.github/workflows/kr1000_data_update_and_validation.yml`.
+- The new workflow has a weekday light mode for market/PIT refresh and daily
+  broker readiness, plus a weekly full mode for scored-panel rebuild,
+  DART/feature-store refresh, official 8y validation, and component A/B.
+- Updated `.github/workflows/quarterly_backtest.yml` to call
+  `tools/run_kr1000_validation_gate.py` without a hard-coded end date.
+- Updated `.github/workflows/smoke_test.yml` so PIT universe tests are skipped
+  when GitHub CI has no `historical_mcap` or `mktcap` cache.
+- Added `docs/KR1000_GITHUB_OPERATIONS.md` with required secrets, manual
+  commands, workflow roles, and the performance-improvement loop.
+
+**Operational result**:
+- GitHub CLI authentication confirmed for `wscha231`.
+- New branch created: `codex/kr1000-github-automation`.
+- Workflow YAML and validation runner commands are ready for GitHub execution.
+
+**symbols_added**:
+- .github/workflows/kr1000_data_update_and_validation.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+
+**symbols_changed**:
+- .github/workflows/quarterly_backtest.yml
+- .github/workflows/smoke_test.yml
+- CHANGELOG.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- pending final pre-commit smoke after workflow/doc update.
+
+---
+
+### 11:34 KST - kr1000-official-validation-gate
+
+**Scope**: Implemented the official KR1000 data-readiness, broker-readiness,
+8y backtest, and component A/B validation gate for the CAGR 30% / MDD -25%
+target.
+
+**What landed**:
+- Added reusable KR1000 score profiles: `full`, `rs_only`, `rs_flow`, and
+  `rs_flow_technical`.
+- `tools/run_kr1000_backtest.py` now supports `--score-profile` and defaults
+  the official start date to `2018-01-01`.
+- Added `tools/run_kr1000_validation_gate.py`, which orchestrates optional data
+  refresh, optional scored-panel rebuild, data audit, daily broker readiness,
+  official 8y broker-ledger backtest, 2016-current/stress periods, and
+  component A/B jobs.
+- The validation gate writes `kr1000_validation_gate.json/.md` with thresholds,
+  blockers, planned commands, backtest metrics, and official pass/fail checks.
+- Smoke syntax coverage now includes `tools/*.py`.
+
+**Operational result**:
+- Dry-run with component A/B planned `8` broker-ledger backtests.
+- Dry-run with `--refresh-data --rebuild-scored-panel` planned the two upstream
+  commands plus the same `8` backtests.
+- Actual gate run with `--skip-backtests` is correctly `blocked` by current
+  data state: audit Critical `1`, High `4`; daily broker check return code `2`
+  because latest signal remains `2024-12-30`.
+
+**symbols_added**:
+- kr1000_leader.LEADER_SCORE_WEIGHTS
+- kr1000_leader.KR1000_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
+- tools/run_kr1000_validation_gate.py: metric_value,
+  evaluate_backtest_metrics, main
+- tests/test_kr1000_validation_gate.py
+
+**symbols_changed**:
+- kr1000_leader.compute_leader_scores
+- tools/run_kr1000_backtest.parse_args
+- tools/run_kr1000_backtest.main
+- tests/test_kr1000_leader.py
+- tests/smoke_test.py
+
+**config_fields_added**:
+- target_cagr_gate, target_mdd_gate, target_excess_cagr_gate,
+  target_sharpe_gate, target_information_ratio_gate,
+  target_min_backtest_years, score_profile.
+
+**breaking_changes**: none. Default KR1000 score profile is `full`, preserving
+the production formula unless an A/B profile is explicitly requested.
+
+**Validation**:
+- `py -3 tests/smoke_test.py --quick` - 24 passed, 0 failed.
+- `py -3 tests/test_kr1000_leader.py` - 6 passed, 0 failed.
+- `py -3 tests/test_kr1000_validation_gate.py` - 2 passed, 0 failed.
+- `py -3 tests/smoke_test.py` - 46 passed, 0 failed.
+- `py -3 tools/run_kr1000_backtest.py --help` - OK.
+- `py -3 tools/run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --dry-run` - OK.
+- `py -3 tools/run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-backtests` -
+  blocked as expected by stale scored panel and data audit critical.
+
+---
+
+### 10:25 KST - kr1000-broker-rule-daily-check
+
+**Scope**: Ported the r1000 official broker-ledger operating rule into KR1000
+and added a previous-close daily check path.
+
+**What landed**:
+- KR1000 default execution policy now uses `metric_mode=broker_ledger_next_close`,
+  `execution_price=next_close`, and `execution_timing=next_trading_day_close`.
+- `kr1000_leader.run_event_driven_backtest()` now records broker metric fields,
+  fees, gross values, fill mode, cash state, and production-metric validity.
+- Daily hard-stop monitoring now emits `SELL_HARD_STOP_DAILY` orders even on
+  non-rebalance days, filled by the next close.
+- `tools/run_kr1000_daily_broker_check.py` evaluates current holdings at the
+  previous KRX close and writes broker-rule daily check JSON/MD/CSV outputs.
+- `tools/refresh_kr1000_daily_data.py` refreshes latest mcap data and appends
+  it into `data_pit/historical_mcap.parquet` without requiring a full
+  `cache_pykrx` resync.
+- `.github/workflows/daily_kr1000_broker_check.yml` runs the daily data refresh
+  and broker check after KRX close.
+- `.github/workflows/quarterly_backtest.yml` now includes a KR1000
+  broker-ledger diagnostic backtest artifact path.
+
+**Operational result**:
+- Ran `tools/refresh_kr1000_daily_data.py --as-of 2026-06-04 --skip-avg-value`.
+- Latest mcap snapshot: `2770` rows.
+- `historical_mcap.parquet`: `287910` -> `290680` rows, max snapshot advanced
+  to `2026-06-04`.
+- Daily broker check for `2026-06-04` is correctly blocked because the latest
+  scored signal is still `2024-12-30` and the data audit still has one critical
+  scored-panel freshness issue.
+- Updated audit summary: Critical `1`, High `4`, Medium `0`.
+
+**symbols_added**:
+- tools/run_kr1000_daily_broker_check.py: previous_krx_close_date,
+  mark_holdings_to_previous_close, render_report, main
+- tools/refresh_kr1000_daily_data.py: normalize_mcap_snapshot,
+  derive_listed_history_from_historical_mcap, append_pit_mcap_snapshot, main
+
+**symbols_changed**:
+- kr_config.kr1000_leader_alpha_cfg
+- kr1000_leader.run_event_driven_backtest
+- kr1000_leader.write_leader_outputs
+- tools/audit_data_integrity._workflow_summary
+- tests/test_kr1000_leader.py
+
+**config_fields_added**:
+- metric_mode, integer_shares, no_negative_cash, no_leverage,
+  hard_stop_loss_pct.
+
+**breaking_changes**: KR1000 production-style metrics should now be interpreted
+as broker-ledger next-close metrics. Older next-open runs are no longer the
+official operating comparison.
+
+**Validation**:
+- `py -3 tests/test_kr1000_leader.py` - 5 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` - 24 passed, 0 failed.
+- `py -3 tests/smoke_test.py` - 46 passed, 0 failed.
+- `py -3 tools/refresh_kr1000_daily_data.py --dry-run --as-of 2026-06-04` - OK.
+- `py -3 tools/refresh_kr1000_daily_data.py --as-of 2026-06-04 --skip-avg-value` - OK.
+- `py -3 tools/run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04` -
+  blocked as expected by stale scored panel.
+- `py -3 -c "import yaml, pathlib; ..."` - daily/quarterly workflow YAML OK.
+- `py -3 tools/audit_data_integrity.py --as-of 2026-06-05` - generated report;
+  exits 1 by design because critical scored-panel freshness issue remains.
+
+---
+
+### 09:40 KST - data-integrity-audit-and-pit-hardening
+
+**Scope**: Started a root data-integrity audit before further KR1000
+performance work. The audit checks collection freshness, PIT membership,
+fundamental filing timestamps, workflow coverage, and the active cost model.
+
+**What landed**:
+- `tools/audit_data_integrity.py`: writes data freshness/leakage reports to
+  `outputs/data_integrity_audit_YYYYMMDD.{json,md}`.
+- `kr_features.add_macro_signals`: now uses `get_macro_snapshot_pit()` so
+  macro series publication lags are respected when phase3 macro is enabled.
+- `kr_dart_client.infer_report_period_end`: prevents newly built DART
+  fundamentals panels from creating `period_end` metadata after `rcept_dt`
+  for non-December fiscal-year companies.
+- `KR_ENGINE_REUSE_VERSION` bumped to `2026-06-05-p1-pit-data-audit` so future
+  feature-store rebuilds do not silently reuse stale formula artifacts.
+
+**Audit result**:
+- `outputs/data_integrity_audit_20260605.json` / `.md` generated under
+  `DATA_ROOT`.
+- Critical: latest scored panel signal date is stale at 2024-12-30
+  (`522` days as of 2026-06-05).
+- High: `mktcap_ALL` cache and `avg_value` cache have month-level gaps.
+- High: current scored panel has `113` rows with
+  `fundamentals_period_end > rebalance_date` and `293` rows with
+  `fundamentals_period_end > fundamentals_rcept_dt`.
+- Direct PIT checks passed for the inspected panel: `0` rows with
+  `fundamentals_rcept_dt > rebalance_date`, and `0` PIT membership misses.
+- Workflow gap: no GitHub workflow runs `tools/run_kr1000_backtest.py`;
+  `monthly_picks.yml` skips `cache_pykrx`, so PIT mcap history will not advance
+  on Actions unless `data_pit` is refreshed elsewhere.
+
+**symbols_added**:
+- kr_dart_client: CALENDAR_PERIOD_END_BY_REPRT_CODE,
+  infer_report_period_end
+- tools/audit_data_integrity.py: build_audit, write_markdown, main
+
+**symbols_changed**:
+- kr_features.add_macro_signals
+- kr_dart_client.build_universe_quarterly_panel
+- kr_dart_client.build_corp_quarterly_panel
+- tests/test_macro.py
+- tests/test_dart_pit.py
+
+**config_fields_added**: none
+
+**breaking_changes**: cache/feature artifacts should be rebuilt under
+`KR_ENGINE_REUSE_VERSION=2026-06-05-p1-pit-data-audit` before trusting new
+KR1000 performance metrics.
+
+**Validation**:
+- `py -3 tests/test_dart_pit.py` - 16 passed, 0 failed.
+- `py -3 tests/test_macro.py` - 14 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` - 24 passed, 0 failed.
+- `py -3 tests/smoke_test.py` - 46 passed, 0 failed.
+- `py -3 tools/audit_data_integrity.py --as-of 2026-06-05` - generated report;
+  exits 1 by design because critical freshness issue remains.
+- `git diff --check` - no whitespace errors; CRLF warnings only.
+
+---
+
+## 2026-05-30
+
+### 18:20 KST - kr1000-leader-alpha-v1-ledger-backtest
+
+**Scope**: Added KR1000 Leader Alpha stock-first layer and the first ledger-style
+backtest execution path for real performance inspection.
+
+**What landed**:
+- `kr1000_leader.py`: PIT KR1000 liquidity universe, KOSPI200 RS 1m/3m/6m,
+  component scoring, current-holdings reconciliation, trade-plan generation,
+  and event-driven order/cash/position ledger backtester.
+- `tools/run_kr1000_leader.py`: latest candidate/portfolio/trade-plan runner.
+- `tools/run_kr1000_backtest.py`: scored-panel-to-ledger backtest runner with
+  KOSPI200 benchmark, cached price-panel reuse, and standard output export.
+- `state/current_holdings.example.csv`: private holdings schema example.
+- `tests/test_kr1000_leader.py` and `tests/smoke_test.py`: KR1000 structural,
+  RS math, trade-plan, ledger, and import checks.
+
+**First result**:
+- Window available from current scored panel: 2019-01-31 to 2024-12-30
+  signals, NAV through 2025-01-09.
+- `outputs/kr1000_bt_2019_2024/leader_backtest_metrics.json`:
+  CAGR -4.77%, KOSPI200 CAGR +1.80%, excess CAGR -6.57pp, MDD -51.77%,
+  Sharpe -0.10, trades 1,946.
+- Verdict: KR1000 v1 execution path works, but the raw score formula fails the
+  MDD gate and benchmark gate. Next work should focus on liquidity/size gates,
+  lower turnover, and component A/B before any live use.
+
+**symbols_added**:
+- kr_config: PHASE4_KR1000_LEADER_COLUMNS, kr1000_leader_alpha_cfg
+- kr1000_leader: build_kr1000_universe, compute_kospi200_relative_strength,
+  add_leader_component_scores, compute_leader_scores, build_target_portfolio,
+  load_current_holdings, generate_trade_plan, run_event_driven_backtest,
+  write_leader_outputs, BacktestResult
+- tools/run_kr1000_leader.py: main
+- tools/run_kr1000_backtest.py: prepare_kr1000_scored_panel, main
+
+**symbols_changed**:
+- kr_universe.build_universe_snapshot: passes cfg avg_value_refresh_days into
+  compute_avg_trading_value_60d.
+- kr1000_leader.run_event_driven_backtest: defends NaN trade values and zero
+  execution prices.
+- tests/smoke_test.py: KR1000 structural/import coverage.
+
+**config_fields_added**:
+- strategy_name, universe_name, kr1000_size, kr_all_discovery_enabled,
+  universe_rank_by, universe_tiebreaker, top_holdings, buy_rank_threshold,
+  hold_rank_threshold, weekly_rebalance_day, daily_hard_exit_enabled,
+  single_stock_max_weight, sector_theme_max_weight, gross_exposure_min,
+  gross_exposure_max, gross_exposure_default, target_mdd_gate,
+  hold_band_weight, min_notional_krw, execution_price, signal_timing,
+  execution_timing, apply_no_fill_rules, avg_value_refresh_days.
+
+**breaking_changes**: none
+
+**Validation**:
+- `py -3 tests/test_kr1000_leader.py` - 4 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` - 24 passed, 0 failed.
+- `py -3 tools/run_kr1000_backtest.py --start 2019-01-01 --end 2024-12-31 --out-dir outputs\kr1000_bt_2019_2024 --price-panel outputs\kr1000_bt_2019_2024\leader_price_panel.parquet --save-scored-panel` - completed.
+
+---
+
 ## 2026-04-27
 
 ### 14:00 KST — p0-bootstrap-scaffolding
