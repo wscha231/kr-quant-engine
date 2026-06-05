@@ -41,13 +41,34 @@ LEADER_SCORE_WEIGHTS = {
     "event_governance_score": 0.05,
 }
 
-KR1000_SCORE_PROFILES = {
+KR1000_COMPONENT_SCORE_PROFILES = {
     "full": tuple(LEADER_SCORE_WEIGHTS),
     "rs_only": ("rs_score",),
     "rs_flow": ("rs_score", "flow_score"),
     "rs_flow_technical": ("rs_score", "flow_score", "technical_score"),
 }
 
+KR1000_DIRECT_SCORE_PROFILES = (
+    "legacy_p0_momentum",
+    "legacy_p1_blended",
+    "pmb_pre_surge",
+    "hybrid_pmb_rs",
+)
+
+KR1000_SCORE_PROFILES = {
+    **KR1000_COMPONENT_SCORE_PROFILES,
+    **{name: () for name in KR1000_DIRECT_SCORE_PROFILES},
+}
+
+KR1000_AB_SCORE_PROFILES = (
+    "full",
+    "rs_only",
+    "rs_flow",
+    "rs_flow_technical",
+    "legacy_p1_blended",
+    "pmb_pre_surge",
+    "hybrid_pmb_rs",
+)
 CURRENT_HOLDINGS_COLUMNS = (
     "as_of_date",
     "account_id",
@@ -380,16 +401,32 @@ def apply_kr1000_score_profile(
         raise ValueError(f"unknown KR1000 score_profile={score_profile!r}; valid: {valid}")
 
     out = add_leader_component_scores(candidates)
-    active = set(KR1000_SCORE_PROFILES[profile])
-    for col in LEADER_SCORE_WEIGHTS:
-        if col not in active:
-            out[col] = 0.0
-        else:
-            out[col] = pd.to_numeric(out[col], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    if profile in KR1000_COMPONENT_SCORE_PROFILES:
+        active = set(KR1000_COMPONENT_SCORE_PROFILES[profile])
+        for col in LEADER_SCORE_WEIGHTS:
+            if col not in active:
+                out[col] = 0.0
+            else:
+                out[col] = pd.to_numeric(out[col], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
-    out["leader_score"] = 0.0
-    for col, weight in LEADER_SCORE_WEIGHTS.items():
-        out["leader_score"] += weight * out[col]
+        out["leader_score"] = 0.0
+        for col, weight in LEADER_SCORE_WEIGHTS.items():
+            out["leader_score"] += weight * out[col]
+    elif profile == "legacy_p0_momentum":
+        out["leader_score"] = _score_series(_numeric(out, "p0_momentum_score", 0.0))
+    elif profile == "legacy_p1_blended":
+        source = _numeric(out, "p1_blended_score", np.nan)
+        fallback = _numeric(out, "p0_momentum_score", 0.0)
+        out["leader_score"] = _score_series(source.fillna(fallback))
+    elif profile == "pmb_pre_surge":
+        out["leader_score"] = _score_series(_numeric(out, "p_pre_surge", 0.0))
+    elif profile == "hybrid_pmb_rs":
+        pmb = _score_series(_numeric(out, "p_pre_surge", 0.0))
+        out["leader_score"] = (
+            0.45 * pmb
+            + 0.35 * out["rs_score"]
+            + 0.20 * out["flow_score"]
+        )
     out["score_profile"] = profile
     return out
 

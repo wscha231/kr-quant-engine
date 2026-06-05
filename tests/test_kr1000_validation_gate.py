@@ -76,7 +76,15 @@ def test_planned_component_ab_jobs():
     jobs = _planned_backtests(args, pd.Timestamp("2026-06-04"), PROJECT_ROOT / "outputs" / "test_gate")
     official = [j for j in jobs if j["period"] == "official_8y"]
     stress = [j for j in jobs if j["period"] == "stress_2020_2022"]
-    assert {j["profile"] for j in official} == {"full", "rs_only", "rs_flow", "rs_flow_technical"}
+    assert {j["profile"] for j in official} == {
+        "full",
+        "rs_only",
+        "rs_flow",
+        "rs_flow_technical",
+        "legacy_p1_blended",
+        "pmb_pre_surge",
+        "hybrid_pmb_rs",
+    }
     assert {j["profile"] for j in stress} == {"full"}
     assert all("--score-profile" in j["cmd"] for j in jobs)
     assert all(j["start"] <= j["end"] for j in jobs)

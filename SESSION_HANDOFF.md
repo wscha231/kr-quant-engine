@@ -28,6 +28,9 @@ Score A/B support:
   - `rs_only`
   - `rs_flow`
   - `rs_flow_technical`
+  - `legacy_p1_blended`
+  - `pmb_pre_surge`
+  - `hybrid_pmb_rs`
 
 Backtest runner:
 - `tools/run_kr1000_backtest.py` now defaults to `--start 2018-01-01`.
@@ -79,7 +82,7 @@ GitHub automation:
 - Added `.github/workflows/kr1000_data_update_and_validation.yml`.
 - Weekday light mode refreshes latest market/PIT data and runs daily readiness.
 - Weekly full mode rebuilds scored panel, refreshes DART/feature-store inputs,
-  runs official 8y validation, and runs KR1000 component A/B.
+  runs official 8y validation, and runs KR1000 component/challenger A/B.
 - All KR1000 GitHub workflows now run `tools/setup_kr1000_data_store.py` before
   refresh/backtest steps.
 - Updated `.github/workflows/quarterly_backtest.yml` to call the validation

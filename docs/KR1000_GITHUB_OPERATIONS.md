@@ -30,7 +30,9 @@ Do not treat vectorized or next-open runs as production metrics.
   - rebuild `scored_panel_v0` through the latest observable close
   - update DART/fundamental-derived feature store when the full rebuild needs it
   - run official 8y broker-ledger validation
-  - run component A/B: `full`, `rs_only`, `rs_flow`, `rs_flow_technical`
+  - run component/challenger A/B: `full`, `rs_only`, `rs_flow`,
+    `rs_flow_technical`, `legacy_p1_blended`, `pmb_pre_surge`,
+    `hybrid_pmb_rs`
 
 `Daily KR1000 Broker Check`
 
@@ -110,6 +112,9 @@ python tools/run_kr1000_validation_gate.py --component-ab --dry-run
    - `rs_only`
    - `rs_flow`
    - `rs_flow_technical`
+   - `legacy_p1_blended`
+   - `pmb_pre_surge`
+   - `hybrid_pmb_rs`
    - `full`
 5. Only change factor weights or features after identifying which component
    improves CAGR without breaking MDD.

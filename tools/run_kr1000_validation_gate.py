@@ -25,7 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from kr_config import DATA_ROOT, kr1000_leader_alpha_cfg  # noqa: E402
-from kr1000_leader import KR1000_SCORE_PROFILES  # noqa: E402
+from kr1000_leader import KR1000_AB_SCORE_PROFILES, KR1000_SCORE_PROFILES  # noqa: E402
 from tools.audit_data_integrity import build_audit, write_markdown  # noqa: E402
 
 
@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--profiles", default="full",
                    help="Comma-separated score profiles. Use --component-ab for the standard A/B set.")
     p.add_argument("--component-ab", action="store_true",
-                   help="Run official_8y with full, rs_only, rs_flow, rs_flow_technical.")
+                   help="Run official_8y with the standard KR1000 challenger score profiles.")
     p.add_argument("--refresh-data", action="store_true",
                    help="Run tools/refresh_kr1000_daily_data.py before auditing.")
     p.add_argument("--skip-avg-value-refresh", action="store_true",
@@ -207,7 +207,7 @@ def _planned_backtests(args: argparse.Namespace, as_of: pd.Timestamp, out_dir: P
     periods = _split_csv(args.periods)
     profiles = _split_csv(args.profiles)
     if args.component_ab:
-        profiles = ["full", "rs_only", "rs_flow", "rs_flow_technical"]
+        profiles = list(KR1000_AB_SCORE_PROFILES)
     for profile in profiles:
         if profile not in KR1000_SCORE_PROFILES:
             valid = ", ".join(sorted(KR1000_SCORE_PROFILES))

@@ -16,6 +16,8 @@ both local runs and GitHub Actions.
 - `kr1000_leader_alpha_cfg()` now uses `target_cagr_gate = 0.35`.
 - `tools/run_kr1000_validation_gate.py` report text now states the official
   target as CAGR `>= 35%`.
+- KR1000 component A/B now also includes performance challengers:
+  `legacy_p1_blended`, `pmb_pre_surge`, and `hybrid_pmb_rs`.
 - Added `tools/setup_kr1000_data_store.py` to create/verify the canonical
   Google Drive data layout and write `outputs/data_store_manifest.json`.
 - Added `tests/test_kr1000_data_store.py`.
@@ -37,6 +39,8 @@ both local runs and GitHub Actions.
 - tests/test_kr1000_data_store.py
 
 **symbols_changed**:
+- kr1000_leader.KR1000_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
 - kr_config.kr1000_leader_alpha_cfg
 - tools/run_kr1000_validation_gate.py
 - .github/workflows/daily_kr1000_broker_check.yml

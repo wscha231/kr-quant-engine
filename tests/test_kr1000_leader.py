@@ -91,6 +91,9 @@ def test_score_profiles():
         "valuation_score": [2.0, 2.0],
         "theme_sector_score": [1.0, 1.0],
         "event_governance_score": [0.5, 0.5],
+        "p0_momentum_score": [0.2, 0.8],
+        "p1_blended_score": [0.1, 0.9],
+        "p_pre_surge": [0.7, 0.2],
     })
     rs_only = apply_kr1000_score_profile(candidates, "rs_only")
     assert rs_only["score_profile"].eq("rs_only").all()
@@ -105,6 +108,16 @@ def test_score_profiles():
     full = apply_kr1000_score_profile(candidates, "full")
     assert full["flow_score"].iloc[0] == -5.0
     assert full["technical_score"].iloc[1] == 4.0
+
+    legacy = apply_kr1000_score_profile(candidates, "legacy_p1_blended")
+    assert legacy.loc[1, "leader_score"] > legacy.loc[0, "leader_score"]
+
+    pmb = apply_kr1000_score_profile(candidates, "pmb_pre_surge")
+    assert pmb.loc[0, "leader_score"] > pmb.loc[1, "leader_score"]
+
+    hybrid = apply_kr1000_score_profile(candidates, "hybrid_pmb_rs")
+    assert hybrid["score_profile"].eq("hybrid_pmb_rs").all()
+    assert not hybrid["leader_score"].isna().any()
 
 
 @_test("trade plan keeps every current holding with reason_code")
