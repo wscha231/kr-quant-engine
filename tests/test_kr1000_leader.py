@@ -140,6 +140,23 @@ def test_sparse_pmb_oos_ranking():
     assert positive["leader_score"] > 0
 
 
+@_test("NaN eligible_final falls back to in_kr1000 after schema union")
+def test_nan_eligible_final_falls_back_to_in_kr1000():
+    from kr1000_leader import compute_leader_scores
+
+    candidates = pd.DataFrame({
+        "ticker": ["000001", "000002"],
+        "p_pre_surge": [0.8, 0.0],
+        "avg_trading_value_60d": [10e9, 9e9],
+        "market_cap": [1e12, 8e11],
+        "in_kr1000": [True, True],
+        "eligible_final": [np.nan, np.nan],
+    })
+    scored = compute_leader_scores(candidates, {"score_profile": "pmb_pre_surge"})
+    assert scored["leader_rank"].notna().sum() == 2
+    assert scored.loc[scored["ticker"] == "000001", "leader_rank"].iloc[0] == 1
+
+
 @_test("trade plan keeps every current holding with reason_code")
 def test_trade_plan_current_holdings_reconciled():
     from kr1000_leader import (

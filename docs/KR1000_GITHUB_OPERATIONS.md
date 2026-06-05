@@ -18,17 +18,28 @@ Do not treat vectorized or next-open runs as production metrics.
 
 ## GitHub Workflows
 
+Production automation is split into three lanes:
+
+1. `Daily KR1000 Broker Check` keeps the trading bridge alive after each KRX
+   close.
+2. `KR1000 Data Update and Validation` updates the data store and runs the
+   official data/readiness/backtest gates.
+3. `Quarterly Backtest` keeps the long-horizon diagnostic report available for
+   slower review cycles.
+
 `KR1000 Data Update and Validation`
 
 - Weekday light run after KRX close:
-  - refresh latest market-cap/PIT snapshot
+  - refresh latest market-cap/PIT snapshot and price-derived liquidity caches
   - skip full `avg_value_60d`
   - run data-integrity and daily broker readiness gates
   - sync refreshed PIT/cache/output artifacts back to GDrive
 - Weekly full run:
   - refresh market data
   - incrementally rebuild `scored_panel_v0` through the latest observable close
-  - update DART/fundamental-derived feature store when the full rebuild needs it
+  - run `run_local.py` with collector enabled by default, so DART and
+    fundamental-derived feature inputs can be refreshed when API secrets and
+    caches are available
   - run official 8y broker-ledger validation
   - run component/challenger A/B: `full`, `rs_only`, `rs_flow`,
     `rs_flow_technical`, `legacy_p1_blended`, `pmb_pre_surge`,
@@ -43,8 +54,9 @@ change or suspected cache corruption requires a from-scratch rebuild.
 
 - Lightweight daily operating bridge.
 - Produces the latest current-holdings trade plan.
-- It may be `blocked` when the scored panel is stale; that is expected and
-  should be fixed by the weekly/full validation workflow.
+- It may be `blocked` when the scored panel is stale or the data audit finds a
+  critical issue. Fix data freshness/PIT leakage first; do not record official
+  performance from a blocked run.
 
 `Quarterly Backtest`
 
@@ -85,6 +97,29 @@ Required folders:
 
 Private account files such as `state/current_holdings.csv` stay gitignored.
 Only `state/current_holdings.example.csv` is copied into the data store.
+
+## Data Update Contract
+
+Daily light automation is allowed to update market/PIT/readiness artifacts
+without rebuilding every full feature:
+
+- `cache_pykrx/mktcap_ALL_YYYYMMDD.parquet`
+- `data_pit/historical_mcap.parquet`
+- `data_pit/listed_history.parquet`
+- `cache_misc/avg_value_60d_YYYYMMDD.parquet` when explicitly requested
+- daily broker check JSON/Markdown/trade-plan outputs
+
+Weekly full automation is the path for official performance evidence. It runs
+the collector-backed rebuild path and can update price, DART, macro,
+fundamental-derived feature, model, and scored-panel caches before broker
+backtests. If the weekly run is too slow, first improve cache reuse and scoped
+backfill; do not substitute a liquidity-only latest snapshot for official
+CAGR/MDD evidence.
+
+Mixed historical/latest scored panels are expected. New latest-readiness rows
+may add columns such as `eligible_final`; older historical rows with
+`eligible_final=NaN` must fall back to PIT membership (`in_kr1000`) and must not
+drop out of historical ranking.
 
 ## Manual Runs
 
@@ -138,6 +173,10 @@ As of the 2026-06-05 drawdown-ladder pass, this diagnostic produced CAGR
 broker-ledger challenger, but it does not satisfy the official CAGR `>= 35%`
 target and is not an 8y official pass.
 
+Daily hard-exit disabled A/B on the same P_MB OOS window worsened to CAGR
+`21.64%`, MDD `-31.22%`, Sharpe `1.00`. Keep daily hard-exit enabled until a
+new signal component proves otherwise in the same broker harness.
+
 ## How Other Agents Should Improve Performance
 
 1. Check `SESSION_HANDOFF.md` first.
@@ -178,12 +217,14 @@ python tools/run_kr1000_validation_gate.py --component-ab --strategy-ab --dry-ru
 
 ## Current Known Blocker
 
-As of the 2026-06-05 18:31 KST handoff:
+As of the 2026-06-05 19:12 KST handoff:
 
 - The daily-readiness data blocker is cleared: latest `scored_panel_v0` signal
   is `2026-06-04`, data gate Critical `0`, and daily broker check completed.
 - The appended `2026-06-04` rows are liquidity-only readiness rows, not
   full-feature backtest rows.
+- The schema-union regression from `eligible_final=NaN` on historical rows is
+  fixed and covered by `tests/test_kr1000_leader.py`.
 - Full score fails after proper NAV sizing (`CAGR -5.61%`, MDD `-50.01%` on
   the available 2019-2024 window).
 - P_MB OOS plus `pmb_defensive_mdd_gate` is the current best broker-ledger
@@ -191,3 +232,4 @@ As of the 2026-06-05 18:31 KST handoff:
 
 The next production step is a faster full-feature 2025-current backfill, then
 component/strategy A/B toward CAGR `>= 35%` under the broker-ledger/MDD gate.
+Avoid more exposure-only experiments until the signal panel is richer.

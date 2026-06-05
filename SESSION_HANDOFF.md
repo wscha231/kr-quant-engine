@@ -1,6 +1,6 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-05 18:31 KST
+## Current Status - 2026-06-05 19:12 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
@@ -9,88 +9,106 @@ The official user target remains unmet:
 
 - Official target: 8y+ broker-ledger CAGR `>= 35%`, MDD `>= -25%`,
   KOSPI200 excess CAGR `> 0`, Sharpe `> 1.0`, IR `> 0.5`.
-- Current best broker-ledger challenger remains:
-  `pmb_defensive_mdd_gate`, available 2020-2024 P_MB OOS window,
+- Current best broker-ledger challenger remains the available 2020-2024 P_MB
+  OOS window with `pmb_pre_surge`, gross `0.70`, daily hard-exit enabled, and
+  portfolio DD ladder:
   CAGR `25.38%`, MDD `-24.00%`, Sharpe `1.23`, IR `1.00`,
   KOSPI200 excess `+23.12%`.
 - This is not an official pass because CAGR is below `35%`, the available
-  P_MB OOS window is not 8y+, and the latest readiness row is liquidity-only.
+  P_MB OOS window is not 8y+, and the latest readiness row is
+  liquidity-only.
 
 ## What Changed In The Latest Pass
 
-Cleared the stale scored-panel blocker for daily readiness:
+Fixed the mixed scored-panel schema regression:
 
-- Added `tools/build_latest_kr1000_scored_snapshot.py`.
-  - `--no-rs` builds a latest PIT KR1000 liquidity-only readiness snapshot.
-  - It appends a new `scored_panel_v0` parquet under the current engine version.
-- Generated:
+- Latest readiness rows added `eligible_final`.
+- Historical scored rows in the concatenated panel therefore had
+  `eligible_final=NaN`.
+- `compute_leader_scores()` had treated those historical rows as ineligible,
+  wiping out historical P_MB ranks.
+- Added `kr1000_leader._eligibility_series()` so `eligible_final=NaN` falls
+  back to PIT membership via `in_kr1000`.
+- Added regression coverage:
+  `tests/test_kr1000_leader.py::test_nan_eligible_final_falls_back_to_in_kr1000`.
 
-```text
-G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2019-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet
-```
+Recorded broker A/B evidence on the same cached P_MB OOS price panel:
 
-- Latest signal date is now `2026-06-04`, not `2024-12-30`.
-- Data integrity gate now has Critical `0`.
-- Daily broker check now completes:
-  - status `completed`
-  - signal `2026-06-04`
-  - signal age `0`
-  - trade plan rows `20`
-  - actions: `BUY: 20`
+- Current best recheck: CAGR `25.38%`, MDD `-24.00%`, Sharpe `1.23`,
+  excess CAGR `+23.12%`, trades `1433`.
+- Daily hard-exit disabled: CAGR `21.64%`, MDD `-31.22%`, Sharpe `1.00`.
+- N10 concentration, higher gross exposure, no ladder, loose ladder, and
+  tighter variants did not beat the current best.
+- Conclusion: keep daily hard-exit and DD ladder. The next real improvement
+  path is signal/full-feature backfill quality, not exposure-only tuning.
 
-Also fixed operational blockers found while trying to rebuild from GDrive:
+## GitHub / Automation State
 
-- `run_local.py`, `kr_pipeline.py`, and `kr_universe.py` no longer emit
-  runtime em dash / arrow characters that crash Windows cp949 output.
-- `tools/run_kr1000_validation_gate.py --skip-backtests` returns exit code
-  `0` when data and daily broker gates pass.
-- Quick scored-panel rebuild now infers the latest scored-panel start date
-  instead of blindly starting from `2016-01-01`.
-- Quick scored-panel rebuild can cap missing rebalance dates with
-  `--rebuild-max-new-months` / `run_local.py --incremental-max-new-months`.
-- `avg_value_60d` can fall back to PIT-safe mktcap daily `value` proxy when
-  true 60-day cache is missing.
+GitHub automation exists and should be used as the shared operating system:
+
+- `Daily KR1000 Broker Check`
+  - weekdays after KRX close
+  - refreshes latest market/PIT data
+  - writes daily broker check and current-holdings trade plan artifacts
+- `KR1000 Data Update and Validation`
+  - weekday light mode: market/PIT/readiness gate
+  - weekly full mode: collector-backed rebuild, component/strategy A/B, and
+    official broker-ledger validation
+  - syncs refreshed caches and outputs back to GDrive when
+    `RCLONE_CONFIG_GDRIVE` is present
+- `Quarterly Backtest`
+  - slower long-horizon diagnostic and artifact retention
+
+Required GitHub secrets:
+
+- `RCLONE_CONFIG_GDRIVE`
+- `DART_API_KEY`
+- `BOK_ECOS_API_KEY`
+
+The operations contract is documented in `docs/KR1000_GITHUB_OPERATIONS.md`.
 
 ## Latest Validation
 
-Passed in this session:
+Passed in this pass:
 
-- `py -3 tools\build_latest_kr1000_scored_snapshot.py --as-of 2026-06-04 --no-rs`
-  -> 1000 latest rows, output scored panel through `2026-06-04`
-- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-backtests`
-  -> `completed_no_official_backtest`, data gate passed, exit code `0`
-- Data audit summary: Critical `0`, High `4`, Medium `1`, Low `0`
-- Daily broker check: completed, signal age `0`, 20 trade-plan rows
-- `py -3 tests/test_kr1000_data_store.py` -> 5 passed, 0 failed
-- `py -3 tests/test_kr1000_validation_gate.py` -> 4 passed, 0 failed
-- `py -3 tests/smoke_test.py --quick` -> 24 passed, 0 failed
+- `py -3 tests\test_kr1000_leader.py` -> 11 passed, 0 failed.
+- `py -3 tests\test_kr1000_data_store.py` -> 5 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 4 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `git diff --check` -> passed.
+- P_MB no-hard-exit broker diagnostic completed and showed worse risk/return,
+  so defensive rules remain justified.
 
-Important caveat:
-
-- The appended `2026-06-04` scored rows are
-  `latest_fast_liquidity_only`. They are suitable for daily readiness and
-  current-holdings trade-plan plumbing, but not for official CAGR/MDD claims.
-- Full-score/performance improvement still requires a full-feature backfill or
-  a faster cached RS/flow feature builder for 2025-current.
+Note: `test_kr1000_data_store.py` and `test_kr1000_validation_gate.py` needed
+unsandboxed execution in the local Codex desktop environment because sandboxed
+Python tempfile cleanup returned `PermissionError`. They passed outside the
+sandbox.
 
 ## Git / Worktree Notes
 
 - Current branch: `codex/kr1000-github-automation`
-- Previous pushed commit before this pass: `3ab4820`
-- New latest-readiness snapshot changes are local until committed/pushed.
+- Latest pushed commit before this pass: `2558960`
+- Intended files to stage:
+  - `kr1000_leader.py`
+  - `tools/run_kr1000_validation_gate.py`
+  - `tests/test_kr1000_leader.py`
+  - `CHANGELOG.md`
+  - `SESSION_HANDOFF.md`
+  - `docs/KR1000_GITHUB_OPERATIONS.md`
 - Existing unrelated dirty file remains:
   `research/10_theme_lifecycle/leader_themes_per_quarter.csv`
   Do not stage it unless the user explicitly asks.
+- Backtest output directories under `outputs/` are evidence only and should not
+  be staged unless a future task explicitly asks to version artifacts.
 
 ## Next Step
 
-1. Run remaining smoke/data-store/diff checks.
-2. Commit and push the latest-readiness snapshot pass.
-3. Update PR #1 with the new evidence:
-   data gate Critical `0`, daily broker check completed, latest signal
-   `2026-06-04`.
+1. Run the remaining validation checks listed above.
+2. Commit and push the schema-union + operations-doc update.
+3. Update PR #1 with the new evidence and confirm the GitHub smoke workflow is
+   green on the pushed SHA.
 4. Next performance work:
-   - build a faster full-feature latest/backfill path using cached exact
-     ticker histories instead of per-ticker network waits;
-   - then run component/strategy A/B on full-feature rows;
+   - build faster full-feature 2025-current backfill using cached ticker
+     histories;
+   - rerun component A/B on full-feature rows;
    - target remains CAGR `>= 35%`, MDD `>= -25%`, broker-ledger next-close.

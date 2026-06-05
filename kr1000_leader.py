@@ -101,6 +101,29 @@ def _to_bool_series(values: Any, index: pd.Index, default: bool = False) -> pd.S
     return s.astype(str).str.lower().isin(("1", "true", "yes", "y", "on"))
 
 
+def _eligibility_series(df: pd.DataFrame) -> pd.Series:
+    """Resolve candidate eligibility with schema-union fallback.
+
+    Older scored panels do not have eligible_final. Newer appended readiness
+    rows do. After concatenation, old rows therefore carry eligible_final=NaN;
+    those rows must fall back to in_kr1000 rather than becoming ineligible.
+    """
+    if "eligible_final" in df.columns:
+        raw = df["eligible_final"]
+        primary = _to_bool_series(raw, df.index, True)
+        fallback = _to_bool_series(
+            df["in_kr1000"] if "in_kr1000" in df.columns else True,
+            df.index,
+            True,
+        )
+        return primary.where(raw.notna(), fallback)
+    elif "in_kr1000" in df.columns:
+        raw = df["in_kr1000"]
+    else:
+        raw = True
+    return _to_bool_series(raw, df.index, True)
+
+
 def _numeric(df: pd.DataFrame, col: str, default: float = np.nan) -> pd.Series:
     if col not in df.columns:
         return pd.Series(default, index=df.index, dtype=float)
@@ -461,7 +484,7 @@ def compute_leader_scores(candidates: pd.DataFrame, cfg: Optional[dict[str, Any]
     if "ticker" in out.columns:
         out["ticker"] = _normalise_ticker(out["ticker"])
 
-    eligible = _to_bool_series(out.get("eligible_final", out.get("in_kr1000", True)), out.index, True)
+    eligible = _eligibility_series(out)
     liquidity_fail = _numeric(out, "avg_trading_value_60d", 1.0).fillna(0) <= 0
     governance_veto = _numeric(out, "governance_hard_veto_flag", 0.0).fillna(0.0) >= 0.5
     admin_veto = _to_bool_series(out.get("admin_issue_flag", False), out.index, False)

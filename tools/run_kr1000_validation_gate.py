@@ -188,15 +188,15 @@ def _infer_scored_panel_start_date(
     if not root.exists():
         return default_start
     pattern = re.compile(r"^scored_panel_v0_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})_.+\.parquet$")
-    candidates: list[tuple[float, str]] = []
+    candidates: list[tuple[float, str, str]] = []
     for path in root.glob("scored_panel_v0_*.parquet"):
         match = pattern.match(path.name)
         if not match:
             continue
-        candidates.append((path.stat().st_mtime, match.group(1)))
+        candidates.append((path.stat().st_mtime, match.group(2), match.group(1)))
     if not candidates:
         return default_start
-    return max(candidates, key=lambda x: x[0])[1]
+    return max(candidates, key=lambda x: (x[0], x[1], x[2]))[2]
 
 
 def _extend_cmd_with_strategy_preset(cmd: list[str], preset: dict[str, Any]) -> None:

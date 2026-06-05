@@ -6,6 +6,63 @@
 
 ## 2026-06-05
 
+### 19:12 KST - kr1000-schema-union-broker-ab
+
+**Scope**: Fixed a schema-union ranking regression introduced by the latest
+daily readiness rows and recorded focused broker-ledger A/B evidence for the
+next performance pass.
+
+**What landed**:
+- Added eligibility schema-union fallback in `compute_leader_scores()`.
+  When a concatenated scored panel has `eligible_final=NaN` on historical rows,
+  those rows now fall back to `in_kr1000` instead of being treated as
+  ineligible.
+- Added a regression test proving historical KR1000 rows still receive
+  `leader_rank` after latest-readiness rows add the newer `eligible_final`
+  column.
+- Made scored-panel rebuild start inference deterministic when cache files have
+  equal filesystem mtimes.
+- Confirmed that simple concentration/exposure changes are not the path to the
+  CAGR target. The current best challenger remains signal-limited rather than
+  broker-harness-limited.
+
+**Operational result**:
+- Restored historical P_MB ranking on the mixed scored panel.
+- Reconfirmed current best available 2020-2024 P_MB OOS broker-ledger
+  challenger: CAGR `25.38%`, MDD `-24.00%`, Sharpe `1.23`, IR `1.00`,
+  KOSPI200 excess `+23.12%`.
+- Daily hard-exit disabled A/B worsened to CAGR `21.64%`, MDD `-31.22%`,
+  Sharpe `1.00`; keep the hard-exit rule enabled.
+- Higher exposure / no ladder / tighter variants did not beat the current
+  best. Next performance work should improve signal coverage and full-feature
+  backfill, not remove defensive broker rules.
+
+**symbols_added**:
+- kr1000_leader._eligibility_series
+- tests/test_kr1000_leader.py::test_nan_eligible_final_falls_back_to_in_kr1000
+
+**symbols_changed**:
+- kr1000_leader.compute_leader_scores
+- tools/run_kr1000_validation_gate._infer_scored_panel_start_date
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none. This is a backwards-compatible schema-union fix for
+mixed historical/latest scored panels.
+
+**Validation**:
+- `py -3 tests\test_kr1000_leader.py` -> 11 passed, 0 failed.
+- `py -3 tests\test_kr1000_data_store.py` -> 5 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 4 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `git diff --check` -> passed.
+- `py -3 tools\run_kr1000_backtest.py ... --disable-daily-hard-exit` ->
+  CAGR `21.64%`, MDD `-31.22%`, Sharpe `1.00`, production broker metric.
+
+---
+
 ### 18:31 KST - kr1000-latest-readiness-snapshot
 
 **Scope**: Cleared the stale scored-panel data blocker for daily readiness by
