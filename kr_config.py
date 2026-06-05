@@ -505,6 +505,9 @@ def kr1000_leader_alpha_cfg(overrides: dict[str, Any] | None = None) -> dict[str
         "no_negative_cash": True,
         "no_leverage": True,
         "hard_stop_loss_pct": 0.15,
+        "portfolio_drawdown_ladder_enabled": False,
+        "portfolio_drawdown_ladder_thresholds": [-0.08, -0.15, -0.25],
+        "portfolio_drawdown_ladder_scales": [0.85, 0.65, 0.40],
         "avg_value_refresh_days": 3650,
     })
     if overrides:

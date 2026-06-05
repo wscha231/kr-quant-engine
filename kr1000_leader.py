@@ -544,6 +544,36 @@ def build_target_portfolio(
     return sel[keep].sort_values("leader_rank").reset_index(drop=True)
 
 
+def portfolio_drawdown_exposure_scale(
+    current_drawdown: float,
+    thresholds: Any = None,
+    scales: Any = None,
+) -> float:
+    """Return a PIT-safe gross-exposure scale from portfolio drawdown.
+
+    The ladder is evaluated from already-observed account NAV, so it can be
+    used at a rebalance without reading future returns.
+    """
+    try:
+        dd = float(current_drawdown)
+    except (TypeError, ValueError):
+        dd = 0.0
+    if not np.isfinite(dd):
+        dd = 0.0
+    ths = list(thresholds if thresholds is not None else (-0.08, -0.15, -0.25))
+    scs = list(scales if scales is not None else (0.85, 0.65, 0.40))
+    scale = 1.0
+    for th, sc in zip(ths, scs):
+        try:
+            threshold = float(th)
+            candidate = float(sc)
+        except (TypeError, ValueError):
+            continue
+        if dd <= threshold:
+            scale = candidate
+    return float(min(1.0, max(0.0, scale)))
+
+
 def load_current_holdings(path: str | Path | None = None) -> pd.DataFrame:
     """Load current holdings. Missing file returns an empty schema frame."""
     p = Path(path) if path else PROJECT_ROOT / "state" / "current_holdings.csv"
@@ -802,6 +832,12 @@ def run_event_driven_backtest(
     metric_mode = str(cfg.get("metric_mode", "broker_ledger_next_close"))
     price_col = "open" if execution_price == "next_open" else "close"
     hard_stop_loss_pct = float(cfg.get("hard_stop_loss_pct", 0.15))
+    base_gross_exposure = float(cfg.get("gross_exposure", cfg.get("gross_exposure_default", 1.0)))
+    use_dd_ladder = bool(cfg.get("portfolio_drawdown_ladder_enabled", False))
+    dd_ladder_thresholds = cfg.get("portfolio_drawdown_ladder_thresholds", (-0.08, -0.15, -0.25))
+    dd_ladder_scales = cfg.get("portfolio_drawdown_ladder_scales", (0.85, 0.65, 0.40))
+    peak_nav = float(initial_cash)
+    exposure_scale_rows: list[dict[str, Any]] = []
 
     for i, day in enumerate(days):
         # Execute orders generated after the previous signal day.
@@ -898,7 +934,16 @@ def run_event_driven_backtest(
         pending_orders = still_pending
 
         nav = _portfolio_value(positions, cash, px, day)
-        nav_rows.append({"date": day, "nav": nav, "cash": cash, "n_holdings": len(positions)})
+        peak_nav = max(peak_nav, nav)
+        portfolio_dd = nav / peak_nav - 1.0 if peak_nav > 0 else 0.0
+        nav_rows.append({
+            "date": day,
+            "nav": nav,
+            "cash": cash,
+            "n_holdings": len(positions),
+            "portfolio_drawdown": portfolio_dd,
+            "peak_nav": peak_nav,
+        })
         for tk, pos in positions.items():
             try:
                 last_px = float(px.loc[(day, tk), "close"])
@@ -943,7 +988,22 @@ def run_event_driven_backtest(
         todays = sp[sp[date_col] == day].copy()
         if todays.empty:
             continue
-        target = build_target_portfolio(todays, cfg, as_of_date=day)
+        rebalance_cfg = dict(cfg)
+        gross_scale = 1.0
+        if use_dd_ladder:
+            gross_scale = portfolio_drawdown_exposure_scale(
+                portfolio_dd,
+                dd_ladder_thresholds,
+                dd_ladder_scales,
+            )
+            rebalance_cfg["gross_exposure"] = base_gross_exposure * gross_scale
+            exposure_scale_rows.append({
+                "date": day,
+                "portfolio_drawdown": portfolio_dd,
+                "gross_exposure_scale": gross_scale,
+                "gross_exposure_effective": rebalance_cfg["gross_exposure"],
+            })
+        target = build_target_portfolio(todays, rebalance_cfg, as_of_date=day)
         cur_rows = []
         for tk, pos in positions.items():
             cur_rows.append({
@@ -954,7 +1014,7 @@ def run_event_driven_backtest(
                 "market_value": pos["shares"] * pos["last_price"],
             })
         cur_df = _prepare_holdings_weights(pd.DataFrame(cur_rows))
-        plan = generate_trade_plan(cur_df, target, todays, cfg, as_of_date=day, account_nav=nav)
+        plan = generate_trade_plan(cur_df, target, todays, rebalance_cfg, as_of_date=day, account_nav=nav)
         for _, r in plan.iterrows():
             pending_sell_tickers = {
                 od["ticker"] for od in pending_orders
@@ -1016,6 +1076,15 @@ def run_event_driven_backtest(
     metrics["initial_cash_krw"] = float(initial_cash)
     metrics["ending_cash_krw"] = float(daily_nav["cash"].iloc[-1]) if not daily_nav.empty and "cash" in daily_nav.columns else float(cash)
     metrics["avg_cash_weight"] = float((daily_nav["cash"] / daily_nav["nav"]).replace([np.inf, -np.inf], np.nan).mean()) if not daily_nav.empty else 0.0
+    metrics["portfolio_drawdown_ladder_enabled"] = bool(use_dd_ladder)
+    if exposure_scale_rows:
+        scales_df = pd.DataFrame(exposure_scale_rows)
+        metrics["avg_gross_exposure_effective"] = float(pd.to_numeric(scales_df["gross_exposure_effective"], errors="coerce").mean())
+        metrics["min_gross_exposure_effective"] = float(pd.to_numeric(scales_df["gross_exposure_effective"], errors="coerce").min())
+        metrics["avg_portfolio_drawdown_at_rebalance"] = float(pd.to_numeric(scales_df["portfolio_drawdown"], errors="coerce").mean())
+    else:
+        metrics["avg_gross_exposure_effective"] = float(base_gross_exposure)
+        metrics["min_gross_exposure_effective"] = float(base_gross_exposure)
     metrics["total_fees_krw"] = float(pd.to_numeric(trades.get("fee_krw", pd.Series(dtype=float)), errors="coerce").fillna(0.0).sum()) if not trades.empty else 0.0
     metrics["n_orders"] = int(len(orders))
     metrics["n_trades"] = int(len(trades))

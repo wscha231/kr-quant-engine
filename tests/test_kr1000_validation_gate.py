@@ -68,6 +68,7 @@ def test_planned_component_ab_jobs():
         periods="official_8y,stress_2020_2022",
         profiles="full",
         component_ab=True,
+        strategy_ab=True,
         initial_cash=100_000_000.0,
         top_holdings=20,
         max_rank_for_prices=20,
@@ -86,6 +87,11 @@ def test_planned_component_ab_jobs():
         "pmb_pre_surge",
         "hybrid_pmb_rs",
     }
+    strategy_jobs = [j for j in official if j.get("strategy_preset") == "pmb_defensive_mdd_gate"]
+    assert len(strategy_jobs) == 1
+    assert "--portfolio-dd-ladder" in strategy_jobs[0]["cmd"]
+    assert "--gross-exposure" in strategy_jobs[0]["cmd"]
+    assert "--hard-stop-loss-pct" in strategy_jobs[0]["cmd"]
     assert {j["profile"] for j in stress} == {"full"}
     assert all("--score-profile" in j["cmd"] for j in jobs)
     assert all(j["start"] <= j["end"] for j in jobs)

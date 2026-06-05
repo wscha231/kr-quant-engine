@@ -80,6 +80,12 @@ def parse_args() -> argparse.Namespace:
                    help="Optional one-way slippage in basis points.")
     p.add_argument("--disable-daily-hard-exit", action="store_true",
                    help="Disable the daily hard-exit monitor for sensitivity tests.")
+    p.add_argument("--portfolio-dd-ladder", action="store_true",
+                   help="Enable portfolio drawdown ladder gross-exposure scaling.")
+    p.add_argument("--portfolio-dd-thresholds", default=None,
+                   help="Comma-separated drawdown thresholds, e.g. -0.08,-0.15,-0.25.")
+    p.add_argument("--portfolio-dd-scales", default=None,
+                   help="Comma-separated gross scales, e.g. 0.85,0.65,0.40.")
     p.add_argument("--pmb-oos-picks", default=None,
                    help=(
                        "Optional PIT-safe P_MB OOS picks CSV with p_pre_surge. "
@@ -104,6 +110,12 @@ def _latest_scored_panel_path() -> Path:
 
 def _normalise_ticker(s: pd.Series) -> pd.Series:
     return s.astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6)
+
+
+def _parse_float_list(raw: str | None) -> list[float] | None:
+    if raw is None or str(raw).strip() == "":
+        return None
+    return [float(x.strip()) for x in str(raw).split(",") if x.strip()]
 
 
 def _default_pmb_oos_picks_path() -> Path:
@@ -411,6 +423,14 @@ def main() -> int:
         cfg_overrides["slippage_bp"] = args.slippage_bp
     if args.disable_daily_hard_exit:
         cfg_overrides["daily_hard_exit_enabled"] = False
+    if args.portfolio_dd_ladder:
+        cfg_overrides["portfolio_drawdown_ladder_enabled"] = True
+    dd_thresholds = _parse_float_list(args.portfolio_dd_thresholds)
+    dd_scales = _parse_float_list(args.portfolio_dd_scales)
+    if dd_thresholds is not None:
+        cfg_overrides["portfolio_drawdown_ladder_thresholds"] = dd_thresholds
+    if dd_scales is not None:
+        cfg_overrides["portfolio_drawdown_ladder_scales"] = dd_scales
     cfg = kr1000_leader_alpha_cfg(cfg_overrides)
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "outputs" / f"kr1000_leader_backtest_{start.date()}_{end.date()}"
     out_dir.mkdir(parents=True, exist_ok=True)

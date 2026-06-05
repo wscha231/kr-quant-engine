@@ -112,7 +112,7 @@ jobs:
             full)
               ARGS="$ARGS --refresh-data --rebuild-scored-panel --full-rebuild"
               if [ "${{ steps.mode.outputs.component_ab }}" = "true" ]; then
-                ARGS="$ARGS --component-ab"
+                ARGS="$ARGS --component-ab --strategy-ab"
               fi
               ;;
             validation_only)

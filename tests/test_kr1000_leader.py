@@ -219,6 +219,16 @@ def test_trade_plan_uses_account_nav_for_cash_weighting():
     assert np.isclose(row["estimated_trade_krw"], 45_000)
 
 
+@_test("portfolio drawdown ladder maps observed DD to exposure scale")
+def test_portfolio_drawdown_ladder_scale():
+    from kr1000_leader import portfolio_drawdown_exposure_scale
+
+    assert np.isclose(portfolio_drawdown_exposure_scale(-0.01), 1.0)
+    assert np.isclose(portfolio_drawdown_exposure_scale(-0.08), 0.85)
+    assert np.isclose(portfolio_drawdown_exposure_scale(-0.16), 0.65)
+    assert np.isclose(portfolio_drawdown_exposure_scale(-0.30), 0.40)
+
+
 @_test("event-driven backtest writes ledger rows and reason codes")
 def test_event_backtester_ledgers():
     from kr1000_leader import run_event_driven_backtest
@@ -256,6 +266,49 @@ def test_event_backtester_ledgers():
     assert not result.orders.empty
     assert result.orders["reason_code"].astype(str).str.len().gt(0).all()
     assert result.trades["fill_mode"].eq("next_close").all()
+
+
+@_test("event-driven backtest records portfolio drawdown ladder metrics")
+def test_event_backtester_drawdown_ladder_metrics():
+    from kr1000_leader import run_event_driven_backtest
+
+    dates = pd.bdate_range("2024-01-01", periods=12)
+    price = pd.DataFrame({
+        "date": dates,
+        "ticker": "000001",
+        "open": [100, 100, 100, 90, 85, 80, 82, 84, 86, 88, 90, 92],
+        "close": [100, 100, 100, 90, 85, 80, 82, 84, 86, 88, 90, 92],
+    })
+    scored = pd.DataFrame({
+        "date": [dates[0], dates[5]],
+        "ticker": ["000001", "000001"],
+        "leader_score": [2.0, 2.0],
+        "leader_rank": [1, 1],
+        "eligible_final": [True, True],
+        "risk_veto_flag": [0, 0],
+        "hard_exit_flag": [0, 0],
+        "max_weight": [1.0, 1.0],
+        "avg_trading_value_60d": [1e9, 1e9],
+        "market_cap": [1e12, 1e12],
+    })
+    result = run_event_driven_backtest(
+        scored,
+        price,
+        cfg={
+            "top_holdings": 1,
+            "min_notional_krw": 1,
+            "gross_exposure": 1.0,
+            "gross_exposure_min": 0.0,
+            "portfolio_drawdown_ladder_enabled": True,
+            "portfolio_drawdown_ladder_thresholds": [-0.08, -0.15],
+            "portfolio_drawdown_ladder_scales": [0.70, 0.40],
+            "daily_hard_exit_enabled": False,
+        },
+        initial_cash=10_000,
+    )
+    assert result.metrics["portfolio_drawdown_ladder_enabled"] is True
+    assert result.metrics["min_gross_exposure_effective"] < 1.0
+    assert "portfolio_drawdown" in result.daily_nav.columns
 
 
 @_test("event-driven backtest applies daily broker hard-stop before next close")

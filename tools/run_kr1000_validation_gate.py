@@ -37,6 +37,20 @@ OFFICIAL_PERIODS = {
     "recent_1y": ("recent_1y", None),
 }
 
+KR1000_STRATEGY_AB_PRESETS = {
+    "pmb_defensive_mdd_gate": {
+        "score_profile": "pmb_pre_surge",
+        "top_holdings": 20,
+        "buy_rank_threshold": 20,
+        "hold_rank_threshold": 40,
+        "gross_exposure": 0.70,
+        "hard_stop_loss_pct": 0.10,
+        "portfolio_dd_ladder": True,
+        "portfolio_dd_thresholds": [-0.10, -0.18, -0.24],
+        "portfolio_dd_scales": [0.80, 0.60, 0.35],
+    },
+}
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="KR1000 official validation gate")
@@ -61,6 +75,8 @@ def parse_args() -> argparse.Namespace:
                    help="Comma-separated score profiles. Use --component-ab for the standard A/B set.")
     p.add_argument("--component-ab", action="store_true",
                    help="Run official_8y with the standard KR1000 challenger score profiles.")
+    p.add_argument("--strategy-ab", action="store_true",
+                   help="Run official_8y with standard broker strategy challenger presets.")
     p.add_argument("--refresh-data", action="store_true",
                    help="Run tools/refresh_kr1000_daily_data.py before auditing.")
     p.add_argument("--skip-avg-value-refresh", action="store_true",
@@ -145,6 +161,29 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _extend_cmd_with_strategy_preset(cmd: list[str], preset: dict[str, Any]) -> None:
+    if preset.get("gross_exposure") is not None:
+        cmd.extend(["--gross-exposure", str(float(preset["gross_exposure"]))])
+    if preset.get("hard_stop_loss_pct") is not None:
+        cmd.extend(["--hard-stop-loss-pct", str(float(preset["hard_stop_loss_pct"]))])
+    if preset.get("buy_rank_threshold") is not None:
+        cmd.extend(["--buy-rank-threshold", str(int(preset["buy_rank_threshold"]))])
+    if preset.get("hold_rank_threshold") is not None:
+        cmd.extend(["--hold-rank-threshold", str(int(preset["hold_rank_threshold"]))])
+    if preset.get("portfolio_dd_ladder"):
+        cmd.append("--portfolio-dd-ladder")
+    if preset.get("portfolio_dd_thresholds") is not None:
+        cmd.extend([
+            "--portfolio-dd-thresholds",
+            ",".join(str(float(x)) for x in preset["portfolio_dd_thresholds"]),
+        ])
+    if preset.get("portfolio_dd_scales") is not None:
+        cmd.extend([
+            "--portfolio-dd-scales",
+            ",".join(str(float(x)) for x in preset["portfolio_dd_scales"]),
+        ])
 
 
 def metric_value(metrics: dict[str, Any], *names: str, default: float = 0.0) -> float:
@@ -243,6 +282,38 @@ def _planned_backtests(args: argparse.Namespace, as_of: pd.Timestamp, out_dir: P
             jobs.append({
                 "period": period,
                 "profile": profile,
+                "strategy_preset": "default",
+                "start": str(start.date()),
+                "end": str(end.date()),
+                "out_dir": str(job_out),
+                "cmd": cmd,
+            })
+    if args.strategy_ab:
+        start, end = _period_window("official_8y", as_of)
+        for name, preset in KR1000_STRATEGY_AB_PRESETS.items():
+            profile = str(preset["score_profile"])
+            job_out = out_dir / f"official_8y_{name}"
+            cmd = [
+                sys.executable,
+                _script("tools/run_kr1000_backtest.py"),
+                "--start", str(start.date()),
+                "--end", str(end.date()),
+                "--initial-cash", str(float(args.initial_cash)),
+                "--top-holdings", str(int(preset.get("top_holdings", args.top_holdings))),
+                "--max-rank-for-prices", str(int(args.max_rank_for_prices)),
+                "--out-dir", str(job_out),
+                "--score-profile", profile,
+                "--save-scored-panel",
+            ]
+            _extend_cmd_with_strategy_preset(cmd, preset)
+            if args.scored_panel:
+                cmd.extend(["--scored-panel", args.scored_panel])
+            if args.price_panel:
+                cmd.extend(["--price-panel", args.price_panel])
+            jobs.append({
+                "period": "official_8y",
+                "profile": profile,
+                "strategy_preset": name,
                 "start": str(start.date()),
                 "end": str(end.date()),
                 "out_dir": str(job_out),
@@ -277,8 +348,9 @@ def _render_report(payload: dict[str, Any]) -> str:
     lines.extend(["", "## Backtests", ""])
     for item in payload.get("backtests", []):
         metrics = item.get("metrics") or {}
+        strategy = item.get("strategy_preset", "default")
         lines.append(
-            f"- `{item.get('period')}` / `{item.get('profile')}`: rc=`{item.get('returncode')}`, "
+            f"- `{item.get('period')}` / `{item.get('profile')}` / `{strategy}`: rc=`{item.get('returncode')}`, "
             f"CAGR=`{metric_value(metrics, 'cagr', 'strategy_cagr'):.2%}`, "
             f"MDD=`{metric_value(metrics, 'mdd', 'max_dd'):.2%}`, "
             f"Excess=`{metric_value(metrics, 'excess_cagr'):.2%}`"

@@ -6,6 +6,76 @@
 
 ## 2026-06-05
 
+### 15:10 KST - kr1000-portfolio-dd-ladder-challenger
+
+**Scope**: Added a portfolio-level drawdown ladder to the KR1000 broker-ledger
+engine and promoted the best current P_MB defensive configuration into the
+validation gate as a reproducible strategy challenger.
+
+**What landed**:
+- Added `portfolio_drawdown_exposure_scale()` and optional
+  `portfolio_drawdown_ladder_enabled` support inside
+  `run_event_driven_backtest()`.
+- Backtest daily NAV now records `portfolio_drawdown` and `peak_nav`.
+- Backtest metrics now record effective gross exposure when the ladder is on.
+- Added runner CLI flags:
+  `--portfolio-dd-ladder`, `--portfolio-dd-thresholds`, and
+  `--portfolio-dd-scales`.
+- Added `KR1000_STRATEGY_AB_PRESETS["pmb_defensive_mdd_gate"]` to
+  `tools/run_kr1000_validation_gate.py`.
+- GitHub full-mode KR1000 validation now passes `--strategy-ab` together with
+  `--component-ab`.
+
+**Operational result**:
+- Prior best MDD-passing broker challenger: `CAGR 24.69%`, `MDD -24.74%`,
+  Sharpe `1.26`.
+- New `pmb_defensive_mdd_gate` challenger:
+  `CAGR 25.38%`, `MDD -24.00%`, Sharpe `1.23`, IR `1.00`, KOSPI200 excess
+  `+23.12%`.
+- Standard artifact directory:
+  `G:/.../outputs/kr1000_pmb_oos_mdd_gate_bt_2020_2024`.
+- GitHub Quarterly Backtest on pushed SHA `6769679` succeeded, but KR1000
+  diagnostic still reports `failed_performance`; data gate Critical `1` is the
+  stale scored-panel signal date (`2024-12-30`).
+- This is still below the official CAGR `>= 35%` target and is not an 8y
+  official pass.
+
+**symbols_added**:
+- kr1000_leader.portfolio_drawdown_exposure_scale
+- tools/run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS
+- tools/run_kr1000_validation_gate._extend_cmd_with_strategy_preset
+- tests/test_kr1000_leader.py::test_portfolio_drawdown_ladder_scale
+- tests/test_kr1000_leader.py::test_event_backtester_drawdown_ladder_metrics
+
+**symbols_changed**:
+- kr_config.kr1000_leader_alpha_cfg
+- kr1000_leader.run_event_driven_backtest
+- tools/run_kr1000_backtest.py
+- tools/run_kr1000_validation_gate.py
+- .github/workflows/kr1000_data_update_and_validation.yml
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**:
+- `portfolio_drawdown_ladder_enabled`
+- `portfolio_drawdown_ladder_thresholds`
+- `portfolio_drawdown_ladder_scales`
+
+**breaking_changes**: none. Drawdown ladder is opt-in.
+
+**Validation**:
+- `py -3 tests/test_kr1000_leader.py` -> 10 passed, 0 failed.
+- `py -3 tests/test_kr1000_validation_gate.py` -> 3 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests/smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests/test_kr1000_data_store.py` -> 2 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run` -> 12 planned backtests.
+- `git diff --check` -> clean except CRLF warnings.
+
+---
+
 ### 14:07 KST - kr1000-pmb-broker-ledger-rank-nav-fixes
 
 **Scope**: Fixed two broker-ledger issues that prevented PIT-safe P_MB OOS
