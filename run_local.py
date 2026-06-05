@@ -38,8 +38,10 @@ def parse_args() -> argparse.Namespace:
                    help="Backtest end (YYYY-MM-DD). Default today.")
     p.add_argument("--portfolio-size", type=int, default=None,
                    help="Top-N. Default 30.")
+    p.add_argument("--incremental-max-new-months", type=int, default=None,
+                   help="When quick incremental rebuild is used, compute only the latest N missing rebalance dates.")
     p.add_argument("--phase0-momentum", default="auto",
-                   help="'auto' | '0' | '1' — Phase 0 momentum toggle.")
+                   help="'auto' | '0' | '1' - Phase 0 momentum toggle.")
     return p.parse_args()
 
 
@@ -58,6 +60,8 @@ def build_cfg(args: argparse.Namespace) -> dict:
         cfg["end_date"] = args.end_date
     if args.portfolio_size:
         cfg["portfolio_size"] = args.portfolio_size
+    if args.incremental_max_new_months is not None:
+        cfg["scored_panel_incremental_max_new_months"] = int(args.incremental_max_new_months)
     if args.full:
         cfg["reuse_existing_artifacts"] = False
     elif args.quick:
@@ -67,7 +71,7 @@ def build_cfg(args: argparse.Namespace) -> dict:
 
 def banner() -> None:
     print("=" * 60)
-    print(f"kr_quant_engine — engine {KR_ENGINE_REUSE_VERSION}")
+    print(f"kr_quant_engine - engine {KR_ENGINE_REUSE_VERSION}")
     print("=" * 60)
 
 

@@ -81,7 +81,13 @@ def normalize_mcap_snapshot(raw: pd.DataFrame, snapshot_date: pd.Timestamp) -> p
             out[col] = pd.to_numeric(out[col], errors="coerce")
     if "market" not in out.columns:
         out["market"] = ""
-    keep = [c for c in ("ticker", "snapshot_date", "market", "market_cap", "listed_shares") if c in out.columns]
+    keep = [
+        c for c in (
+            "ticker", "snapshot_date", "market", "market_cap",
+            "listed_shares", "volume", "value",
+        )
+        if c in out.columns
+    ]
     out = out[keep].drop_duplicates(["snapshot_date", "ticker"], keep="last")
     return out.sort_values(["snapshot_date", "ticker"]).reset_index(drop=True)
 

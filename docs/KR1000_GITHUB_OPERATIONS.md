@@ -95,6 +95,18 @@ python tools/setup_kr1000_data_store.py
 python tools/run_kr1000_validation_gate.py --refresh-data --skip-avg-value-refresh --skip-backtests
 ```
 
+Fast latest-readiness snapshot, for clearing stale signal blockers without a
+full feature backfill:
+
+```bash
+python tools/build_latest_kr1000_scored_snapshot.py --as-of <latest-trading-date> --no-rs
+python tools/run_kr1000_validation_gate.py --as-of <latest-trading-date> --skip-backtests
+```
+
+This path is for daily broker readiness only. `--no-rs` creates
+`latest_fast_liquidity_only` rows; do not use those rows as official
+CAGR/MDD evidence.
+
 Full rebuild and official validation:
 
 ```bash
@@ -166,14 +178,16 @@ python tools/run_kr1000_validation_gate.py --component-ab --strategy-ab --dry-ru
 
 ## Current Known Blocker
 
-As of the 2026-06-05 14:07 KST handoff:
+As of the 2026-06-05 18:31 KST handoff:
 
-- The latest `scored_panel_v0` signal is stale (`2024-12-30`).
+- The daily-readiness data blocker is cleared: latest `scored_panel_v0` signal
+  is `2026-06-04`, data gate Critical `0`, and daily broker check completed.
+- The appended `2026-06-04` rows are liquidity-only readiness rows, not
+  full-feature backtest rows.
 - Full score fails after proper NAV sizing (`CAGR -5.61%`, MDD `-50.01%` on
   the available 2019-2024 window).
 - P_MB OOS plus `pmb_defensive_mdd_gate` is the current best broker-ledger
   challenger, but it is still below the official CAGR target.
 
-The next production step is a full scored-panel rebuild through the latest
-observable KRX close, then alpha-signal improvement toward CAGR `>= 35%` under
-the broker-ledger/MDD gate.
+The next production step is a faster full-feature 2025-current backfill, then
+component/strategy A/B toward CAGR `>= 35%` under the broker-ledger/MDD gate.

@@ -6,6 +6,89 @@
 
 ## 2026-06-05
 
+### 18:31 KST - kr1000-latest-readiness-snapshot
+
+**Scope**: Cleared the stale scored-panel data blocker for daily readiness by
+adding a fast latest-snapshot bridge and fixing Windows/GitHub operational
+failure modes found during local GDrive validation.
+
+**What landed**:
+- Added `tools/build_latest_kr1000_scored_snapshot.py`.
+  - Builds the latest PIT KR1000 universe from GDrive data.
+  - Appends a fresh `scored_panel_v0` row set through the latest observable
+    close.
+  - Supports `--no-rs` liquidity-only mode for daily readiness when full
+    feature backfill is too expensive.
+- Added mktcap daily-value liquidity proxy fallback for missing
+  `avg_value_60d` caches. The proxy is PIT-safe: it only uses
+  `mktcap_ALL_YYYYMMDD` files dated on or before the signal date and within
+  `avg_value_mktcap_value_fallback_max_days`.
+- Added `universe_name_lookup` so operational snapshots can skip DART name
+  enrichment and avoid slow external waits.
+- Fixed Windows cp949 runtime crashes by replacing non-ASCII runtime output in
+  `run_local.py`, `kr_pipeline.py`, and `kr_universe.py`.
+- Added cache-preserving rebuild controls:
+  `--rebuild-start-date`, `--rebuild-max-new-months`, and
+  `run_local.py --incremental-max-new-months`.
+- `tools/run_kr1000_validation_gate.py --skip-backtests` now exits `0` when
+  data and daily broker gates pass.
+
+**Operational result**:
+- Generated latest scored panel:
+  `G:/.../feature_store/scored_panel_v0_2019-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet`.
+- Latest scored signal date is now `2026-06-04` instead of `2024-12-30`.
+- Data integrity gate now has Critical `0`.
+- Daily broker check now completes with signal age `0` and writes a 20-row
+  trade plan.
+- Caveat: the appended `2026-06-04` rows are `latest_fast_liquidity_only`
+  readiness rows, not full RS/flow/technical/fundamental backtest rows. Do not
+  treat them as an official CAGR/MDD improvement.
+
+**symbols_added**:
+- tools/build_latest_kr1000_scored_snapshot.py
+- kr_universe.compute_avg_value_proxy_from_mktcap_cache
+- kr_universe.find_prior_mktcap_value_cache
+- tests/test_kr1000_data_store.py::test_mktcap_value_proxy_fallback
+- tools/run_kr1000_validation_gate._infer_scored_panel_start_date
+
+**symbols_changed**:
+- kr_config.DEFAULT_CFG
+- kr_config.kr1000_leader_alpha_cfg
+- kr_universe.compute_avg_trading_value_60d
+- kr_universe.build_universe_snapshot
+- kr_pit_universe.build_historical_mcap_panel
+- kr_pit_universe._fetch_listing_from_historical_mcap
+- tools/refresh_kr1000_daily_data.normalize_mcap_snapshot
+- tools/run_kr1000_validation_gate.py
+- run_local.py
+- kr_pipeline.py
+- SESSION_HANDOFF.md
+
+**config_fields_added**:
+- `universe_name_lookup`
+- `avg_value_mktcap_value_fallback`
+- `avg_value_mktcap_value_fallback_max_days`
+- `scored_panel_incremental_max_new_months`
+- `scored_panel_allow_prior_engine_reuse`
+
+**breaking_changes**: none. The latest snapshot bridge is an operational
+readiness path. Official performance metrics still require broker-ledger
+backtests and full-feature signal rows.
+
+**Validation**:
+- `py -3 tools\build_latest_kr1000_scored_snapshot.py --as-of 2026-06-04 --no-rs`
+  -> 1000 latest rows, output scored panel through `2026-06-04`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-backtests`
+  -> `completed_no_official_backtest`, data gate passed, exit code `0`.
+- Data audit summary: Critical `0`, High `4`, Medium `1`, Low `0`.
+- Daily broker check: `completed`, signal `2026-06-04`, signal age `0`,
+  trade plan rows `20`.
+- `py -3 tests/test_kr1000_data_store.py` -> 5 passed, 0 failed.
+- `py -3 tests/test_kr1000_validation_gate.py` -> 4 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` -> 24 passed, 0 failed.
+
+---
+
 ### 15:33 KST - kr1000-cache-preserving-github-refresh
 
 **Scope**: Made the GitHub KR1000 data/full-validation path cache-preserving

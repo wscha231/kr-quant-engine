@@ -121,6 +121,19 @@ def test_merge_pmb_oos_predictions():
     assert by_ticker.loc["000001", "p_pre_surge"] == 0.0
 
 
+@_test("scored-panel rebuild start defaults to latest cache start in quick mode")
+def test_infer_scored_panel_start_date():
+    from tools.run_kr1000_validation_gate import _infer_scored_panel_start_date
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        old = root / "scored_panel_v0_2016-01-01_2024-12-31_old.parquet"
+        latest = root / "scored_panel_v0_2019-01-01_2024-12-31_old.parquet"
+        old.touch()
+        latest.touch()
+        assert _infer_scored_panel_start_date(root) == "2019-01-01"
+
+
 if __name__ == "__main__":
     print(f"kr1000 validation gate tests: {PASSED} passed, {FAILED} failed")
     sys.exit(0 if FAILED == 0 else 1)

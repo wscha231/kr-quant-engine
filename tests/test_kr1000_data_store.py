@@ -112,6 +112,38 @@ def test_incremental_scored_panel_cache_selection():
         assert selected == expected
 
 
+@_test("mktcap value proxy fallback is PIT-safe and date limited")
+def test_mktcap_value_proxy_fallback():
+    from kr_universe import compute_avg_value_proxy_from_mktcap_cache
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        pd.DataFrame({
+            "ticker": ["1", "000002"],
+            "value": [10_000_000.0, 20_000_000.0],
+        }).to_parquet(root / "mktcap_ALL_20260529.parquet", index=False)
+        pd.DataFrame({
+            "ticker": ["000001"],
+            "value": [999_000_000.0],
+        }).to_parquet(root / "mktcap_ALL_20260606.parquet", index=False)
+
+        out = compute_avg_value_proxy_from_mktcap_cache(
+            pd.Timestamp("2026-06-04"),
+            tickers=["000001"],
+            fallback_max_days=10,
+            cache_dir=root,
+        )
+        assert len(out) == 1
+        assert out.iloc[0]["ticker"] == "000001"
+        assert out.iloc[0]["avg_trading_value"] == 10_000_000.0
+        assert out.iloc[0]["days_observed"] == 1
+        assert compute_avg_value_proxy_from_mktcap_cache(
+            pd.Timestamp("2026-06-04"),
+            fallback_max_days=3,
+            cache_dir=root,
+        ).empty
+
+
 if __name__ == "__main__":
     print(f"kr1000 data-store tests: {PASSED} passed, {FAILED} failed")
     sys.exit(0 if FAILED == 0 else 1)

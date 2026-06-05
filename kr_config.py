@@ -407,6 +407,7 @@ DEFAULT_CFG: dict[str, Any] = {
     "exclude_spac": True,
     "exclude_managed": True,
     "exclude_reits": True,
+    "universe_name_lookup": True,
 
     # Portfolio
     "portfolio_size": 30,                # Top-N
@@ -430,7 +431,11 @@ DEFAULT_CFG: dict[str, Any] = {
     "companyfacts_refresh_days": 30,
     "avg_value_refresh_days": 3650,
     "avg_value_fallback_max_days": 10,
+    "avg_value_mktcap_value_fallback": True,
+    "avg_value_mktcap_value_fallback_max_days": 240,
     "scored_panel_incremental_rebuild": True,
+    "scored_panel_incremental_max_new_months": 0,
+    "scored_panel_allow_prior_engine_reuse": True,
 
     # Benchmark
     "benchmark_ticker": DEFAULT_BENCHMARK,
@@ -513,7 +518,11 @@ def kr1000_leader_alpha_cfg(overrides: dict[str, Any] | None = None) -> dict[str
         "portfolio_drawdown_ladder_scales": [0.85, 0.65, 0.40],
         "avg_value_refresh_days": 3650,
         "avg_value_fallback_max_days": 10,
+        "avg_value_mktcap_value_fallback": True,
+        "avg_value_mktcap_value_fallback_max_days": 240,
         "scored_panel_incremental_rebuild": True,
+        "scored_panel_incremental_max_new_months": 0,
+        "scored_panel_allow_prior_engine_reuse": True,
     })
     if overrides:
         cfg.update(overrides)

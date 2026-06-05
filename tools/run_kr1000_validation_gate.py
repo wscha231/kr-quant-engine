@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -83,8 +84,19 @@ def parse_args() -> argparse.Namespace:
                    help="Pass --skip-avg-value to data refresh for a lighter PIT mcap update.")
     p.add_argument("--rebuild-scored-panel", action="store_true",
                    help="Run run_local.py to rebuild scored_panel_v0 through --as-of before auditing.")
+    p.add_argument("--rebuild-start-date", default=None,
+                   help=(
+                       "Start date for scored-panel rebuild. Default: in quick mode, "
+                       "reuse the latest scored_panel_v0 start date when present; "
+                       "in --full-rebuild mode, use 2016-01-01."
+                   ))
     p.add_argument("--full-rebuild", action="store_true",
                    help="Use run_local.py --full instead of --quick when --rebuild-scored-panel is set.")
+    p.add_argument("--rebuild-max-new-months", type=int, default=1,
+                   help=(
+                       "For cache-preserving quick rebuilds, compute only the latest N missing "
+                       "rebalance dates. Use 0 to fill all missing months."
+                   ))
     p.add_argument("--skip-collector", action="store_true",
                    help="Pass --no-collector to run_local.py rebuild.")
     p.add_argument("--skip-daily-check", action="store_true")
@@ -161,6 +173,30 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _infer_scored_panel_start_date(
+    feature_store: Path | None = None,
+    default_start: str = "2016-01-01",
+) -> str:
+    """Infer rebuild start from the latest scored_panel_v0 cache.
+
+    Cache-preserving GitHub runs should extend the current canonical panel
+    instead of silently falling back to a from-scratch 2016 rebuild.
+    """
+    root = feature_store or DATA_ROOT / "feature_store"
+    if not root.exists():
+        return default_start
+    pattern = re.compile(r"^scored_panel_v0_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})_.+\.parquet$")
+    candidates: list[tuple[float, str]] = []
+    for path in root.glob("scored_panel_v0_*.parquet"):
+        match = pattern.match(path.name)
+        if not match:
+            continue
+        candidates.append((path.stat().st_mtime, match.group(1)))
+    if not candidates:
+        return default_start
+    return max(candidates, key=lambda x: x[0])[1]
 
 
 def _extend_cmd_with_strategy_preset(cmd: list[str], preset: dict[str, Any]) -> None:
@@ -383,14 +419,19 @@ def main() -> int:
         commands.append({"step": "refresh_data", "cmd": cmd})
 
     if args.rebuild_scored_panel:
+        rebuild_start = args.rebuild_start_date
+        if not rebuild_start:
+            rebuild_start = "2016-01-01" if args.full_rebuild else _infer_scored_panel_start_date()
         cmd = [
             sys.executable,
             _script("run_local.py"),
             "--full" if args.full_rebuild else "--quick",
-            "--start-date", "2016-01-01",
+            "--start-date", rebuild_start,
             "--end-date", str(as_of.date()),
             "--portfolio-size", str(int(args.top_holdings)),
         ]
+        if not args.full_rebuild and int(args.rebuild_max_new_months) > 0:
+            cmd.extend(["--incremental-max-new-months", str(int(args.rebuild_max_new_months))])
         if args.skip_collector:
             cmd.append("--no-collector")
         commands.append({"step": "rebuild_scored_panel", "cmd": cmd})
@@ -538,7 +579,9 @@ def main() -> int:
     print(f"  report: {md_path}")
     for blocker in blockers[:8]:
         print(f"  blocker: {blocker}")
-    return 0 if status == "passed" else 2 if status == "blocked" else 1
+    if status in {"passed", "completed_no_official_backtest"}:
+        return 0
+    return 2 if status == "blocked" else 1
 
 
 if __name__ == "__main__":

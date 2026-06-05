@@ -66,7 +66,11 @@ def build_scored_panel_v0(
     prior_panel = pd.DataFrame()
     prior_max_date: Optional[pd.Timestamp] = None
     if cfg.get("reuse_existing_artifacts", True) and cfg.get("scored_panel_incremental_rebuild", True):
-        prior_path = find_incremental_scored_panel_cache(start_date, end_date)
+        prior_path = find_incremental_scored_panel_cache(
+            start_date,
+            end_date,
+            allow_prior_engine_versions=bool(cfg.get("scored_panel_allow_prior_engine_reuse", False)),
+        )
         if prior_path is not None:
             try:
                 prior_panel = pd.read_parquet(prior_path)
@@ -98,6 +102,14 @@ def build_scored_panel_v0(
         f"[pipeline] build scored panel: {len(build_month_ends)}/{len(month_ends)} "
         f"month-ends to compute"
     )
+    max_new_months = int(cfg.get("scored_panel_incremental_max_new_months", 0) or 0)
+    if prior_max_date is not None and max_new_months > 0 and len(build_month_ends) > max_new_months:
+        original_count = len(build_month_ends)
+        build_month_ends = build_month_ends[-max_new_months:]
+        log(
+            f"[pipeline] incremental max_new_months={max_new_months}: "
+            f"compute latest {len(build_month_ends)} of {original_count} missing month-ends"
+        )
 
     if not build_month_ends and not prior_panel.empty:
         try:
@@ -182,6 +194,7 @@ def find_incremental_scored_panel_cache(
     start_date: str,
     end_date: str,
     feature_store: Optional[Path] = None,
+    allow_prior_engine_versions: bool = False,
 ) -> Optional[Path]:
     """Find the widest prior scored_panel cache with the same start date.
 
@@ -194,23 +207,28 @@ def find_incremental_scored_panel_cache(
         return None
     target_end = pd.Timestamp(end_date).normalize()
     prefix = f"scored_panel_v0_{start_date}_"
-    suffix = f"_{KR_ENGINE_REUSE_VERSION}.parquet"
-    candidates: list[tuple[pd.Timestamp, float, Path]] = []
-    for path in root.glob(f"{prefix}*{suffix}"):
+    candidates: list[tuple[pd.Timestamp, int, float, Path]] = []
+    for path in root.glob(f"{prefix}*.parquet"):
         name = path.name
-        if not name.startswith(prefix) or not name.endswith(suffix):
+        if not name.startswith(prefix) or not name.endswith(".parquet"):
             continue
-        raw_end = name[len(prefix):-len(suffix)]
+        tail = name[len(prefix):-len(".parquet")]
+        raw_end, sep, engine_version = tail.partition("_")
+        if not sep:
+            continue
+        engine_match = engine_version == KR_ENGINE_REUSE_VERSION
+        if not engine_match and not allow_prior_engine_versions:
+            continue
         try:
             panel_end = pd.Timestamp(raw_end).normalize()
         except Exception:
             continue
         if panel_end > target_end:
             continue
-        candidates.append((panel_end, path.stat().st_mtime, path))
+        candidates.append((panel_end, 1 if engine_match else 0, path.stat().st_mtime, path))
     if not candidates:
         return None
-    return max(candidates, key=lambda x: (x[0], x[1]))[2]
+    return max(candidates, key=lambda x: (x[0], x[1], x[2]))[3]
 
 
 # ---------------------------------------------------------------------------
@@ -453,7 +471,7 @@ def run_p0_baseline(cfg: Optional[dict] = None) -> dict:
     n = int(cfg.get("portfolio_size", 30))
 
     log(f"[pipeline] === P0 baseline run ===")
-    log(f"[pipeline] window {start_date} → {end_date}, Top-{n}, cost={cfg.get('round_trip_cost'):.4f}")
+    log(f"[pipeline] window {start_date} -> {end_date}, Top-{n}, cost={cfg.get('round_trip_cost'):.4f}")
 
     t0 = time.time()
     panel = build_scored_panel_v0(start_date, end_date, cfg=cfg)
@@ -520,7 +538,7 @@ def run_verdict_only() -> dict:
     turnover = metrics.get("avg_turnover", 0.0)
 
     print("=" * 60)
-    print(f"P0 BASELINE VERDICT — engine {metrics.get('engine_version')}")
+    print(f"P0 BASELINE VERDICT - engine {metrics.get('engine_version')}")
     print("=" * 60)
     print(f"  Strategy CAGR : {cagr:7.2%}")
     print(f"  Benchmark CAGR: {bench:7.2%}  (KOSPI200)")
@@ -537,11 +555,11 @@ def run_verdict_only() -> dict:
     # Ship gate (P0 vs benchmark only — first baseline)
     p0_target_excess = 0.03   # +3pp vs benchmark
     if excess >= p0_target_excess:
-        verdict = "SHIP — proceed to P1 (DART fundamentals)"
+        verdict = "SHIP - proceed to P1 (DART fundamentals)"
     elif excess >= 0:
-        verdict = "PARTIAL — universe/cost OK, alpha weak. Tune before P1."
+        verdict = "PARTIAL - universe/cost OK, alpha weak. Tune before P1."
     else:
-        verdict = "REGRESS — strategy underperforms benchmark. Debug cost / filters / signals."
+        verdict = "REGRESS - strategy underperforms benchmark. Debug cost / filters / signals."
     print(f"  VERDICT: {verdict}")
     print("=" * 60)
     return {"metrics": metrics, "validation": validation, "verdict": verdict}

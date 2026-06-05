@@ -202,7 +202,8 @@ def build_listed_history_from_cache(save: bool = True) -> pd.DataFrame:
 def build_historical_mcap_panel(save: bool = True) -> pd.DataFrame:
     """Long-format historical mcap panel from all cached snapshots.
 
-    Returns columns: ticker, snapshot_date, market, market_cap, listed_shares.
+    Returns columns: ticker, snapshot_date, market, market_cap, listed_shares,
+    volume, value when present in the source snapshots.
     Saves to data_pit/historical_mcap.parquet when save=True.
     """
     files = _scan_cached_mktcap_files()
@@ -223,7 +224,7 @@ def build_historical_mcap_panel(save: bool = True) -> pd.DataFrame:
         df["ticker"] = df["ticker"].astype(str).str.zfill(6)
         df["snapshot_date"] = snap_dt
         keep = [c for c in ("ticker", "snapshot_date", "market",
-                             "market_cap", "listed_shares")
+                             "market_cap", "listed_shares", "volume", "value")
                 if c in df.columns]
         rows.append(df[keep])
 
@@ -330,7 +331,8 @@ def _fetch_listing_from_historical_mcap(
     sub["ticker"] = sub["ticker"].astype(str).str.zfill(6)
     if "market" in sub.columns and market.upper() != "ALL":
         sub = sub[sub["market"].str.upper().isin([market.upper()])].copy()
-    keep = [c for c in ("ticker", "market", "market_cap", "listed_shares")
+    keep = [c for c in ("ticker", "market", "market_cap", "listed_shares",
+                        "volume", "value")
             if c in sub.columns]
     sub = sub[keep].copy()
     sub["snapshot_date"] = snap_dt
