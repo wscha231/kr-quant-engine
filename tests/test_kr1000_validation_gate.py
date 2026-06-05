@@ -40,7 +40,7 @@ def test_official_metric_gate():
     cfg = kr1000_leader_alpha_cfg()
     metrics = {
         "years": 8.25,
-        "cagr": 0.31,
+        "cagr": 0.36,
         "mdd": -0.24,
         "excess_cagr": 0.01,
         "sharpe": 1.05,

@@ -47,6 +47,9 @@ jobs:
           rclone copy gdrive:kr_quant_engine/feature_store data/feature_store -P || true
           rclone copy gdrive:kr_quant_engine/models data/models -P || true
 
+      - name: Setup KR1000 data store
+        run: python tools/setup_kr1000_data_store.py
+
       - name: Run quarterly backtest
         run: python tools/run_quarterly_backtest.py --top-n 20 --weighting equal
 

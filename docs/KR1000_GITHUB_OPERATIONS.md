@@ -6,7 +6,7 @@ KR1000 Leader Alpha is accepted only when the official broker-ledger path
 passes the current gate:
 
 - 8y+ backtest from `2018-01-01`
-- CAGR `>= 30%`
+- CAGR `>= 35%`
 - MDD `>= -25%`
 - KOSPI200 excess CAGR `> 0`
 - Sharpe `> 1.0`
@@ -51,17 +51,47 @@ Do not treat vectorized or next-open runs as production metrics.
 - `BOK_ECOS_API_KEY`: BOK ECOS API key.
 - Optional `SLACK_WEBHOOK_URL` for legacy notification workflows.
 
+## Data Store Layout
+
+The canonical data root is Google Drive path `gdrive:kr_quant_engine`, mounted
+locally through `KR_DATA_DIR` when available. The setup tool creates and audits
+the required layout:
+
+```bash
+python tools/setup_kr1000_data_store.py
+```
+
+Required folders:
+
+- `cache_pykrx`
+- `cache_dart`
+- `cache_macro`
+- `cache_misc`
+- `data_raw`
+- `data_pit`
+- `feature_store`
+- `models`
+- `outputs`
+- `outputs_advisor`
+- `backtest_results`
+- `state`
+
+Private account files such as `state/current_holdings.csv` stay gitignored.
+Only `state/current_holdings.example.csv` is copied into the data store.
+
 ## Manual Runs
 
 Light daily gate:
 
 ```bash
+python tools/setup_kr1000_data_store.py
 python tools/run_kr1000_validation_gate.py --refresh-data --skip-avg-value-refresh --skip-backtests
 ```
 
 Full rebuild and official validation:
 
 ```bash
+python tools/setup_kr1000_data_store.py
 python tools/run_kr1000_validation_gate.py --refresh-data --rebuild-scored-panel --full-rebuild --component-ab
 ```
 
@@ -87,6 +117,7 @@ python tools/run_kr1000_validation_gate.py --component-ab --dry-run
 
 ```bash
 python tests/smoke_test.py --quick
+python tests/test_kr1000_data_store.py
 python tests/test_kr1000_leader.py
 python tests/test_kr1000_validation_gate.py
 python tools/run_kr1000_validation_gate.py --component-ab --dry-run

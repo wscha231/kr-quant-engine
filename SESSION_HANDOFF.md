@@ -6,7 +6,7 @@ KR1000 Leader Alpha now has an official validation gate for the user's current
 target:
 
 - 8y+ broker-ledger backtest
-- CAGR `>= 30%`
+- CAGR `>= 35%`
 - MDD `>= -25%`
 - KOSPI200 excess CAGR `> 0`
 - Sharpe `> 1.0`
@@ -52,7 +52,7 @@ Validation gate:
 
 Config:
 - `kr1000_leader_alpha_cfg()` now carries official gate fields:
-  - `target_cagr_gate = 0.30`
+  - `target_cagr_gate = 0.35`
   - `target_mdd_gate = -0.25`
   - `target_excess_cagr_gate = 0.0`
   - `target_sharpe_gate = 1.0`
@@ -61,15 +61,27 @@ Config:
   - `score_profile = full`
 
 Tests:
+- Added `tests/test_kr1000_data_store.py`.
 - `tests/test_kr1000_leader.py` now covers score profiles.
 - Added `tests/test_kr1000_validation_gate.py`.
 - `tests/smoke_test.py` now syntax-checks `tools/*.py`.
+
+Data store:
+- Added `tools/setup_kr1000_data_store.py`.
+- Canonical local data root resolves to `G:/내 드라이브/kr_quant_engine`.
+- Required folders include `cache_pykrx`, `cache_dart`, `cache_macro`,
+  `cache_misc`, `data_raw`, `data_pit`, `feature_store`, `models`, `outputs`,
+  `outputs_advisor`, `backtest_results`, and `state`.
+- Private account files remain gitignored; only
+  `state/current_holdings.example.csv` is copied into the data store.
 
 GitHub automation:
 - Added `.github/workflows/kr1000_data_update_and_validation.yml`.
 - Weekday light mode refreshes latest market/PIT data and runs daily readiness.
 - Weekly full mode rebuilds scored panel, refreshes DART/feature-store inputs,
   runs official 8y validation, and runs KR1000 component A/B.
+- All KR1000 GitHub workflows now run `tools/setup_kr1000_data_store.py` before
+  refresh/backtest steps.
 - Updated `.github/workflows/quarterly_backtest.yml` to call the validation
   gate without a hard-coded end date.
 - Added `docs/KR1000_GITHUB_OPERATIONS.md` for other agents.
@@ -78,6 +90,7 @@ GitHub automation:
 
 Passed:
 - `py -3 tests/smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests/test_kr1000_data_store.py` -> pending after latest edit.
 - `py -3 tests/test_kr1000_leader.py` -> 6 passed, 0 failed.
 - `py -3 tests/test_kr1000_validation_gate.py` -> 2 passed, 0 failed.
 - `py -3 tests/smoke_test.py` -> 46 passed, 0 failed.
@@ -119,7 +132,7 @@ Target after rebuild:
 - official 8y backtest can run and produce `official_8y_full/leader_backtest_metrics.json`
 
 Only after that should component A/B be used to improve signal quality toward
-CAGR `>= 30%` and MDD `>= -25%`.
+CAGR `>= 35%` and MDD `>= -25%`.
 
 ## Known Dirty/Untracked Files
 
@@ -131,6 +144,7 @@ KR1000 implementation files are still untracked unless staged later:
 - `.github/workflows/kr1000_data_update_and_validation.yml`
 - `kr1000_leader.py`
 - `docs/KR1000_GITHUB_OPERATIONS.md`
+- `tools/setup_kr1000_data_store.py`
 - `tools/run_kr1000_leader.py`
 - `tools/run_kr1000_backtest.py`
 - `tools/run_kr1000_daily_broker_check.py`
@@ -138,5 +152,6 @@ KR1000 implementation files are still untracked unless staged later:
 - `tools/audit_data_integrity.py`
 - `tools/run_kr1000_validation_gate.py`
 - `tests/test_kr1000_leader.py`
+- `tests/test_kr1000_data_store.py`
 - `tests/test_kr1000_validation_gate.py`
 - `state/`

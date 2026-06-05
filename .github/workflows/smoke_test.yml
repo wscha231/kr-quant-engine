@@ -30,6 +30,15 @@ jobs:
       - name: Smoke test (full)
         run: python tests/smoke_test.py
 
+      - name: KR1000 data-store tests
+        run: python tests/test_kr1000_data_store.py
+
+      - name: KR1000 leader tests
+        run: python tests/test_kr1000_leader.py
+
+      - name: KR1000 validation gate tests
+        run: python tests/test_kr1000_validation_gate.py
+
       - name: PIT universe tests (Phase C1)
         run: |
           if [ -f data_pit/historical_mcap.parquet ] || ls cache_pykrx/mktcap_ALL_*.parquet >/dev/null 2>&1; then

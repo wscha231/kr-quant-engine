@@ -6,6 +6,56 @@
 
 ## 2026-06-05
 
+### 13:04 KST - kr1000-data-store-and-cagr35-gate
+
+**Scope**: Raised the official KR1000 performance target to CAGR 35% while
+keeping MDD -25%, and made the Google Drive data-store setup reproducible from
+both local runs and GitHub Actions.
+
+**What landed**:
+- `kr1000_leader_alpha_cfg()` now uses `target_cagr_gate = 0.35`.
+- `tools/run_kr1000_validation_gate.py` report text now states the official
+  target as CAGR `>= 35%`.
+- Added `tools/setup_kr1000_data_store.py` to create/verify the canonical
+  Google Drive data layout and write `outputs/data_store_manifest.json`.
+- Added `tests/test_kr1000_data_store.py`.
+- Wired data-store setup into daily KR1000 broker check, KR1000 data update
+  and validation, quarterly backtest, and PR smoke workflows.
+- Updated `docs/KR1000_GITHUB_OPERATIONS.md` and `SESSION_HANDOFF.md`.
+
+**Operational result**:
+- Local `DATA_ROOT` resolves to `G:/내 드라이브/kr_quant_engine`.
+- Existing GDrive folders were present for caches, PIT data, feature_store,
+  outputs, and models; `state/` was missing and is now handled by setup.
+- GitHub PR smoke for prior commit `83bf71c` passed before this update.
+- Quarterly KR1000 validation diagnostic for `83bf71c` was still running when
+  this update started; it will be superseded by the next pushed SHA.
+
+**symbols_added**:
+- tools/setup_kr1000_data_store.py: REQUIRED_DATA_DIRS,
+  build_data_store_manifest, write_manifest, main
+- tests/test_kr1000_data_store.py
+
+**symbols_changed**:
+- kr_config.kr1000_leader_alpha_cfg
+- tools/run_kr1000_validation_gate.py
+- .github/workflows/daily_kr1000_broker_check.yml
+- .github/workflows/kr1000_data_update_and_validation.yml
+- .github/workflows/quarterly_backtest.yml
+- .github/workflows/smoke_test.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: KR1000 official acceptance is stricter: CAGR gate is now
+35%, not 30%.
+
+**Validation**:
+- pending final smoke/YAML/data-store checks after this edit.
+
+---
+
 ### 11:45 KST - github-data-update-validation-automation
 
 **Scope**: Added GitHub-side automation so other agents can run KR1000 data

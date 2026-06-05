@@ -89,8 +89,12 @@ jobs:
       - name: Smoke tests
         run: |
           python tests/smoke_test.py --quick
+          python tests/test_kr1000_data_store.py
           python tests/test_kr1000_leader.py
           python tests/test_kr1000_validation_gate.py
+
+      - name: Setup KR1000 data store
+        run: python tools/setup_kr1000_data_store.py
 
       - name: Run KR1000 validation gate
         id: gate

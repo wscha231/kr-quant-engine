@@ -57,7 +57,12 @@ jobs:
           rclone copy gdrive:kr_quant_engine/state data/state -P || true
 
       - name: Quick smoke
-        run: python tests/smoke_test.py --quick
+        run: |
+          python tests/smoke_test.py --quick
+          python tests/test_kr1000_data_store.py
+
+      - name: Setup KR1000 data store
+        run: python tools/setup_kr1000_data_store.py
 
       - name: Refresh latest mcap and PIT data
         run: |
