@@ -120,6 +120,26 @@ def test_score_profiles():
     assert not hybrid["leader_score"].isna().any()
 
 
+@_test("sparse P_MB OOS probabilities rank above zero non-picks")
+def test_sparse_pmb_oos_ranking():
+    from kr1000_leader import compute_leader_scores
+
+    candidates = pd.DataFrame({
+        "ticker": [f"{i:06d}" for i in range(20)],
+        "p_pre_surge": [0.0] * 19 + [0.8],
+        "avg_trading_value_60d": list(range(20, 0, -1)),
+        "market_cap": list(range(20, 0, -1)),
+        "in_kr1000": [True] * 20,
+        "eligible_final": [True] * 20,
+    })
+    scored = compute_leader_scores(candidates, {"score_profile": "pmb_pre_surge"})
+    top = scored.iloc[0]
+    positive = scored.loc[scored["p_pre_surge"] > 0].iloc[0]
+    assert top["ticker"] == "000019"
+    assert positive["leader_rank"] == 1
+    assert positive["leader_score"] > 0
+
+
 @_test("trade plan keeps every current holding with reason_code")
 def test_trade_plan_current_holdings_reconciled():
     from kr1000_leader import (
@@ -158,6 +178,45 @@ def test_trade_plan_current_holdings_reconciled():
     assert plan.loc[plan["ticker"] == "000002", "action"].iloc[0] == "SELL"
     assert plan["reason_code"].astype(str).str.len().gt(0).all()
     assert set(plan["action"]).issubset({"BUY", "ADD", "HOLD", "TRIM", "SELL", "BLOCKED", "NO_TRADE"})
+
+
+@_test("trade plan weights holdings against account NAV when cash is present")
+def test_trade_plan_uses_account_nav_for_cash_weighting():
+    from kr1000_leader import generate_trade_plan
+
+    current = pd.DataFrame({
+        "ticker": ["000001"],
+        "name": ["Cash Diluted Holding"],
+        "shares": [5],
+        "avg_cost": [1000],
+        "last_price": [1000],
+        "market_value": [5000],
+    })
+    target = pd.DataFrame({
+        "ticker": ["000001"],
+        "name": ["Cash Diluted Holding"],
+        "target_weight": [0.50],
+    })
+    candidates = pd.DataFrame({
+        "ticker": ["000001"],
+        "name": ["Cash Diluted Holding"],
+        "leader_rank": [1],
+        "leader_score": [1.0],
+        "risk_veto_flag": [0],
+        "hard_exit_flag": [0],
+    })
+    plan = generate_trade_plan(
+        current,
+        target,
+        candidates,
+        cfg={"min_notional_krw": 1},
+        as_of_date="2024-04-01",
+        account_nav=100_000,
+    )
+    row = plan.iloc[0]
+    assert row["action"] == "ADD"
+    assert np.isclose(row["current_weight"], 0.05)
+    assert np.isclose(row["estimated_trade_krw"], 45_000)
 
 
 @_test("event-driven backtest writes ledger rows and reason codes")

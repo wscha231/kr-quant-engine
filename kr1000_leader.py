@@ -120,6 +120,27 @@ def _score_series(series: pd.Series) -> pd.Series:
     return cross_sectional_robust_z(s).fillna(0.0)
 
 
+def _sparse_positive_rank_score(series: pd.Series) -> pd.Series:
+    """Rank sparse positive signals while leaving missing/non-selected rows at 0.
+
+    P_MB walk-forward OOS picks are sparse: only selected names have
+    probabilities and the rest are explicit zeroes. Robust z-score degenerates
+    to all zero when the cross-section median and MAD are both zero, so use a
+    positive-only percentile rank for these PIT-safe probabilities.
+    """
+    s = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    out = pd.Series(0.0, index=s.index, dtype=float)
+    positive = s > 0
+    if not positive.any():
+        return out
+    pos = s[positive]
+    if pos.nunique(dropna=True) <= 1:
+        out.loc[positive] = 1.0
+    else:
+        out.loc[positive] = pos.rank(pct=True, method="average")
+    return out
+
+
 def _z(df: pd.DataFrame, col: str) -> pd.Series:
     return _score_series(_numeric(df, col))
 
@@ -419,9 +440,9 @@ def apply_kr1000_score_profile(
         fallback = _numeric(out, "p0_momentum_score", 0.0)
         out["leader_score"] = _score_series(source.fillna(fallback))
     elif profile == "pmb_pre_surge":
-        out["leader_score"] = _score_series(_numeric(out, "p_pre_surge", 0.0))
+        out["leader_score"] = _sparse_positive_rank_score(_numeric(out, "p_pre_surge", 0.0))
     elif profile == "hybrid_pmb_rs":
-        pmb = _score_series(_numeric(out, "p_pre_surge", 0.0))
+        pmb = _sparse_positive_rank_score(_numeric(out, "p_pre_surge", 0.0))
         out["leader_score"] = (
             0.45 * pmb
             + 0.35 * out["rs_score"]
@@ -560,10 +581,19 @@ def generate_trade_plan(
     candidates: pd.DataFrame,
     cfg: Optional[dict[str, Any]] = None,
     as_of_date: str | pd.Timestamp | None = None,
+    account_nav: float | None = None,
 ) -> pd.DataFrame:
     """Reconcile current holdings against target and produce trade actions."""
     cfg = _cfg(cfg)
     h = _prepare_holdings_weights(current_holdings)
+    cfg_nav = pd.to_numeric(cfg.get("account_nav_krw", np.nan), errors="coerce")
+    nav_value = pd.to_numeric(account_nav, errors="coerce")
+    if not np.isfinite(nav_value) or nav_value <= 0:
+        nav_value = float(cfg_nav) if np.isfinite(cfg_nav) and float(cfg_nav) > 0 else np.nan
+    holdings_mv = float(h["market_value"].sum()) if not h.empty else 0.0
+    total_mv = float(nav_value) if np.isfinite(nav_value) and float(nav_value) > 0 else holdings_mv
+    if not h.empty and total_mv > 0:
+        h["weight"] = h["market_value"] / total_mv
     t = target_portfolio.copy()
     c = candidates.copy()
     for df in (h, t, c):
@@ -583,7 +613,6 @@ def generate_trade_plan(
     buy_rank = int(cfg.get("buy_rank_threshold", 20))
     band = float(cfg.get("hold_band_weight", 0.01))
     min_notional = float(cfg.get("min_notional_krw", 100000.0))
-    total_mv = float(h["market_value"].sum()) if not h.empty else 0.0
 
     for tk in tickers:
         crow = cand.loc[tk] if tk in cand.index else pd.Series(dtype=object)
@@ -925,7 +954,7 @@ def run_event_driven_backtest(
                 "market_value": pos["shares"] * pos["last_price"],
             })
         cur_df = _prepare_holdings_weights(pd.DataFrame(cur_rows))
-        plan = generate_trade_plan(cur_df, target, todays, cfg, as_of_date=day)
+        plan = generate_trade_plan(cur_df, target, todays, cfg, as_of_date=day, account_nav=nav)
         for _, r in plan.iterrows():
             pending_sell_tickers = {
                 od["ticker"] for od in pending_orders

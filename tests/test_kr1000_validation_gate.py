@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 
 import pandas as pd
@@ -88,6 +89,30 @@ def test_planned_component_ab_jobs():
     assert {j["profile"] for j in stress} == {"full"}
     assert all("--score-profile" in j["cmd"] for j in jobs)
     assert all(j["start"] <= j["end"] for j in jobs)
+
+
+@_test("KR1000 backtest runner merges PIT-safe P_MB OOS probabilities")
+def test_merge_pmb_oos_predictions():
+    from tools.run_kr1000_backtest import merge_pmb_oos_predictions
+
+    panel = pd.DataFrame({
+        "rebalance_date": pd.to_datetime(["2024-01-31", "2024-01-31"]),
+        "ticker": ["000001", "2"],
+        "p_pre_surge": [0.0, 0.0],
+    })
+    with tempfile.TemporaryDirectory() as tmp:
+        picks_path = Path(tmp) / "picks.csv"
+        pd.DataFrame({
+            "rebalance_date": ["2024-01-31"],
+            "ticker": ["000002"],
+            "p_pre_surge": [0.77],
+            "rank_in_month": [3],
+        }).to_csv(picks_path, index=False)
+        out = merge_pmb_oos_predictions(panel, picks_path)
+    by_ticker = out.set_index("ticker")
+    assert by_ticker.loc["000002", "p_pre_surge"] == 0.77
+    assert by_ticker.loc["000002", "pmb_oos_rank"] == 3
+    assert by_ticker.loc["000001", "p_pre_surge"] == 0.0
 
 
 if __name__ == "__main__":

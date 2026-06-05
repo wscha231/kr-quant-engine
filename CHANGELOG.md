@@ -6,6 +6,66 @@
 
 ## 2026-06-05
 
+### 14:07 KST - kr1000-pmb-broker-ledger-rank-nav-fixes
+
+**Scope**: Fixed two broker-ledger issues that prevented PIT-safe P_MB OOS
+signals from being evaluated correctly, then added strategy override CLI knobs
+for reproducible defensive A/B runs.
+
+**What landed**:
+- `pmb_pre_surge` and `hybrid_pmb_rs` now rank sparse positive P_MB OOS
+  probabilities with a positive-only percentile score instead of robust z-score.
+- `generate_trade_plan()` now accepts `account_nav` and computes current
+  weights / trade notional against cash-inclusive NAV when supplied.
+- `run_event_driven_backtest()` now passes daily NAV into `generate_trade_plan()`.
+- `tools/run_kr1000_backtest.py` now supports strategy overrides:
+  `--gross-exposure`, `--hard-stop-loss-pct`, `--buy-rank-threshold`,
+  `--hold-rank-threshold`, `--min-notional-krw`, `--slippage-bp`, and
+  `--disable-daily-hard-exit`.
+- Added regression tests for sparse P_MB ranking and cash-inclusive trade-plan
+  weighting.
+
+**Operational result**:
+- P_MB OOS 2020-2024 before these fixes: `CAGR -5.61%`, `MDD -34.33%`.
+- After sparse-rank fix only: `CAGR 9.35%`, `MDD -25.18%`.
+- After sparse-rank + NAV fix: `CAGR 23.52%`, `MDD -33.07%`, Sharpe `0.99`.
+- Defensive CLI run (`pmb_pre_surge`, gross `0.60`, hard stop `0.10`) produced
+  `CAGR 24.69%`, `MDD -24.74%`, Sharpe `1.26`, KOSPI200 excess `+22.42%`.
+- Current target `CAGR >= 35%` is still not met; next work should improve alpha
+  signal quality, not the broker harness.
+
+**symbols_added**:
+- kr1000_leader._sparse_positive_rank_score
+- tests/test_kr1000_leader.py::test_sparse_pmb_oos_ranking
+- tests/test_kr1000_leader.py::test_trade_plan_uses_account_nav_for_cash_weighting
+
+**symbols_changed**:
+- kr1000_leader.apply_kr1000_score_profile
+- kr1000_leader.generate_trade_plan
+- kr1000_leader.run_event_driven_backtest
+- tools/run_kr1000_backtest.py
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+- SESSION_HANDOFF.md
+- docs/KR1000_GITHUB_OPERATIONS.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 tests/test_kr1000_leader.py` -> 8 passed, 0 failed.
+- `py -3 tests/test_kr1000_validation_gate.py` -> 3 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests/smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests/test_kr1000_data_store.py` -> 2 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --dry-run` -> 11 planned backtests.
+- `git diff --check` -> clean except CRLF warnings.
+- Backtest artifacts written under
+  `G:/.../outputs/kr1000_pmb_oos_defensive_cli_bt_2020_2024`.
+
+---
+
 ### 13:04 KST - kr1000-data-store-and-cagr35-gate
 
 **Scope**: Raised the official KR1000 performance target to CAGR 35% while

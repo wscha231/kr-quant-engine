@@ -103,6 +103,17 @@ Dry-run command manifest:
 python tools/run_kr1000_validation_gate.py --component-ab --dry-run
 ```
 
+P_MB defensive broker-ledger diagnostic:
+
+```bash
+python tools/run_kr1000_backtest.py --start 2020-01-01 --end 2024-12-31 --score-profile pmb_pre_surge --gross-exposure 0.60 --hard-stop-loss-pct 0.10 --top-holdings 20 --buy-rank-threshold 20 --hold-rank-threshold 40 --save-scored-panel
+```
+
+As of the 2026-06-05 broker-ledger fix, this diagnostic produced CAGR
+`24.69%`, MDD `-24.74%`, Sharpe `1.26`, and KOSPI200 excess `+22.42%` on the
+available 2020-2024 P_MB OOS window. It is a useful challenger, but it does
+not satisfy the official CAGR `>= 35%` target and is not an 8y official pass.
+
 ## How Other Agents Should Improve Performance
 
 1. Check `SESSION_HANDOFF.md` first.
@@ -128,8 +139,26 @@ python tests/test_kr1000_validation_gate.py
 python tools/run_kr1000_validation_gate.py --component-ab --dry-run
 ```
 
+7. When comparing broker strategy settings, use the runner CLI overrides rather
+   than editing code:
+   - `--gross-exposure`
+   - `--hard-stop-loss-pct`
+   - `--buy-rank-threshold`
+   - `--hold-rank-threshold`
+   - `--min-notional-krw`
+   - `--slippage-bp`
+   - `--disable-daily-hard-exit`
+
 ## Current Known Blocker
 
-As of the 2026-06-05 handoff, the latest `scored_panel_v0` signal is stale
-(`2024-12-30`). The next production step is a full scored-panel rebuild through
-the latest observable KRX close, then rerun the official validation gate.
+As of the 2026-06-05 14:07 KST handoff:
+
+- The latest `scored_panel_v0` signal is stale (`2024-12-30`).
+- Full score fails after proper NAV sizing (`CAGR -5.61%`, MDD `-50.01%` on
+  the available 2019-2024 window).
+- P_MB OOS is the current best alpha source, but the best defensive broker
+  diagnostic is still below the official CAGR target.
+
+The next production step is a full scored-panel rebuild through the latest
+observable KRX close, then alpha-signal improvement toward CAGR `>= 35%` under
+the broker-ledger/MDD gate.
