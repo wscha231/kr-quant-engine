@@ -428,6 +428,9 @@ DEFAULT_CFG: dict[str, Any] = {
     "dart_refresh_days": 1,
     "macro_refresh_days": 7,
     "companyfacts_refresh_days": 30,
+    "avg_value_refresh_days": 3650,
+    "avg_value_fallback_max_days": 10,
+    "scored_panel_incremental_rebuild": True,
 
     # Benchmark
     "benchmark_ticker": DEFAULT_BENCHMARK,
@@ -509,6 +512,8 @@ def kr1000_leader_alpha_cfg(overrides: dict[str, Any] | None = None) -> dict[str
         "portfolio_drawdown_ladder_thresholds": [-0.08, -0.15, -0.25],
         "portfolio_drawdown_ladder_scales": [0.85, 0.65, 0.40],
         "avg_value_refresh_days": 3650,
+        "avg_value_fallback_max_days": 10,
+        "scored_panel_incremental_rebuild": True,
     })
     if overrides:
         cfg.update(overrides)

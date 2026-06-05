@@ -1,111 +1,78 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-05 15:10 KST
+## Current Status - 2026-06-05 15:33 KST
 
-KR1000 Leader Alpha is on branch `codex/kr1000-github-automation` with
-GitHub/GDrive automation, data-store setup, broker validation, component A/B,
-and strategy A/B support.
+KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
+Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
 The official user target remains unmet:
 
 - Official target: 8y+ broker-ledger CAGR `>= 35%`, MDD `>= -25%`,
   KOSPI200 excess CAGR `> 0`, Sharpe `> 1.0`, IR `> 0.5`.
 - Current best broker-ledger challenger:
-  `pmb_defensive_mdd_gate`, 2020-01-31 to 2025-01-09,
+  `pmb_defensive_mdd_gate`, available 2020-2024 P_MB OOS window,
   CAGR `25.38%`, MDD `-24.00%`, Sharpe `1.23`, IR `1.00`,
   KOSPI200 excess `+23.12%`.
-- This is not an official 8y pass because the scored panel currently covers
-  only `2019-01-31` to `2024-12-30`, and CAGR is below `35%`.
+- This is not an official pass because CAGR is below `35%` and the current
+  scored-panel history still needs to be rebuilt through latest close for the
+  official 8y gate.
 
 ## What Changed In The Latest Pass
 
-Added portfolio-level drawdown ladder support to the broker-ledger engine:
+Made the GitHub data/full-validation path cache-preserving by default:
 
-- `kr1000_leader.portfolio_drawdown_exposure_scale()`
-- `portfolio_drawdown_ladder_enabled`
-- `portfolio_drawdown_ladder_thresholds`
-- `portfolio_drawdown_ladder_scales`
-- daily NAV now records `portfolio_drawdown` and `peak_nav`
-- metrics record `avg_gross_exposure_effective` and
-  `min_gross_exposure_effective`
-
-Added runner CLI:
-
-- `--portfolio-dd-ladder`
-- `--portfolio-dd-thresholds`
-- `--portfolio-dd-scales`
-
-Added validation strategy preset:
-
-- `KR1000_STRATEGY_AB_PRESETS["pmb_defensive_mdd_gate"]`
-- score profile: `pmb_pre_surge`
-- gross exposure: `0.70`
-- hard stop: `0.10`
-- portfolio DD thresholds: `-0.10,-0.18,-0.24`
-- portfolio DD scales: `0.80,0.60,0.35`
-
-GitHub full-mode KR1000 validation now appends `--strategy-ab` whenever
-`--component-ab` is enabled.
-
-## Latest Performance Evidence
-
-Same P_MB OOS source, broker-ledger next-close:
-
-- Before rank/NAV fixes: `CAGR -5.61%`, `MDD -34.33%`
-- Sparse-rank fix only: `CAGR 9.35%`, `MDD -25.18%`
-- Sparse-rank + NAV fix: `CAGR 23.52%`, `MDD -33.07%`
-- Prior best MDD-passing defensive run: `CAGR 24.69%`, `MDD -24.74%`
-- New `pmb_defensive_mdd_gate`: `CAGR 25.38%`, `MDD -24.00%`,
-  Sharpe `1.23`, IR `1.00`, excess `+23.12%`
-
-Standard artifact:
-
-```text
-G:\내 드라이브\kr_quant_engine\outputs\kr1000_pmb_oos_mdd_gate_bt_2020_2024
-```
-
-Full-score remains a failed signal after proper NAV sizing:
-
-- `G:\내 드라이브\kr_quant_engine\outputs\kr1000_full_navfix_bt_2018_latest`
-- actual available window: `2019-01-31` to `2025-01-09`
-- CAGR `-5.61%`, MDD `-50.01%`, excess `-7.41%`
+- `kr_universe.find_prior_avg_value_cache()` selects only prior
+  `avg_value_60d` caches within `avg_value_fallback_max_days`.
+- `kr_universe.compute_avg_trading_value_60d()` can reuse that PIT-safe prior
+  cache when the exact dated cache is missing.
+- `kr_pipeline.find_incremental_scored_panel_cache()` finds the widest
+  same-start scored-panel cache whose filename end date is not after the
+  target end date.
+- `kr_pipeline.build_scored_panel_v0()` now appends only missing month-ends
+  when `reuse_existing_artifacts=True` and
+  `scored_panel_incremental_rebuild=True`.
+- Default config now includes:
+  - `avg_value_refresh_days=3650`
+  - `avg_value_fallback_max_days=10`
+  - `scored_panel_incremental_rebuild=True`
+- GitHub `KR1000 Data Update and Validation` full mode now runs the scored
+  panel rebuild with caches preserved by default. Manual dispatch can still
+  force a from-scratch rebuild with `force_full_rebuild=true`.
 
 ## Latest Validation
 
 Passed in this session:
 
-- `py -3 tests/test_kr1000_leader.py` -> 10 passed, 0 failed
+- `py -3 tests/test_kr1000_data_store.py` -> 4 passed, 0 failed
 - `py -3 tests/test_kr1000_validation_gate.py` -> 3 passed, 0 failed
-- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run` -> 12 planned backtests
 - `py -3 tests/smoke_test.py --quick` -> 24 passed, 0 failed
 - `py -3 tests/smoke_test.py` -> 46 passed, 0 failed
-- `py -3 tests/test_kr1000_data_store.py` -> 2 passed, 0 failed
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --refresh-data --rebuild-scored-panel --component-ab --strategy-ab --dry-run`
+  -> 2 planned commands, 12 planned backtests
+- Verified the dry-run `rebuild_scored_panel` command is:
+
+```text
+run_local.py --quick --start-date 2016-01-01 --end-date 2026-06-04 --portfolio-size 20
+```
+
 - `git diff --check` -> clean except CRLF warnings
 
-## GitHub State
+## Git / Worktree Notes
 
-- Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
-- Latest pushed commit before this handoff: `6769679`
-- Current drawdown-ladder changes are local until committed/pushed.
-- Smoke Test on `6769679`: success
-  https://github.com/wscha231/kr-quant-engine/actions/runs/26996826984
-- Quarterly Backtest on latest pushed SHA `6769679` succeeded:
-  https://github.com/wscha231/kr-quant-engine/actions/runs/26996905214
-- Its KR1000 diagnostic still reports `failed_performance`; data gate has
-  Critical `1` because latest scored-panel signal is stale by 521 days
-  (`2024-12-30`).
-- Existing unrelated dirty file:
-  `research/10_theme_lifecycle/leader_themes_per_quarter.csv`.
+- Current branch: `codex/kr1000-github-automation`
+- Previous pushed commit before this pass: `2745aa1`
+- New cache-preserving refresh changes are local until committed/pushed.
+- Existing unrelated dirty file remains:
+  `research/10_theme_lifecycle/leader_themes_per_quarter.csv`
   Do not stage it unless the user explicitly asks.
 
 ## Next Step
 
-1. Run remaining smoke/data-store/diff checks.
-2. Commit and push the drawdown-ladder challenger changes.
-3. Update PR #1 with the new `25.38% / -24.00%` evidence.
-4. After this commit, rerun GitHub Smoke Test automatically via PR push.
-5. Rebuild the scored panel through the latest observable KRX close to clear
-   the data gate critical issue.
-6. Continue alpha-signal work. The broker harness now has a repeatable MDD
-   passing challenger, but CAGR still needs roughly +10pp to reach the user's
-   `35%` target.
+1. Commit and push this cache-preserving GitHub refresh pass.
+2. Update PR #1 with the new automation behavior.
+3. Let GitHub Smoke Test run on the pushed SHA.
+4. Trigger or wait for `KR1000 Data Update and Validation` full mode so the
+   scored panel extends through latest observable KRX close.
+5. If data gate passes but performance still fails, use the 12-run
+   component/strategy A/B manifest to continue signal improvement toward
+   CAGR `>= 35%` without breaking MDD `>= -25%`.

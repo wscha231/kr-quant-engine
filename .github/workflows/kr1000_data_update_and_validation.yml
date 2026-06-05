@@ -22,6 +22,10 @@ on:
         description: 'run RS/flow/technical component A/B in full mode'
         type: boolean
         default: true
+      force_full_rebuild:
+        description: 'ignore scored-panel caches and rebuild the full window from scratch'
+        type: boolean
+        default: false
 
 jobs:
   validate:
@@ -49,6 +53,7 @@ jobs:
           fi
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "component_ab=${{ inputs.component_ab || 'true' }}" >> "$GITHUB_OUTPUT"
+          echo "force_full_rebuild=${{ inputs.force_full_rebuild || 'false' }}" >> "$GITHUB_OUTPUT"
           echo "as_of=${{ inputs.as_of || '' }}" >> "$GITHUB_OUTPUT"
           echo "Resolved KR1000 validation mode: $MODE"
 
@@ -110,7 +115,10 @@ jobs:
               ARGS="$ARGS --refresh-data --skip-avg-value-refresh --skip-backtests"
               ;;
             full)
-              ARGS="$ARGS --refresh-data --rebuild-scored-panel --full-rebuild"
+              ARGS="$ARGS --refresh-data --rebuild-scored-panel"
+              if [ "${{ steps.mode.outputs.force_full_rebuild }}" = "true" ]; then
+                ARGS="$ARGS --full-rebuild"
+              fi
               if [ "${{ steps.mode.outputs.component_ab }}" = "true" ]; then
                 ARGS="$ARGS --component-ab --strategy-ab"
               fi

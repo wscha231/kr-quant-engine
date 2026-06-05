@@ -72,6 +72,7 @@ def compute_avg_trading_value_60d(
     lookback_days: int = 60,
     refresh_days: int = 7,
     tickers: Optional[list[str]] = None,
+    fallback_max_days: int = 0,
 ) -> pd.DataFrame:
     """For each ticker, compute avg 거래대금 over last N business days ending
     on rebalance_date.
@@ -84,7 +85,9 @@ def compute_avg_trading_value_60d(
 
     Returns DataFrame: ticker, avg_trading_value, days_observed.
 
-    Caches per (rebalance_date, lookback_days) at cache_misc/.
+    Caches per (rebalance_date, lookback_days) at cache_misc/. When
+    fallback_max_days > 0 and the exact cache is unavailable, the latest prior
+    cache within that date gap may be reused. Future caches are never used.
     """
     from kr_pykrx_client import fetch_listing, fetch_ticker_history
 
@@ -99,6 +102,26 @@ def compute_avg_trading_value_60d(
                 return pd.read_parquet(cache_path)
             except Exception as e:
                 log(f"[universe] cache read fail {cache_path.name}: {e}", level="WARN")
+
+    if fallback_max_days > 0 and refresh_days != 0:
+        fallback_path = find_prior_avg_value_cache(
+            rebalance_date,
+            lookback_days=lookback_days,
+            fallback_max_days=fallback_max_days,
+        )
+        if fallback_path is not None:
+            try:
+                prior = pd.read_parquet(fallback_path)
+                if tickers is not None and "ticker" in prior.columns:
+                    allowed = {str(t).zfill(6) for t in tickers}
+                    prior = prior[prior["ticker"].astype(str).str.zfill(6).isin(allowed)].copy()
+                log(
+                    f"[universe] reuse PIT-safe prior avg_value cache "
+                    f"{fallback_path.name} for {rebalance_date.strftime('%Y-%m-%d')}"
+                )
+                return prior
+            except Exception as e:
+                log(f"[universe] prior avg_value cache read fail {fallback_path.name}: {e}", level="WARN")
 
     if tickers is None:
         listing = fetch_listing(rebalance_date.strftime("%Y%m%d"), market="ALL",
@@ -143,6 +166,41 @@ def compute_avg_trading_value_60d(
             log(f"[universe] cache write fail {cache_path.name}: {e}", level="WARN")
     log(f"[universe] avg_value: {len(out)} tickers with valid data")
     return out
+
+
+def find_prior_avg_value_cache(
+    rebalance_date: pd.Timestamp,
+    lookback_days: int = 60,
+    fallback_max_days: int = 0,
+    cache_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """Return latest prior avg_value cache within fallback_max_days.
+
+    This helper is intentionally date-based rather than mtime-based because
+    avg trading value snapshots are historical facts once computed. It is
+    PIT-safe: only cache files dated on or before rebalance_date are eligible.
+    """
+    if fallback_max_days <= 0:
+        return None
+    root = Path(cache_dir) if cache_dir is not None else DATA_ROOT / "cache_misc"
+    if not root.exists():
+        return None
+    rd = pd.Timestamp(rebalance_date).normalize()
+    pattern = re.compile(rf"^avg_value_{int(lookback_days)}d_(\d{{8}})\.parquet$")
+    candidates: list[tuple[pd.Timestamp, Path]] = []
+    for path in root.glob(f"avg_value_{int(lookback_days)}d_*.parquet"):
+        match = pattern.match(path.name)
+        if not match:
+            continue
+        cache_date = pd.Timestamp(match.group(1)).normalize()
+        if cache_date > rd:
+            continue
+        if (rd - cache_date).days > int(fallback_max_days):
+            continue
+        candidates.append((cache_date, path))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda x: x[0])[1]
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +284,7 @@ def build_universe_snapshot(
         lookback_days=60,
         refresh_days=int(cfg.get("avg_value_refresh_days", 7)),
         tickers=pit_tickers,
+        fallback_max_days=int(cfg.get("avg_value_fallback_max_days", 0)),
     )
 
     # 4. Listed months (PIT-correct from kr_pit_universe)

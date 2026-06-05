@@ -27,12 +27,17 @@ Do not treat vectorized or next-open runs as production metrics.
   - sync refreshed PIT/cache/output artifacts back to GDrive
 - Weekly full run:
   - refresh market data
-  - rebuild `scored_panel_v0` through the latest observable close
+  - incrementally rebuild `scored_panel_v0` through the latest observable close
   - update DART/fundamental-derived feature store when the full rebuild needs it
   - run official 8y broker-ledger validation
   - run component/challenger A/B: `full`, `rs_only`, `rs_flow`,
     `rs_flow_technical`, `legacy_p1_blended`, `pmb_pre_surge`,
     `hybrid_pmb_rs`
+
+The default full GitHub run preserves caches and appends only missing
+rebalance dates when a compatible prior `scored_panel_v0` exists. Use the
+manual `force_full_rebuild=true` workflow input only when an engine-version
+change or suspected cache corruption requires a from-scratch rebuild.
 
 `Daily KR1000 Broker Check`
 
@@ -94,7 +99,13 @@ Full rebuild and official validation:
 
 ```bash
 python tools/setup_kr1000_data_store.py
-python tools/run_kr1000_validation_gate.py --refresh-data --rebuild-scored-panel --full-rebuild --component-ab
+python tools/run_kr1000_validation_gate.py --refresh-data --rebuild-scored-panel --component-ab --strategy-ab
+```
+
+Forced full rebuild, for cache invalidation only:
+
+```bash
+python tools/run_kr1000_validation_gate.py --refresh-data --rebuild-scored-panel --full-rebuild --component-ab --strategy-ab
 ```
 
 Dry-run command manifest:

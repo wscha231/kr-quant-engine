@@ -6,6 +6,70 @@
 
 ## 2026-06-05
 
+### 15:33 KST - kr1000-cache-preserving-github-refresh
+
+**Scope**: Made the GitHub KR1000 data/full-validation path cache-preserving
+by default, so scheduled runs can update price/PIT data, extend the scored
+panel, and run broker-ledger A/B without recomputing every cached artifact.
+
+**What landed**:
+- Added PIT-safe prior `avg_value_60d` cache selection. The universe builder
+  can reuse only a cache dated on or before the rebalance date and only within
+  the configured date gap.
+- Added scored-panel incremental rebuild support. When the target
+  `scored_panel_v0` file is missing, `build_scored_panel_v0()` now looks for a
+  compatible same-start prior panel and computes only missing month-ends.
+- GitHub `KR1000 Data Update and Validation` full mode now preserves caches by
+  default. Manual dispatch can still force a from-scratch rebuild with
+  `force_full_rebuild=true`.
+- Updated KR1000 operations docs so other agents know to use the incremental
+  full validation path before tuning signal weights.
+
+**Operational result**:
+- This does not change the current performance target status. The best current
+  broker-ledger challenger remains `25.38%` CAGR / `-24.00%` MDD, below the
+  official `35%` CAGR gate.
+- The next GitHub full validation run should address the stale scored-panel
+  data blocker by preserving GDrive caches and extending the panel through the
+  latest observable KRX close.
+
+**symbols_added**:
+- kr_universe.find_prior_avg_value_cache
+- kr_pipeline.scored_panel_cache_path
+- kr_pipeline.find_incremental_scored_panel_cache
+- tests/test_kr1000_data_store.py::test_avg_value_prior_cache_selection
+- tests/test_kr1000_data_store.py::test_incremental_scored_panel_cache_selection
+
+**symbols_changed**:
+- kr_universe.compute_avg_trading_value_60d
+- kr_universe.build_universe_snapshot
+- kr_pipeline.build_scored_panel_v0
+- kr_config.DEFAULT_CFG
+- kr_config.kr1000_leader_alpha_cfg
+- .github/workflows/kr1000_data_update_and_validation.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**:
+- `avg_value_fallback_max_days`
+- `scored_panel_incremental_rebuild`
+
+**breaking_changes**: none. The fallback is date-limited and PIT-safe; forced
+from-scratch rebuilds remain available via `--full-rebuild` and GitHub manual
+`force_full_rebuild=true`.
+
+**Validation**:
+- `py -3 tests/test_kr1000_data_store.py` -> 4 passed, 0 failed.
+- `py -3 tests/test_kr1000_validation_gate.py` -> 3 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests/smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --refresh-data --rebuild-scored-panel --component-ab --strategy-ab --dry-run` -> 2 planned commands, 12 planned backtests.
+- Verified dry-run `rebuild_scored_panel` command uses `run_local.py --quick`
+  without `--full-rebuild`.
+- `git diff --check` -> clean except CRLF warnings.
+
+---
+
 ### 15:10 KST - kr1000-portfolio-dd-ladder-challenger
 
 **Scope**: Added a portfolio-level drawdown ladder to the KR1000 broker-ledger

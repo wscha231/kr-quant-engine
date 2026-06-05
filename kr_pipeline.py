@@ -53,9 +53,7 @@ def build_scored_panel_v0(
     cfg = {**DEFAULT_CFG, **(cfg or {})}
     end_date = end_date or datetime.now().strftime("%Y-%m-%d")
 
-    cache_path = DATA_ROOT / "feature_store" / (
-        f"scored_panel_v0_{start_date}_{end_date}_{KR_ENGINE_REUSE_VERSION}.parquet"
-    )
+    cache_path = scored_panel_cache_path(start_date, end_date)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     if cfg.get("reuse_existing_artifacts", True) and cache_path.exists():
         log(f"[pipeline] reuse cached scored panel {cache_path.name}")
@@ -65,7 +63,49 @@ def build_scored_panel_v0(
         pd.Timestamp(start_date).strftime("%Y%m%d"),
         pd.Timestamp(end_date).strftime("%Y%m%d"),
     )
-    log(f"[pipeline] build scored panel: {len(month_ends)} month-ends")
+    prior_panel = pd.DataFrame()
+    prior_max_date: Optional[pd.Timestamp] = None
+    if cfg.get("reuse_existing_artifacts", True) and cfg.get("scored_panel_incremental_rebuild", True):
+        prior_path = find_incremental_scored_panel_cache(start_date, end_date)
+        if prior_path is not None:
+            try:
+                prior_panel = pd.read_parquet(prior_path)
+                if "rebalance_date" in prior_panel.columns and not prior_panel.empty:
+                    prior_panel["rebalance_date"] = pd.to_datetime(
+                        prior_panel["rebalance_date"], errors="coerce"
+                    ).dt.normalize()
+                    target_end = pd.Timestamp(end_date).normalize()
+                    prior_panel = prior_panel[prior_panel["rebalance_date"] <= target_end].copy()
+                    prior_max_date = prior_panel["rebalance_date"].max()
+                    log(
+                        f"[pipeline] incremental scored panel base {prior_path.name} "
+                        f"through {prior_max_date.strftime('%Y-%m-%d')}"
+                    )
+            except Exception as e:
+                prior_panel = pd.DataFrame()
+                prior_max_date = None
+                log(f"[pipeline] incremental scored panel read fail {prior_path.name}: {e}", level="WARN")
+
+    if prior_max_date is not None:
+        build_month_ends = [
+            pd.Timestamp(me).normalize()
+            for me in month_ends
+            if pd.Timestamp(me).normalize() > prior_max_date
+        ]
+    else:
+        build_month_ends = [pd.Timestamp(me).normalize() for me in month_ends]
+    log(
+        f"[pipeline] build scored panel: {len(build_month_ends)}/{len(month_ends)} "
+        f"month-ends to compute"
+    )
+
+    if not build_month_ends and not prior_panel.empty:
+        try:
+            prior_panel.to_parquet(cache_path, index=False)
+            log(f"[pipeline] materialized scored panel cache -> {cache_path}")
+        except Exception as e:
+            log(f"[pipeline] panel save fail: {e}", level="WARN")
+        return prior_panel
 
     # ----- P1: pre-build full fundamentals panel once (DART bulk fetch) -----
     fund_panel = pd.DataFrame()
@@ -73,7 +113,7 @@ def build_scored_panel_v0(
         # Sample tickers from a recent month to drive the corp_code fetch
         # (faster than per-month re-discovery)
         log("[pipeline] phase1 enabled -> pre-build DART fundamentals panel")
-        sample_snap = build_universe_snapshot(month_ends[-1], cfg=cfg)
+        sample_snap = build_universe_snapshot(build_month_ends[-1], cfg=cfg)
         if not sample_snap.empty:
             sample_tickers = sample_snap[sample_snap["eligible"]]["ticker"].astype(str).tolist()
             fund_start = int(cfg.get("dart_fund_start_year", 2014))
@@ -99,8 +139,8 @@ def build_scored_panel_v0(
                         log(f"[pipeline] fund_panel save fail: {e}", level="WARN")
 
     frames = []
-    for i, me in enumerate(month_ends, 1):
-        log(f"[pipeline] [{i}/{len(month_ends)}] {me.strftime('%Y-%m-%d')}")
+    for i, me in enumerate(build_month_ends, 1):
+        log(f"[pipeline] [{i}/{len(build_month_ends)}] {me.strftime('%Y-%m-%d')}")
         snap = build_universe_snapshot(me, cfg=cfg)
         if snap.empty:
             continue
@@ -111,15 +151,66 @@ def build_scored_panel_v0(
         feat = add_universe_features(eligible, me, fund_panel=fund_panel)
         frames.append(feat)
 
-    if not frames:
+    if not frames and prior_panel.empty:
         return pd.DataFrame()
-    panel = pd.concat(frames, ignore_index=True)
+    all_frames = []
+    if not prior_panel.empty:
+        all_frames.append(prior_panel)
+    all_frames.extend(frames)
+    panel = pd.concat(all_frames, ignore_index=True)
+    if {"rebalance_date", "ticker"}.issubset(panel.columns):
+        panel["rebalance_date"] = pd.to_datetime(panel["rebalance_date"], errors="coerce").dt.normalize()
+        panel["ticker"] = panel["ticker"].astype(str).str.zfill(6)
+        panel = panel.drop_duplicates(["rebalance_date", "ticker"], keep="last")
+        panel = panel.sort_values(["rebalance_date", "ticker"]).reset_index(drop=True)
     try:
         panel.to_parquet(cache_path, index=False)
         log(f"[pipeline] saved scored panel ({len(panel)} rows) -> {cache_path}")
     except Exception as e:
         log(f"[pipeline] panel save fail: {e}", level="WARN")
     return panel
+
+
+def scored_panel_cache_path(start_date: str, end_date: str) -> Path:
+    """Canonical scored_panel_v0 cache path for a date window."""
+    return DATA_ROOT / "feature_store" / (
+        f"scored_panel_v0_{start_date}_{end_date}_{KR_ENGINE_REUSE_VERSION}.parquet"
+    )
+
+
+def find_incremental_scored_panel_cache(
+    start_date: str,
+    end_date: str,
+    feature_store: Optional[Path] = None,
+) -> Optional[Path]:
+    """Find the widest prior scored_panel cache with the same start date.
+
+    Only panels whose filename end date is on or before the target end date are
+    eligible. This prevents a future-dated panel from leaking into a historical
+    rebuild while still allowing a weekly job to append only new month-ends.
+    """
+    root = Path(feature_store) if feature_store is not None else DATA_ROOT / "feature_store"
+    if not root.exists():
+        return None
+    target_end = pd.Timestamp(end_date).normalize()
+    prefix = f"scored_panel_v0_{start_date}_"
+    suffix = f"_{KR_ENGINE_REUSE_VERSION}.parquet"
+    candidates: list[tuple[pd.Timestamp, float, Path]] = []
+    for path in root.glob(f"{prefix}*{suffix}"):
+        name = path.name
+        if not name.startswith(prefix) or not name.endswith(suffix):
+            continue
+        raw_end = name[len(prefix):-len(suffix)]
+        try:
+            panel_end = pd.Timestamp(raw_end).normalize()
+        except Exception:
+            continue
+        if panel_end > target_end:
+            continue
+        candidates.append((panel_end, path.stat().st_mtime, path))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda x: (x[0], x[1]))[2]
 
 
 # ---------------------------------------------------------------------------
