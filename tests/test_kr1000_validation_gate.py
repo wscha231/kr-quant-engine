@@ -41,7 +41,7 @@ def test_official_metric_gate():
     cfg = kr1000_leader_alpha_cfg()
     metrics = {
         "years": 8.25,
-        "cagr": 0.36,
+        "cagr": 0.31,
         "mdd": -0.24,
         "excess_cagr": 0.01,
         "sharpe": 1.05,
@@ -54,10 +54,39 @@ def test_official_metric_gate():
     assert gate["all_pass"] is True
 
     weak = dict(metrics)
-    weak["mdd"] = -0.30
+    weak["cagr"] = 0.29
     weak_gate = evaluate_backtest_metrics(weak, cfg)
     assert weak_gate["all_pass"] is False
-    assert weak_gate["checks"]["mdd"]["pass"] is False
+    assert weak_gate["checks"]["cagr"]["pass"] is False
+
+
+@_test("P_MB production job requires OOS coverage gate")
+def test_pmb_job_requires_oos_coverage():
+    from kr_config import kr1000_leader_alpha_cfg
+    from tools.run_kr1000_validation_gate import evaluate_job_metrics
+
+    cfg = kr1000_leader_alpha_cfg()
+    metrics = {
+        "years": 8.25,
+        "cagr": 0.31,
+        "mdd": -0.24,
+        "excess_cagr": 0.01,
+        "sharpe": 1.05,
+        "information_ratio": 0.55,
+        "metric_mode": "broker_ledger_next_close",
+        "fill_mode": "next_close",
+        "valid_for_production_metric": True,
+    }
+    job = {
+        "period": "official_8y",
+        "profile": "pmb_pre_surge",
+        "strategy_preset": "pmb_defensive_mdd_gate",
+    }
+    failed = evaluate_job_metrics(metrics, cfg, job, {"status": "failed", "pass": False})
+    assert failed["all_pass"] is False
+    assert failed["checks"]["pmb_oos_coverage"]["pass"] is False
+    passed = evaluate_job_metrics(metrics, cfg, job, {"status": "passed", "pass": True})
+    assert passed["all_pass"] is True
 
 
 @_test("planned validation jobs include official component A/B without duplicating stress profiles")
@@ -74,6 +103,7 @@ def test_planned_component_ab_jobs():
         max_rank_for_prices=20,
         scored_panel=None,
         price_panel=None,
+        pmb_oos_picks="research/06_walkforward_baselines/p_mb_v1_oos_picks.csv",
     )
     jobs = _planned_backtests(args, pd.Timestamp("2026-06-04"), PROJECT_ROOT / "outputs" / "test_gate")
     official = [j for j in jobs if j["period"] == "official_8y"]
@@ -94,7 +124,34 @@ def test_planned_component_ab_jobs():
     assert "--hard-stop-loss-pct" in strategy_jobs[0]["cmd"]
     assert {j["profile"] for j in stress} == {"full"}
     assert all("--score-profile" in j["cmd"] for j in jobs)
+    assert all("--pmb-oos-picks" in j["cmd"] for j in jobs)
     assert all(j["start"] <= j["end"] for j in jobs)
+
+
+@_test("P_MB OOS coverage gate fails when official 8y months are missing")
+def test_pmb_oos_coverage_gate():
+    from tools.build_pmb_oos_picks import audit_pmb_oos_coverage
+
+    rows = []
+    for rd in pd.date_range("2020-01-31", "2024-12-31", freq="ME"):
+        for i in range(20):
+            rows.append({
+                "rebalance_date": rd,
+                "ticker": f"{i:06d}",
+                "p_pre_surge": 0.5,
+            })
+    gate = audit_pmb_oos_coverage(
+        pd.DataFrame(rows),
+        target_start="2018-01-01",
+        target_end="2026-06-04",
+        min_covered_years=8.0,
+        min_coverage_ratio=0.95,
+        min_picks_per_month=20,
+    )
+    assert gate["pass"] is False
+    assert gate["covered_months"] == 60
+    assert gate["expected_months"] > gate["covered_months"]
+    assert "2018-01" in gate["missing_months"]
 
 
 @_test("KR1000 backtest runner merges PIT-safe P_MB OOS probabilities")
@@ -132,6 +189,34 @@ def test_infer_scored_panel_start_date():
         old.touch()
         latest.touch()
         assert _infer_scored_panel_start_date(root) == "2019-01-01"
+
+
+@_test("validation rebuild command widens late cache start to official 2018")
+def test_validation_dry_run_widens_rebuild_start():
+    from tools.run_kr1000_validation_gate import main as gate_main
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = Path(tmp)
+        old_argv = sys.argv[:]
+        try:
+            sys.argv = [
+                "run_kr1000_validation_gate.py",
+                "--as-of", "2026-06-04",
+                "--rebuild-scored-panel",
+                "--dry-run",
+                "--out-dir", str(out_dir),
+            ]
+            rc = gate_main()
+        finally:
+            sys.argv = old_argv
+        assert rc == 0
+        import json
+
+        payload = json.loads((out_dir / "kr1000_validation_gate.json").read_text(encoding="utf-8"))
+        rebuild = [c for c in payload["planned_commands"] if c["step"] == "rebuild_scored_panel"][0]
+        cmd = rebuild["cmd"]
+        assert "--start-date" in cmd
+        assert cmd[cmd.index("--start-date") + 1] <= "2018-01-01"
 
 
 if __name__ == "__main__":

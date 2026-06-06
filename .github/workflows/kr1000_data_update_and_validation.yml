@@ -115,7 +115,7 @@ jobs:
               ARGS="$ARGS --refresh-data --skip-avg-value-refresh --build-latest-snapshot --skip-backtests"
               ;;
             full)
-              ARGS="$ARGS --refresh-data --rebuild-scored-panel"
+              ARGS="$ARGS --refresh-data --rebuild-scored-panel --build-pmb-oos-picks"
               if [ "${{ steps.mode.outputs.force_full_rebuild }}" = "true" ]; then
                 ARGS="$ARGS --full-rebuild"
               fi
@@ -168,4 +168,6 @@ jobs:
             data/outputs/kr1000_daily_broker_check_*.md
             data/outputs/kr1000_daily_broker_trade_plan_*.csv
             data/outputs/kr1000_daily_data_refresh_*.json
+            data/outputs/p_mb_oos_picks_purged_3sleeve*.csv
+            data/outputs/p_mb_oos_picks_purged_3sleeve*.json
           retention-days: 180

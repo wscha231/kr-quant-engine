@@ -93,6 +93,7 @@ def main() -> int:
 
     result = train_entry_classifier(
         labeled, feature_cols=feat_cols, n_folds=args.n_folds,
+        purged=bool(args.purged), embargo_months=int(args.embargo_months),
     )
     if "error" in result:
         log(f"[retrain] training failed: {result['error']}", level="ERROR")
@@ -122,6 +123,9 @@ def main() -> int:
         "n_features": len(feat_cols),
         "n_panel_rows": int(len(labeled)),
         "n_positive": int(labeled.get("is_pre_surge", pd.Series()).sum()),
+        "split_mode": result.get("split_mode"),
+        "purged": bool(result.get("purged", False)),
+        "embargo_months": int(result.get("embargo_months", 0)),
         "fold_aucs": result.get("fold_aucs"),
         "mean_auc": result.get("mean_auc"),
         "feature_cols": list(feat_cols),    # critical for inference alignment

@@ -50,8 +50,14 @@ jobs:
       - name: Setup KR1000 data store
         run: python tools/setup_kr1000_data_store.py
 
+      - name: Build purged P_MB OOS picks
+        run: |
+          python tools/build_pmb_oos_picks.py \
+            --out data/outputs/p_mb_oos_picks_purged_3sleeve_latest.csv \
+            --coverage-json data/outputs/p_mb_oos_picks_purged_3sleeve_latest.coverage.json
+
       - name: Run quarterly backtest
-        run: python tools/run_quarterly_backtest.py --top-n 20 --weighting equal
+        run: python tools/run_quarterly_backtest.py --picks data/outputs/p_mb_oos_picks_purged_3sleeve_latest.csv --top-n 20 --weighting equal
 
       - name: Run KR1000 validation diagnostic
         run: |
@@ -59,6 +65,7 @@ jobs:
           python tools/run_kr1000_validation_gate.py \
             --periods official_8y,full_2016,stress_2020_2022,stress_2023_current \
             --profiles full \
+            --pmb-oos-picks data/outputs/p_mb_oos_picks_purged_3sleeve_latest.csv \
             --skip-daily-check \
             --allow-blocked-backtest
           rc=$?
@@ -80,6 +87,8 @@ jobs:
           path: |
             data/outputs/quarterly_backtest_*.json
             data/outputs/quarterly_backtest_*_monthly.csv
+            data/outputs/p_mb_oos_picks_purged_3sleeve*.csv
+            data/outputs/p_mb_oos_picks_purged_3sleeve*.json
             data/outputs/kr1000_validation_gate_*/**
           retention-days: 365
 

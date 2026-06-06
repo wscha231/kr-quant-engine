@@ -6,7 +6,7 @@ KR1000 Leader Alpha is accepted only when the official broker-ledger path
 passes the current gate:
 
 - 8y+ backtest from `2018-01-01`
-- CAGR `>= 35%`
+- CAGR `>= 30%`
 - MDD `>= -25%`
 - KOSPI200 excess CAGR `> 0`
 - Sharpe `> 1.0`
@@ -15,6 +15,8 @@ passes the current gate:
 - `fill_mode = next_close`
 
 Do not treat vectorized or next-open runs as production metrics.
+`35%` CAGR is tracked as a stretch target only. The current official pass/fail
+gate is `30%`.
 
 ## GitHub Workflows
 
@@ -41,15 +43,18 @@ Production automation is split into three lanes:
   - run `run_local.py` with collector enabled by default, so DART and
     fundamental-derived feature inputs can be refreshed when API secrets and
     caches are available
+  - build purged 3-sleeve P_MB OOS picks for the same validation run
   - run official 8y broker-ledger validation
   - run component/challenger A/B: `full`, `rs_only`, `rs_flow`,
     `rs_flow_technical`, `legacy_p1_blended`, `pmb_pre_surge`,
     `hybrid_pmb_rs`
 
-The default full GitHub run preserves caches and appends only missing
-rebalance dates when a compatible prior `scored_panel_v0` exists. Use the
-manual `force_full_rebuild=true` workflow input only when an engine-version
-change or suspected cache corruption requires a from-scratch rebuild.
+The default full GitHub run preserves caches and appends missing rebalance
+dates when a compatible prior `scored_panel_v0` exists, but it will widen the
+rebuild start back to `2018-01-01` if the latest compatible panel starts later.
+Use the manual `force_full_rebuild=true` workflow input only when an
+engine-version change or suspected cache corruption requires a from-scratch
+2016 rebuild.
 
 `Daily KR1000 Broker Check`
 
@@ -122,10 +127,15 @@ rows, but it is still not official backtest evidence.
 
 Weekly full automation is the path for official performance evidence. It runs
 the collector-backed rebuild path and can update price, DART, macro,
-fundamental-derived feature, model, and scored-panel caches before broker
-backtests. If the weekly run is too slow, first improve cache reuse and scoped
-backfill; do not substitute a liquidity-only latest snapshot for official
-CAGR/MDD evidence.
+fundamental-derived feature, model, purged P_MB OOS picks, and scored-panel
+caches before broker backtests. If the weekly run is too slow, first improve
+cache reuse and scoped backfill; do not substitute a liquidity-only latest
+snapshot for official CAGR/MDD evidence.
+
+Official production pass/fail uses the locked `pmb_defensive_mdd_gate` strategy
+preset when `--strategy-ab` is run. The `full` score profile remains a baseline
+gate for diagnosis. P_MB and hybrid jobs cannot pass the official gate unless
+the P_MB OOS coverage audit passes the 8y PIT-safe coverage check.
 
 Mixed historical/latest scored panels are expected. New latest-readiness rows
 may add columns such as `eligible_final`; older historical rows with
@@ -165,19 +175,25 @@ Full rebuild and official validation:
 
 ```bash
 python tools/setup_kr1000_data_store.py
-python tools/run_kr1000_validation_gate.py --refresh-data --rebuild-scored-panel --component-ab --strategy-ab
+python tools/run_kr1000_validation_gate.py --refresh-data --rebuild-scored-panel --build-pmb-oos-picks --component-ab --strategy-ab
 ```
 
 Forced full rebuild, for cache invalidation only:
 
 ```bash
-python tools/run_kr1000_validation_gate.py --refresh-data --rebuild-scored-panel --full-rebuild --component-ab --strategy-ab
+python tools/run_kr1000_validation_gate.py --refresh-data --rebuild-scored-panel --build-pmb-oos-picks --full-rebuild --component-ab --strategy-ab
 ```
 
 Dry-run command manifest:
 
 ```bash
-python tools/run_kr1000_validation_gate.py --component-ab --dry-run
+python tools/run_kr1000_validation_gate.py --build-pmb-oos-picks --component-ab --strategy-ab --dry-run
+```
+
+Build purged P_MB OOS picks without overwriting the legacy research CSV:
+
+```bash
+python tools/build_pmb_oos_picks.py --target-start 2018-01-01 --target-end <latest-trading-date> --out outputs/p_mb_oos_picks_purged_3sleeve_latest.csv
 ```
 
 P_MB defensive broker-ledger diagnostic:
@@ -189,8 +205,9 @@ python tools/run_kr1000_backtest.py --start 2020-01-01 --end 2024-12-31 --score-
 As of the 2026-06-05 drawdown-ladder pass, this diagnostic produced CAGR
 `25.38%`, MDD `-24.00%`, Sharpe `1.23`, IR `1.00`, and KOSPI200 excess
 `+23.12%` on the available 2020-2024 P_MB OOS window. It is the current best
-broker-ledger challenger, but it does not satisfy the official CAGR `>= 35%`
-target and is not an 8y official pass.
+broker-ledger challenger, but it does not satisfy the `35%` stretch target and
+is not an 8y official pass. It is also below the current official CAGR
+`>= 30%` gate.
 
 Daily hard-exit disabled A/B on the same P_MB OOS window worsened to CAGR
 `21.64%`, MDD `-31.22%`, Sharpe `1.00`. Keep daily hard-exit enabled until a
@@ -249,13 +266,18 @@ As of the 2026-06-05 19:12 KST handoff:
   is `2026-06-04`, data gate Critical `0`, and daily broker check completed.
 - The appended `2026-06-04` rows are liquidity-only readiness rows, not
   full-feature backtest rows.
+- The current scored panel lacks `forward_min_return_1m` /
+  `forward_return_1m`, so the purged 3-sleeve P_MB OOS builder skips the risk
+  sleeve until forward drawdown labels are added to the full-feature panel.
 - The schema-union regression from `eligible_final=NaN` on historical rows is
   fixed and covered by `tests/test_kr1000_leader.py`.
 - Full score fails after proper NAV sizing (`CAGR -5.61%`, MDD `-50.01%` on
   the available 2019-2024 window).
 - P_MB OOS plus `pmb_defensive_mdd_gate` is the current best broker-ledger
-  challenger, but it is still below the official CAGR target.
+  challenger, but it is still below the official CAGR target and lacks 8y OOS
+  coverage.
 
-The next production step is a faster full-feature 2025-current backfill, then
-component/strategy A/B toward CAGR `>= 35%` under the broker-ledger/MDD gate.
+The next production step is a full-feature 2018-current backfill, purged P_MB
+OOS regeneration, then component/strategy A/B toward CAGR `>= 30%` under the
+broker-ledger/MDD gate.
 Avoid more exposure-only experiments until the signal panel is richer.

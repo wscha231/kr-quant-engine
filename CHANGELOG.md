@@ -6,6 +6,92 @@
 
 ## 2026-06-06
 
+### 14:05 KST - kr1000-official-gate-pmb-oos-realignment
+
+**Scope**: Realigned the official KR1000 validation target to the current user
+goal and hardened the P_MB path so production performance cannot be accepted
+without PIT-safe 8y OOS coverage.
+
+**What landed**:
+- Changed the official KR1000 CAGR gate from `35%` to `30%`; `35%` is now a
+  stretch target only.
+- Added a purged 3-sleeve P_MB OOS picks builder that writes separate
+  CSV/JSON artifacts and does not overwrite the legacy research picks file.
+- Added P_MB OOS coverage auditing to the validation gate.
+- Added scored-panel official-start auditing so official backtests require a
+  signal panel that starts no later than `2018-01-01`.
+- Made `pmb_defensive_mdd_gate` the official production gate when
+  `--strategy-ab` is run; `full` remains the baseline gate.
+- Made P_MB/hybrid/production jobs fail their gate when PIT-safe P_MB OOS
+  coverage is missing or incomplete.
+- Connected `run_classifier_retrain.py --purged --embargo-months 9` to the
+  classifier trainer and removed fold test-set early stopping from CV training.
+- Updated full GitHub validation and quarterly backtest workflows to build and
+  use purged P_MB OOS picks.
+
+**Operational result**:
+- Current known best remains the 2020-2024 P_MB defensive broker-ledger run:
+  CAGR `25.38%`, MDD `-24.00%`, Sharpe `1.23`, IR `1.00`.
+- This remains below the official `30%` CAGR gate and lacks 8y OOS coverage.
+- Current canonical scored panel starts at `2019-01-31`, so a 2018-current or
+  2016-current full-feature rebuild remains the next required data step.
+
+**symbols_added**:
+- tools/build_pmb_oos_picks.py
+- tools/run_kr1000_validation_gate.PRODUCTION_GATE_STRATEGY_PRESET
+- tools/run_kr1000_validation_gate.PMB_SCORE_PROFILES
+- tools/run_kr1000_validation_gate._job_requires_pmb_oos
+- tools/run_kr1000_validation_gate.evaluate_job_metrics
+- tools/run_kr1000_validation_gate._latest_scored_panel_path
+- tools/run_kr1000_validation_gate._read_rebalance_dates
+- tools/run_kr1000_validation_gate._audit_scored_panel_window
+- tests/test_kr1000_validation_gate.py::test_pmb_job_requires_oos_coverage
+- tests/test_kr1000_validation_gate.py::test_pmb_oos_coverage_gate
+- tests/test_kr1000_validation_gate.py::test_validation_dry_run_widens_rebuild_start
+- tests/test_walkforward.py::test_pmb_oos_feature_selector_excludes_leakage
+
+**symbols_changed**:
+- kr_config.kr1000_leader_alpha_cfg
+- kr_multibagger_classifier.train_entry_classifier
+- tools/run_classifier_retrain.main
+- tools/run_kr1000_validation_gate.parse_args
+- tools/run_kr1000_validation_gate.evaluate_backtest_metrics
+- tools/run_kr1000_validation_gate._planned_backtests
+- tools/run_kr1000_validation_gate._render_report
+- tools/run_kr1000_validation_gate.main
+- .github/workflows/kr1000_data_update_and_validation.yml
+- .github/workflows/quarterly_backtest.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none. `target_cagr_gate` changed value from `0.35` to
+`0.30`.
+
+**breaking_changes**:
+- Official validation status now follows `pmb_defensive_mdd_gate` when
+  `--strategy-ab` is included. `full` is still reported as a baseline gate.
+- P_MB/hybrid jobs require the P_MB OOS coverage gate to pass.
+
+**Validation**:
+- `py -3 -m py_compile tools\build_pmb_oos_picks.py tools\run_kr1000_validation_gate.py tools\run_classifier_retrain.py kr_multibagger_classifier.py`
+  -> passed.
+- `py -3 tests\test_walkforward.py` -> 10 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 11 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_pmb_oos`
+  -> planned `build_pmb_oos_picks`, 12 broker backtests, target CAGR `0.30`,
+  all backtest commands include `--pmb-oos-picks`.
+- `py -3 tools\build_pmb_oos_picks.py --target-start 2018-01-01 --target-end 2026-06-04 --iterations 20 --out H:\kr_quant_engine\outputs\p_mb_oos_picks_purged_3sleeve_smoke.csv --coverage-json H:\kr_quant_engine\outputs\p_mb_oos_picks_purged_3sleeve_smoke.coverage.json`
+  -> 1800 picks across 60 months, `2020-01-31` to `2024-12-30`, split gap
+  `10` months, coverage failed `60/102` months as expected from the current
+  2019-start scored panel. Risk sleeve was skipped because the current panel
+  lacks `forward_min_return_1m` / `forward_return_1m`.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04`
+  -> Critical `0`, High `4`, Medium `1`.
+
+---
+
 ### 12:16 KST - kr1000-live-pmb-daily-automation
 
 **Scope**: Upgraded the daily KR1000 data-to-broker automation so the latest

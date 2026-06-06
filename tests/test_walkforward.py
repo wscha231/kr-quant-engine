@@ -210,6 +210,43 @@ def test_3sleeve_picks_columns():
     assert rank_top["rebalance_date"].nunique() == picks["rebalance_date"].nunique()
 
 
+@_test("P_MB OOS feature selector excludes forward/generated leakage columns")
+def test_pmb_oos_feature_selector_excludes_leakage():
+    from tools.build_pmb_oos_picks import select_pmb_feature_columns
+
+    panel = pd.DataFrame({
+        "rebalance_date": pd.date_range("2024-01-31", periods=6, freq="ME"),
+        "ticker": [f"{i:06d}" for i in range(6)],
+        "feat_value": np.arange(6, dtype=float),
+        "forward_return_1m": np.arange(6, dtype=float),
+        "target_next_month": np.arange(6, dtype=float),
+        "p_pre_surge": np.linspace(0.1, 0.6, 6),
+        "leader_rank": np.arange(6),
+        "is_pre_entry": [0, 1, 0, 0, 1, 0],
+        "is_continuation": [0, 0, 1, 0, 0, 1],
+        "is_risk": [0, 0, 0, 1, 0, 0],
+    })
+    features = select_pmb_feature_columns(panel)
+    assert "feat_value" in features
+    for col in ("forward_return_1m", "target_next_month",
+                "p_pre_surge", "leader_rank", "is_pre_entry",
+                "is_continuation", "is_risk"):
+        assert col not in features, f"leaky/generated column selected: {col}"
+
+
+@_test("train_entry_classifier exposes purged split controls")
+def test_train_entry_classifier_purged_signature():
+    import inspect
+    from kr_multibagger_classifier import train_entry_classifier
+
+    params = inspect.signature(train_entry_classifier).parameters
+    assert "purged" in params
+    assert "embargo_months" in params
+    src = inspect.getsource(train_entry_classifier)
+    assert "eval_set=(X_test, y_test)" not in src
+    assert "early_stopping_rounds" not in src
+
+
 print()
 print("=" * 60)
 print(f"walkforward / sleeve tests: {PASSED} passed, {FAILED} failed")

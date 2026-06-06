@@ -52,6 +52,9 @@ KR1000_STRATEGY_AB_PRESETS = {
     },
 }
 
+PRODUCTION_GATE_STRATEGY_PRESET = "pmb_defensive_mdd_gate"
+PMB_SCORE_PROFILES = {"pmb_pre_surge", "hybrid_pmb_rs"}
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="KR1000 official validation gate")
@@ -86,6 +89,12 @@ def parse_args() -> argparse.Namespace:
                    help="Run run_local.py to rebuild scored_panel_v0 through --as-of before auditing.")
     p.add_argument("--build-latest-snapshot", action="store_true",
                    help="Append a fast latest scored snapshot after data refresh and before daily broker readiness.")
+    p.add_argument("--build-pmb-oos-picks", action="store_true",
+                   help="Build purged 3-sleeve P_MB OOS picks before broker backtests.")
+    p.add_argument("--pmb-oos-picks", default=None,
+                   help="PIT-safe P_MB OOS picks CSV passed to broker backtests.")
+    p.add_argument("--require-pmb-oos-coverage", action="store_true",
+                   help="Block official P_MB diagnostics unless OOS picks cover the 8y gate.")
     p.add_argument("--rebuild-start-date", default=None,
                    help=(
                        "Start date for scored-panel rebuild. Default: in quick mode, "
@@ -243,8 +252,8 @@ def evaluate_backtest_metrics(metrics: dict[str, Any], cfg: dict[str, Any]) -> d
         },
         "cagr": {
             "value": metric_value(metrics, "cagr", "strategy_cagr"),
-            "threshold": float(cfg.get("target_cagr_gate", 0.35)),
-            "pass": metric_value(metrics, "cagr", "strategy_cagr") >= float(cfg.get("target_cagr_gate", 0.35)),
+            "threshold": float(cfg.get("target_cagr_gate", 0.30)),
+            "pass": metric_value(metrics, "cagr", "strategy_cagr") >= float(cfg.get("target_cagr_gate", 0.30)),
         },
         "mdd": {
             "value": metric_value(metrics, "mdd", "max_dd"),
@@ -280,6 +289,30 @@ def evaluate_backtest_metrics(metrics: dict[str, Any], cfg: dict[str, Any]) -> d
     }
 
 
+def _job_requires_pmb_oos(job: dict[str, Any]) -> bool:
+    profile = str(job.get("profile", "")).strip().lower()
+    strategy = str(job.get("strategy_preset", "")).strip().lower()
+    return profile in PMB_SCORE_PROFILES or strategy == PRODUCTION_GATE_STRATEGY_PRESET
+
+
+def evaluate_job_metrics(
+    metrics: dict[str, Any],
+    cfg: dict[str, Any],
+    job: dict[str, Any],
+    pmb_oos_gate: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    gate = evaluate_backtest_metrics(metrics, cfg)
+    if _job_requires_pmb_oos(job):
+        passed = bool((pmb_oos_gate or {}).get("pass"))
+        gate["checks"]["pmb_oos_coverage"] = {
+            "value": (pmb_oos_gate or {}).get("status", "missing"),
+            "threshold": "8y_pit_safe_oos_coverage",
+            "pass": passed,
+        }
+        gate["all_pass"] = bool(gate["all_pass"] and passed)
+    return gate
+
+
 def _planned_backtests(args: argparse.Namespace, as_of: pd.Timestamp, out_dir: Path) -> list[dict[str, Any]]:
     periods = _split_csv(args.periods)
     profiles = _split_csv(args.profiles)
@@ -292,6 +325,7 @@ def _planned_backtests(args: argparse.Namespace, as_of: pd.Timestamp, out_dir: P
 
     jobs: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
+    pmb_oos_picks = getattr(args, "pmb_oos_picks", None)
     for period in periods:
         start, end = _period_window(period, as_of)
         period_profiles = profiles if (period == "official_8y" or not args.component_ab) else ["full"]
@@ -317,6 +351,8 @@ def _planned_backtests(args: argparse.Namespace, as_of: pd.Timestamp, out_dir: P
                 cmd.extend(["--scored-panel", args.scored_panel])
             if args.price_panel:
                 cmd.extend(["--price-panel", args.price_panel])
+            if pmb_oos_picks:
+                cmd.extend(["--pmb-oos-picks", str(pmb_oos_picks)])
             jobs.append({
                 "period": period,
                 "profile": profile,
@@ -348,6 +384,8 @@ def _planned_backtests(args: argparse.Namespace, as_of: pd.Timestamp, out_dir: P
                 cmd.extend(["--scored-panel", args.scored_panel])
             if args.price_panel:
                 cmd.extend(["--price-panel", args.price_panel])
+            if pmb_oos_picks:
+                cmd.extend(["--pmb-oos-picks", str(pmb_oos_picks)])
             jobs.append({
                 "period": "official_8y",
                 "profile": profile,
@@ -360,13 +398,125 @@ def _planned_backtests(args: argparse.Namespace, as_of: pd.Timestamp, out_dir: P
     return jobs
 
 
+def _default_pmb_oos_picks_path() -> Path:
+    return PROJECT_ROOT / "research" / "06_walkforward_baselines" / "p_mb_v1_oos_picks.csv"
+
+
+def _latest_scored_panel_path() -> Path | None:
+    root = DATA_ROOT / "feature_store"
+    if not root.exists():
+        return None
+    files = sorted(
+        root.glob("scored_panel_v0_*.parquet"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return files[0] if files else None
+
+
+def _read_rebalance_dates(path: Path) -> pd.Series:
+    if path.suffix.lower() == ".csv":
+        df = pd.read_csv(path, usecols=lambda c: c in {"rebalance_date", "date"})
+    else:
+        try:
+            df = pd.read_parquet(path, columns=["rebalance_date"])
+        except Exception:
+            df = pd.read_parquet(path)
+            keep = [c for c in ("rebalance_date", "date") if c in df.columns]
+            df = df[keep]
+    date_col = "rebalance_date" if "rebalance_date" in df.columns else "date"
+    if date_col not in df.columns:
+        return pd.Series(dtype="datetime64[ns]")
+    return pd.to_datetime(df[date_col], errors="coerce").dropna().dt.normalize()
+
+
+def _audit_scored_panel_window(path: Path | None, target_start: pd.Timestamp, as_of: pd.Timestamp) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "path": str(path) if path else None,
+        "target_start": str(target_start.date()),
+        "target_end": str(as_of.date()),
+    }
+    if path is None or not path.exists():
+        payload.update({
+            "status": "missing",
+            "pass": False,
+            "reason": "scored_panel_not_found",
+        })
+        return payload
+    try:
+        dates = _read_rebalance_dates(path)
+    except Exception as exc:
+        payload.update({
+            "status": "error",
+            "pass": False,
+            "reason": f"{type(exc).__name__}: {exc}",
+        })
+        return payload
+    if dates.empty:
+        payload.update({
+            "status": "missing",
+            "pass": False,
+            "reason": "no_valid_rebalance_dates",
+        })
+        return payload
+    first = pd.Timestamp(dates.min()).normalize()
+    last = pd.Timestamp(dates.max()).normalize()
+    ok = first <= target_start
+    payload.update({
+        "status": "passed" if ok else "failed",
+        "pass": bool(ok),
+        "first_signal_date": str(first.date()),
+        "last_signal_date": str(last.date()),
+        "months": int(dates.dt.to_period("M").nunique()),
+    })
+    if first > target_start:
+        payload["reason"] = "scored_panel_starts_after_official_start"
+    return payload
+
+
+def _audit_pmb_oos_picks(path: Path, as_of: pd.Timestamp, cfg: dict[str, Any]) -> dict[str, Any]:
+    from tools.build_pmb_oos_picks import audit_pmb_oos_coverage
+
+    payload: dict[str, Any] = {
+        "path": str(path),
+        "target_start": "2018-01-01",
+        "target_end": str(as_of.date()),
+    }
+    if not path.exists():
+        payload.update({
+            "status": "missing",
+            "pass": False,
+            "reason": "pmb_oos_picks_not_found",
+        })
+        return payload
+    try:
+        picks = pd.read_csv(path, dtype={"ticker": str})
+        audit = audit_pmb_oos_coverage(
+            picks,
+            target_start="2018-01-01",
+            target_end=as_of,
+            min_covered_years=float(cfg.get("target_min_backtest_years", 8.0)),
+            min_coverage_ratio=0.95,
+            min_picks_per_month=min(20, int(cfg.get("top_holdings", 20))),
+        )
+        audit["path"] = str(path)
+        return audit
+    except Exception as exc:
+        payload.update({
+            "status": "error",
+            "pass": False,
+            "reason": f"{type(exc).__name__}: {exc}",
+        })
+        return payload
+
+
 def _render_report(payload: dict[str, Any]) -> str:
     lines = [
         "# KR1000 Validation Gate",
         "",
         f"- Status: `{payload.get('status')}`",
         f"- As of: `{payload.get('as_of')}`",
-        f"- Official target: `CAGR >= 35%, MDD >= -25%, excess CAGR > 0`",
+        f"- Official target: `CAGR >= 30%, MDD >= -25%, excess CAGR > 0`",
         f"- Data gate: `{payload.get('data_gate', {}).get('status')}`",
         f"- Daily broker check: `{payload.get('daily_broker_check', {}).get('status')}`",
         "",
@@ -375,7 +525,10 @@ def _render_report(payload: dict[str, Any]) -> str:
     ]
     official = payload.get("official_gate") or {}
     if official:
-        lines.append(f"- Period/profile: `{official.get('period')}` / `{official.get('profile')}`")
+        lines.append(
+            f"- Period/profile/preset: `{official.get('period')}` / "
+            f"`{official.get('profile')}` / `{official.get('strategy_preset')}`"
+        )
         lines.append(f"- Pass: `{official.get('all_pass')}`")
         for name, check in (official.get("checks") or {}).items():
             lines.append(
@@ -383,6 +536,41 @@ def _render_report(payload: dict[str, Any]) -> str:
             )
     else:
         lines.append("- Not run.")
+    baseline = payload.get("baseline_gate") or {}
+    if baseline:
+        lines.extend(["", "## Full Baseline Gate", ""])
+        lines.append(
+            f"- Period/profile/preset: `{baseline.get('period')}` / "
+            f"`{baseline.get('profile')}` / `{baseline.get('strategy_preset')}`"
+        )
+        lines.append(f"- Pass: `{baseline.get('all_pass')}`")
+        lines.append(f"- Metrics: `{baseline.get('metrics_path')}`")
+    scored_gate = payload.get("scored_panel_window_gate") or {}
+    if scored_gate:
+        lines.extend(["", "## Scored Panel Window", ""])
+        lines.append(f"- Path: `{scored_gate.get('path')}`")
+        lines.append(f"- Status: `{scored_gate.get('status')}`")
+        lines.append(f"- Pass: `{scored_gate.get('pass')}`")
+        if scored_gate.get("first_signal_date"):
+            lines.append(
+                f"- Window: `{scored_gate.get('first_signal_date')}` .. `{scored_gate.get('last_signal_date')}`"
+            )
+        if scored_gate.get("reason"):
+            lines.append(f"- Reason: `{scored_gate.get('reason')}`")
+    pmb_gate = payload.get("pmb_oos_gate") or {}
+    if pmb_gate:
+        lines.extend(["", "## P_MB OOS Coverage", ""])
+        lines.append(f"- Path: `{pmb_gate.get('path')}`")
+        lines.append(f"- Status: `{pmb_gate.get('status')}`")
+        lines.append(f"- Pass: `{pmb_gate.get('pass')}`")
+        if pmb_gate.get("expected_months") is not None:
+            lines.append(
+                f"- Covered months: `{pmb_gate.get('covered_months')}` / `{pmb_gate.get('expected_months')}`"
+            )
+        if pmb_gate.get("covered_years") is not None:
+            lines.append(f"- Covered years: `{pmb_gate.get('covered_years')}`")
+        if pmb_gate.get("reason"):
+            lines.append(f"- Reason: `{pmb_gate.get('reason')}`")
     lines.extend(["", "## Backtests", ""])
     for item in payload.get("backtests", []):
         metrics = item.get("metrics") or {}
@@ -409,6 +597,8 @@ def main() -> int:
     cfg = kr1000_leader_alpha_cfg()
     commands: list[dict[str, Any]] = []
     blockers: list[str] = []
+    if args.build_pmb_oos_picks and not args.pmb_oos_picks:
+        args.pmb_oos_picks = str(out_dir / "p_mb_oos_picks_purged_3sleeve.csv")
 
     if args.refresh_data:
         cmd = [
@@ -423,7 +613,12 @@ def main() -> int:
     if args.rebuild_scored_panel:
         rebuild_start = args.rebuild_start_date
         if not rebuild_start:
-            rebuild_start = "2016-01-01" if args.full_rebuild else _infer_scored_panel_start_date()
+            if args.full_rebuild:
+                rebuild_start = "2016-01-01"
+            else:
+                rebuild_start = _infer_scored_panel_start_date()
+                if pd.Timestamp(rebuild_start) > pd.Timestamp("2018-01-01"):
+                    rebuild_start = "2018-01-01"
         cmd = [
             sys.executable,
             _script("run_local.py"),
@@ -449,12 +644,26 @@ def main() -> int:
             ],
         })
 
+    if args.build_pmb_oos_picks:
+        commands.append({
+            "step": "build_pmb_oos_picks",
+            "cmd": [
+                sys.executable,
+                _script("tools/build_pmb_oos_picks.py"),
+                "--out", str(args.pmb_oos_picks),
+                "--coverage-json", str(out_dir / "p_mb_oos_picks_purged_3sleeve.coverage.json"),
+                "--target-start", "2018-01-01",
+                "--target-end", str(as_of.date()),
+            ],
+        })
+
     if args.dry_run:
         backtest_jobs = _planned_backtests(args, as_of, out_dir)
         payload = {
             "status": "dry_run",
             "as_of": str(as_of.date()),
             "out_dir": str(out_dir),
+            "pmb_oos_picks": str(args.pmb_oos_picks or _default_pmb_oos_picks_path()),
             "planned_commands": commands,
             "planned_backtests": backtest_jobs,
             "thresholds": {
@@ -494,6 +703,22 @@ def main() -> int:
     if data_gate_status != "passed":
         blockers.append("data_integrity_audit_has_critical")
 
+    scored_panel_window_gate = _audit_scored_panel_window(
+        Path(args.scored_panel) if args.scored_panel else _latest_scored_panel_path(),
+        pd.Timestamp("2018-01-01"),
+        as_of,
+    )
+    if not args.skip_backtests and not scored_panel_window_gate.get("pass"):
+        blockers.append("scored_panel_window_gate_failed")
+
+    pmb_oos_gate = _audit_pmb_oos_picks(
+        Path(args.pmb_oos_picks) if args.pmb_oos_picks else _default_pmb_oos_picks_path(),
+        as_of,
+        cfg,
+    )
+    if args.require_pmb_oos_coverage and not pmb_oos_gate.get("pass"):
+        blockers.append("pmb_oos_coverage_gate_failed")
+
     daily_payload: dict[str, Any] = {"status": "skipped"}
     if not args.skip_daily_check:
         daily_cmd = [
@@ -520,12 +745,14 @@ def main() -> int:
     run_backtests = not args.skip_backtests and (not blockers or args.allow_blocked_backtest)
     backtests: list[dict[str, Any]] = []
     official_gate: dict[str, Any] | None = None
+    baseline_gate: dict[str, Any] | None = None
+    production_gate: dict[str, Any] | None = None
     if run_backtests:
         for job in _planned_backtests(args, as_of, out_dir):
             result = _run_command(job["cmd"], PROJECT_ROOT)
             metrics_path = Path(job["out_dir"]) / "leader_backtest_metrics.json"
             metrics = _read_json(metrics_path)
-            gate = evaluate_backtest_metrics(metrics, cfg) if metrics else {"all_pass": False, "checks": {}}
+            gate = evaluate_job_metrics(metrics, cfg, job, pmb_oos_gate) if metrics else {"all_pass": False, "checks": {}}
             item = {
                 **{k: v for k, v in job.items() if k != "cmd"},
                 "cmd": job["cmd"],
@@ -537,14 +764,32 @@ def main() -> int:
                 "stderr_tail": result["stderr_tail"],
             }
             backtests.append(item)
-            if job["period"] == "official_8y" and job["profile"] == "full":
-                official_gate = {
+            if (
+                job["period"] == "official_8y"
+                and job["profile"] == "full"
+                and job.get("strategy_preset") == "default"
+            ):
+                baseline_gate = {
                     "period": job["period"],
                     "profile": job["profile"],
+                    "strategy_preset": job.get("strategy_preset"),
                     "all_pass": bool(gate.get("all_pass")),
                     "checks": gate.get("checks", {}),
                     "metrics_path": str(metrics_path),
                 }
+            if (
+                job["period"] == "official_8y"
+                and job.get("strategy_preset") == PRODUCTION_GATE_STRATEGY_PRESET
+            ):
+                production_gate = {
+                    "period": job["period"],
+                    "profile": job["profile"],
+                    "strategy_preset": job.get("strategy_preset"),
+                    "all_pass": bool(gate.get("all_pass")),
+                    "checks": gate.get("checks", {}),
+                    "metrics_path": str(metrics_path),
+                }
+        official_gate = production_gate or baseline_gate
     elif not args.skip_backtests:
         blockers.append("backtests_skipped_until_data_and_daily_gates_pass")
 
@@ -575,8 +820,12 @@ def main() -> int:
             "audit_md": str(audit_md),
             "summary": audit.get("summary", {}),
         },
+        "scored_panel_window_gate": scored_panel_window_gate,
+        "pmb_oos_gate": pmb_oos_gate,
         "daily_broker_check": daily_payload,
         "command_results": command_results,
+        "baseline_gate": baseline_gate,
+        "production_gate": production_gate,
         "official_gate": official_gate,
         "backtests": backtests,
         "blockers": blockers,

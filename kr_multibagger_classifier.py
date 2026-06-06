@@ -609,6 +609,8 @@ def train_entry_classifier(
     labeled_panel: pd.DataFrame,
     feature_cols: list[str],
     n_folds: int = 5,
+    purged: bool = False,
+    embargo_months: int = 9,
     cb_params: Optional[dict] = None,
     fit_final_model: bool = True,
 ) -> dict:
@@ -654,7 +656,14 @@ def train_entry_classifier(
     }
     cb_params = {**cb_default, **(cb_params or {})}
 
-    splits = walk_forward_splits(labeled_panel, n_folds=n_folds)
+    if purged:
+        splits = walk_forward_splits_purged(
+            labeled_panel, n_folds=n_folds, embargo_months=embargo_months,
+        )
+        split_mode = "purged_walk_forward"
+    else:
+        splits = walk_forward_splits(labeled_panel, n_folds=n_folds)
+        split_mode = "legacy_walk_forward"
     if not splits:
         return {"error": "insufficient data for walk-forward"}
 
@@ -672,7 +681,7 @@ def train_entry_classifier(
             continue
 
         model = CatBoostClassifier(**cb_params)
-        model.fit(X_train, y_train, eval_set=(X_test, y_test), early_stopping_rounds=50)
+        model.fit(X_train, y_train)
         proba = model.predict_proba(X_test)[:, 1]
 
         from sklearn.metrics import roc_auc_score
@@ -707,6 +716,9 @@ def train_entry_classifier(
 
     out = {
         "n_folds": len(fold_aucs),
+        "split_mode": split_mode,
+        "purged": bool(purged),
+        "embargo_months": int(embargo_months) if purged else 0,
         "fold_auc": fold_aucs,
         "fold_aucs": fold_aucs,                     # legacy alias
         "auc_mean": float(np.mean(fold_aucs)),

@@ -495,7 +495,7 @@ def kr1000_leader_alpha_cfg(overrides: dict[str, Any] | None = None) -> dict[str
         "gross_exposure_min": 0.45,
         "gross_exposure_max": 1.00,
         "gross_exposure_default": 1.00,
-        "target_cagr_gate": 0.35,
+        "target_cagr_gate": 0.30,
         "target_mdd_gate": -0.25,
         "target_excess_cagr_gate": 0.0,
         "target_sharpe_gate": 1.0,
