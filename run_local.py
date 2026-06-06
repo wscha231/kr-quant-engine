@@ -42,6 +42,8 @@ def parse_args() -> argparse.Namespace:
                    help="Top-N. Default 30.")
     p.add_argument("--incremental-max-new-months", type=int, default=None,
                    help="When quick incremental rebuild is used, compute only the latest N missing rebalance dates.")
+    p.add_argument("--incremental-fill-order", choices=["latest", "earliest"], default=None,
+                   help="For incremental rebuild limits, choose latest or earliest missing rebalance dates.")
     p.add_argument("--no-forward-labels", action="store_true",
                    help="Skip forward target label generation during scored-panel rebuild.")
     p.add_argument("--phase0-momentum", default="auto",
@@ -66,6 +68,8 @@ def build_cfg(args: argparse.Namespace) -> dict:
         cfg["portfolio_size"] = args.portfolio_size
     if args.incremental_max_new_months is not None:
         cfg["scored_panel_incremental_max_new_months"] = int(args.incremental_max_new_months)
+    if args.incremental_fill_order:
+        cfg["scored_panel_incremental_fill_order"] = args.incremental_fill_order
     if args.no_forward_labels:
         cfg["forward_label_enabled"] = False
     if args.full:

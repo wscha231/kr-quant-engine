@@ -89,6 +89,27 @@ def test_pmb_job_requires_oos_coverage():
     assert passed["all_pass"] is True
 
 
+@_test("data gate blocks PIT mcap and avg-value coverage gaps")
+def test_data_gate_blocks_official_cache_gaps():
+    from tools.run_kr1000_validation_gate import _data_gate_blockers
+
+    audit = {
+        "summary": {"critical": 0, "high": 3},
+        "issues": [
+            {"severity": "HIGH", "message": "mktcap cache has month-level gaps >45 days"},
+            {"severity": "HIGH", "message": "avg_trading_value cache has gaps >45 days"},
+            {"severity": "HIGH", "message": "workflow skipped optional artifact sync"},
+        ],
+    }
+    blockers = _data_gate_blockers(audit)
+    assert "data_integrity_mktcap_cache_gap" in blockers
+    assert "data_integrity_avg_value_cache_gap" in blockers
+    assert "workflow skipped optional artifact sync" not in blockers
+
+    critical = {"summary": {"critical": 1}, "issues": []}
+    assert _data_gate_blockers(critical) == ["data_integrity_audit_has_critical"]
+
+
 @_test("planned validation jobs include official component A/B without duplicating stress profiles")
 def test_planned_component_ab_jobs():
     from tools.run_kr1000_validation_gate import _planned_backtests
@@ -192,6 +213,28 @@ def test_merge_pmb_oos_predictions():
     assert by_ticker.loc["000002", "p_pre_surge"] == 0.77
     assert by_ticker.loc["000002", "pmb_oos_rank"] == 3
     assert by_ticker.loc["000001", "p_pre_surge"] == 0.0
+
+
+@_test("scored-panel window gate fails on missing monthly signals")
+def test_scored_panel_window_gate_requires_monthly_continuity():
+    from tools.run_kr1000_validation_gate import _audit_scored_panel_window
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "scored.parquet"
+        pd.DataFrame({
+            "rebalance_date": pd.to_datetime(["2018-01-31", "2018-03-30"]),
+            "ticker": ["000001", "000001"],
+        }).to_parquet(path, index=False)
+        gate = _audit_scored_panel_window(
+            path,
+            pd.Timestamp("2018-01-01"),
+            pd.Timestamp("2018-03-30"),
+        )
+
+    assert gate["pass"] is False
+    assert gate["reason"] == "scored_panel_missing_months"
+    assert gate["missing_month_count"] == 1
+    assert gate["missing_months"] == ["2018-02"]
 
 
 @_test("scored-panel rebuild start defaults to latest cache start in quick mode")

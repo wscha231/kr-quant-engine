@@ -65,6 +65,10 @@ KR1000_STRATEGY_AB_PRESETS = {
 
 PRODUCTION_GATE_STRATEGY_PRESET = "pmb_defensive_mdd_gate"
 PMB_SCORE_PROFILES = {"pmb_pre_surge", "pmb_mid_rank_7_23", "hybrid_pmb_rs"}
+DATA_GATE_BLOCKING_HIGH_MESSAGES = {
+    "mktcap cache has month-level gaps >45 days": "data_integrity_mktcap_cache_gap",
+    "avg_trading_value cache has gaps >45 days": "data_integrity_avg_value_cache_gap",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -317,6 +321,20 @@ def _job_requires_pmb_oos(job: dict[str, Any]) -> bool:
     return profile in PMB_SCORE_PROFILES or strategy == PRODUCTION_GATE_STRATEGY_PRESET
 
 
+def _data_gate_blockers(audit: dict[str, Any]) -> list[str]:
+    """Return data audit issues that invalidate official broker metrics."""
+    blockers: list[str] = []
+    if int((audit.get("summary") or {}).get("critical", 0)) > 0:
+        blockers.append("data_integrity_audit_has_critical")
+    for issue in audit.get("issues", []) or []:
+        if str(issue.get("severity", "")).upper() != "HIGH":
+            continue
+        key = DATA_GATE_BLOCKING_HIGH_MESSAGES.get(str(issue.get("message", "")))
+        if key and key not in blockers:
+            blockers.append(key)
+    return blockers
+
+
 def evaluate_job_metrics(
     metrics: dict[str, Any],
     cfg: dict[str, Any],
@@ -483,16 +501,28 @@ def _audit_scored_panel_window(path: Path | None, target_start: pd.Timestamp, as
         return payload
     first = pd.Timestamp(dates.min()).normalize()
     last = pd.Timestamp(dates.max()).normalize()
-    ok = first <= target_start
+    observed_months = set(dates.dt.to_period("M").unique())
+    expected_months = list(pd.period_range(target_start.to_period("M"), as_of.to_period("M"), freq="M"))
+    missing_months = [str(m) for m in expected_months if m not in observed_months]
+    first_month = first.to_period("M")
+    target_start_month = target_start.to_period("M")
+    ok = first_month <= target_start_month and last >= as_of and not missing_months
     payload.update({
         "status": "passed" if ok else "failed",
         "pass": bool(ok),
         "first_signal_date": str(first.date()),
         "last_signal_date": str(last.date()),
         "months": int(dates.dt.to_period("M").nunique()),
+        "expected_months": int(len(expected_months)),
+        "missing_month_count": int(len(missing_months)),
+        "missing_months": missing_months[:24],
     })
-    if first > target_start:
+    if first_month > target_start_month:
         payload["reason"] = "scored_panel_starts_after_official_start"
+    elif last < as_of:
+        payload["reason"] = "scored_panel_ends_before_as_of"
+    elif missing_months:
+        payload["reason"] = "scored_panel_missing_months"
     return payload
 
 
@@ -741,9 +771,9 @@ def main() -> int:
     audit_md = out_dir / f"data_integrity_audit_{stamp}.md"
     audit_json.write_text(json.dumps(audit, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
     write_markdown(audit, audit_md)
-    data_gate_status = "passed" if int(audit.get("summary", {}).get("critical", 0)) == 0 else "blocked"
-    if data_gate_status != "passed":
-        blockers.append("data_integrity_audit_has_critical")
+    data_blockers = _data_gate_blockers(audit)
+    data_gate_status = "passed" if not data_blockers else "blocked"
+    blockers.extend([b for b in data_blockers if b not in blockers])
 
     scored_panel_window_gate = _audit_scored_panel_window(
         Path(args.scored_panel) if args.scored_panel else _latest_scored_panel_path(),

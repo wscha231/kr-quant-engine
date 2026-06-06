@@ -4,6 +4,113 @@
 
 ---
 
+## 2026-06-07
+
+### 05:55 KST - kr1000-pit-repair-2016-oos-coverage-and-official-fail
+
+**Scope**: Replaced suspect KR1000 mcap history with PIT marcap yearly sources,
+extended the scored panel to 2016-current warm-up coverage, generated
+2018-current purged P_MB OOS picks, and recorded the official 8y broker-ledger
+failure against the active CAGR `>= 30%` / MDD `>= -25%` gate.
+
+**What landed**:
+- Added `tools/quarantine_suspect_mcap_caches.py` to quarantine distant
+  duplicate `mktcap_ALL_YYYYMMDD.parquet` snapshots and derived avg-value
+  proxy caches before PIT rebuilds.
+- Added `tools/materialize_mcap_from_marcap_yearly.py` to convert
+  `cache_pykrx/marcap_YYYY.parquet` daily rows into monthly PIT mcap caches.
+- Added `--max-date` to the marcap materializer so current-year files cannot
+  write snapshots after the validation `as_of` date.
+- Normalized `KOSDAQ GLOBAL` rows to `KOSDAQ` while continuing to exclude
+  KONEX from the KR1000 tradeable universe.
+- Strengthened `tools/run_kr1000_validation_gate.py` so official scored panels
+  must cover every month from target start through `as_of`, not only start
+  before the target date.
+- Strengthened validation data blockers so High-severity PIT mcap or
+  avg-value cache gaps block official backtests.
+- Updated `kr_pykrx_client.py` to reuse local yearly marcap daily history and
+  broader index caches before provider fetches.
+- Updated `tools/run_kr1000_backtest.py` to stop requesting prices after the
+  official `as_of` date; the old `+10d` request prevented local marcap caches
+  from serving 2026 official runs.
+
+**Operational result**:
+- Quarantined suspect duplicate data:
+  - `54` mcap snapshots
+  - `51` derived avg-value proxy caches
+  - manifest:
+    `G:\내 드라이브\kr_quant_engine\outputs\mcap_quarantine_20260606.json`
+- Downloaded local marcap yearly sources for `2015`, `2016`, and `2026`.
+- Materialized PIT monthly mcap caches from marcap yearly files:
+  - `2015-2016`: `24` written
+  - `2017-2025`: `36` written earlier in this repair path
+  - `2026`: `6` written with `--max-date 2026-06-04`
+- Rebuilt `historical_mcap.parquet` to `363,680` rows, `148` snapshots,
+  `2015-01-30` through `2026-06-04`.
+- Materialized avg-value proxy caches for 2015-2017 and refreshed 2026
+  proxies.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04`
+  -> Critical `0`, High `0`, Medium `0`.
+- Built scored panel:
+  `feature_store/scored_panel_v0_2016-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet`
+  with `159,005` rows, `126` monthly signals, no missing months.
+- Built official P_MB OOS picks:
+  `outputs/p_mb_oos_picks_purged_3sleeve_2018_20260604_latest.csv`
+  with `3,150` rows, `2017-10-31` through `2026-06-04`; official coverage
+  passed `102/102` months from `2018-01` through `2026-06`.
+- Official broker-ledger performance remains a hard fail:
+  - `pmb_defensive_mdd_gate`: CAGR `-0.32%`, MDD `-28.60%`,
+    excess CAGR `-18.88%`, Sharpe `0.04`, IR `-0.99`.
+  - Component A/B best CAGR was `pmb_mid_rank_7_23` at `6.65%`, but MDD was
+    `-44.12%`.
+
+**symbols_added**:
+- tools/quarantine_suspect_mcap_caches.py
+- tools/materialize_mcap_from_marcap_yearly.py
+- tools.materialize_mcap_from_marcap_yearly.snapshots_from_marcap_year
+- tools.materialize_mcap_from_marcap_yearly.materialize_mcap_from_marcap_years
+- tests/test_kr1000_data_repair_tools.py::test_quarantine_suspect_mcap_caches_dry_run
+- tests/test_kr1000_data_repair_tools.py::test_quarantine_suspect_mcap_caches_moves_files
+- tests/test_kr1000_data_repair_tools.py::test_materialize_mcap_from_marcap_yearly
+- tests/test_kr1000_data_repair_tools.py::test_materialize_mcap_from_marcap_yearly_max_date
+- tests/test_kr1000_validation_gate.py::test_scored_panel_window_gate_requires_monthly_continuity
+
+**symbols_changed**:
+- kr_pykrx_client.fetch_ticker_history
+- kr_pykrx_client.fetch_index_ohlcv
+- kr_pipeline.build_scored_panel_v0
+- run_local.parse_args
+- run_local.build_cfg
+- tools.run_kr1000_backtest._load_or_build_price_panel
+- tools.run_kr1000_backtest.main
+- tools.run_kr1000_validation_gate._audit_scored_panel_window
+- tools.run_kr1000_validation_gate._data_gate_blockers
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Official validation now fails if a scored panel has missing monthly signals
+  inside the 8y target window.
+- Official backtests no longer request post-`as_of` prices for the final
+  signal window.
+
+**Validation**:
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 13 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\test_kr1000_data_store.py` -> 11 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`,
+  High `0`, Medium `0`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --skip-backtests --require-pmb-oos-coverage --pmb-oos-picks G:\내 드라이브\kr_quant_engine\outputs\p_mb_oos_picks_purged_3sleeve_2018_20260604_latest.csv`
+  -> data/scored-panel/P_MB coverage gates passed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --periods official_8y --profiles pmb_pre_surge --strategy-ab --require-pmb-oos-coverage ...`
+  -> `failed_performance`, official production preset failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --periods official_8y --profiles full --component-ab --require-pmb-oos-coverage ...`
+  -> `failed_performance`; all component profiles failed the official gate.
+
+---
+
 ## 2026-06-06
 
 ### 21:25 KST - kr1000-mcap-leakage-audit-and-backfill-scope

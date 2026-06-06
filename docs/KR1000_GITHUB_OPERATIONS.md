@@ -138,6 +138,38 @@ without rebuilding every full feature:
 
 - `cache_pykrx/mktcap_ALL_YYYYMMDD.parquet`
 - `data_pit/historical_mcap.parquet`
+
+### PIT mcap repair from marcap yearly files
+
+When the data audit flags duplicate or stale `mktcap_ALL_YYYYMMDD.parquet`
+snapshots, quarantine suspect caches before recording official backtest
+metrics:
+
+```bash
+python tools/quarantine_suspect_mcap_caches.py --dry-run
+python tools/quarantine_suspect_mcap_caches.py
+```
+
+Then rebuild monthly PIT mcap snapshots from local yearly marcap parquet files:
+
+```bash
+python tools/materialize_mcap_from_marcap_yearly.py --start-year 2015 --end-year 2025
+python tools/materialize_mcap_from_marcap_yearly.py --start-year 2026 --end-year 2026 --max-date <latest-observable-date> --overwrite
+python tools/materialize_avg_value_proxy_caches.py --start 2015-01-01 --end <latest-observable-date>
+python tools/audit_data_integrity.py --as-of <latest-observable-date>
+```
+
+Use `--max-date` for current-year marcap files. Official backtests must not
+materialize or request prices after the validation `as_of` date.
+
+For 2018-current official P_MB OOS coverage, keep a warm-up scored panel from
+2016-current and target the coverage gate from 2018:
+
+```bash
+python run_local.py --quick --start-date 2016-01-01 --end-date <latest-observable-date> --portfolio-size 20 --panel-only --no-collector --no-forward-labels --incremental-fill-order earliest
+python tools/enrich_scored_panel_forward_labels.py --panel <scored_panel_2016_current.parquet> --label-as-of <latest-observable-date> --out outputs/scored_panel_v0_2016_forward_labels.parquet
+python tools/build_pmb_oos_picks.py --panel outputs/scored_panel_v0_2016_forward_labels.parquet --target-start 2018-01-01 --target-end <latest-observable-date> --out outputs/p_mb_oos_picks_purged_3sleeve_latest.csv --fail-on-coverage-gap
+```
 - `data_pit/listed_history.parquet`
 - `cache_misc/avg_value_60d_YYYYMMDD.parquet` when explicitly requested
 - `feature_store/scored_panel_v0_*_<latest>_*.parquet`

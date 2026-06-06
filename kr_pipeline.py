@@ -156,14 +156,31 @@ def build_scored_panel_v0(
 
     cache_path = scored_panel_cache_path(start_date, end_date)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    if cfg.get("reuse_existing_artifacts", True) and cache_path.exists():
-        log(f"[pipeline] reuse cached scored panel {cache_path.name}")
-        return pd.read_parquet(cache_path)
-
     month_ends = fetch_month_end_business_days(
         pd.Timestamp(start_date).strftime("%Y%m%d"),
         pd.Timestamp(end_date).strftime("%Y%m%d"),
     )
+    if cfg.get("reuse_existing_artifacts", True) and cache_path.exists():
+        cached_panel = pd.read_parquet(cache_path)
+        if not cfg.get("scored_panel_incremental_rebuild", True):
+            log(f"[pipeline] reuse cached scored panel {cache_path.name}")
+            return cached_panel
+        cached_dates: set[pd.Timestamp] = set()
+        if "rebalance_date" in cached_panel.columns and not cached_panel.empty:
+            cached_dates = {
+                pd.Timestamp(x).normalize()
+                for x in pd.to_datetime(cached_panel["rebalance_date"], errors="coerce").dropna().unique()
+            }
+        wanted_dates = {pd.Timestamp(x).normalize() for x in month_ends}
+        missing_exact = sorted(wanted_dates - cached_dates)
+        if not missing_exact:
+            log(f"[pipeline] reuse cached scored panel {cache_path.name}")
+            return cached_panel
+        log(
+            f"[pipeline] exact scored panel cache {cache_path.name} is missing "
+            f"{len(missing_exact)} month-ends; continuing incremental rebuild",
+            level="WARN",
+        )
     prior_panel = pd.DataFrame()
     prior_max_date: Optional[pd.Timestamp] = None
     prior_dates: set[pd.Timestamp] = set()
@@ -216,10 +233,15 @@ def build_scored_panel_v0(
     max_new_months = int(cfg.get("scored_panel_incremental_max_new_months", 0) or 0)
     if prior_max_date is not None and max_new_months > 0 and len(build_month_ends) > max_new_months:
         original_count = len(build_month_ends)
-        build_month_ends = build_month_ends[-max_new_months:]
+        fill_order = str(cfg.get("scored_panel_incremental_fill_order", "latest") or "latest").lower()
+        if fill_order == "earliest":
+            build_month_ends = build_month_ends[:max_new_months]
+        else:
+            fill_order = "latest"
+            build_month_ends = build_month_ends[-max_new_months:]
         log(
-            f"[pipeline] incremental max_new_months={max_new_months}: "
-            f"compute latest {len(build_month_ends)} of {original_count} missing month-ends"
+            f"[pipeline] incremental max_new_months={max_new_months}: compute "
+            f"{fill_order} {len(build_month_ends)} of {original_count} missing month-ends"
         )
 
     if not build_month_ends and not prior_panel.empty:

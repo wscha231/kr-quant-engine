@@ -363,7 +363,7 @@ def _load_or_build_price_panel(
 
     frames = []
     fetch_start_day = start - pd.Timedelta(days=10)
-    fetch_end_day = end + pd.Timedelta(days=10)
+    fetch_end_day = end
     fetch_start = fetch_start_day.strftime("%Y%m%d")
     fetch_end = fetch_end_day.strftime("%Y%m%d")
     for i, tk in enumerate(tickers, start=1):
@@ -451,7 +451,7 @@ def main() -> int:
     prices = _load_or_build_price_panel(
         scored,
         actual_start,
-        actual_end + pd.Timedelta(days=10),
+        actual_end,
         args.max_rank_for_prices,
         args.refresh_days,
         args.price_panel,
@@ -464,7 +464,7 @@ def main() -> int:
         log(f"[kr1000-bt] saved price panel: {price_out}")
 
     nav_start = max(actual_start, pd.Timestamp(prices["date"].min()).normalize())
-    nav_end = min(actual_end + pd.Timedelta(days=10), pd.Timestamp(prices["date"].max()).normalize())
+    nav_end = min(actual_end, pd.Timestamp(prices["date"].max()).normalize())
     bench_nav = _benchmark_nav(bench_close, nav_start, nav_end, args.initial_cash)
     holdings = load_current_holdings(args.current_holdings) if args.current_holdings else None
 

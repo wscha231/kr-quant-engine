@@ -165,6 +165,199 @@ def test_mcap_duplicate_snapshot_audit_allows_carry_forward():
         assert audit["status"] == "passed"
 
 
+def _write_mcap_snapshot(path: Path, *, source: str | None = None) -> None:
+    data = {
+        "ticker": ["000001", "000002"],
+        "market_cap": [100.0, 200.0],
+        "listed_shares": [10.0, 20.0],
+        "volume": [1.0, 2.0],
+        "value": [1000.0, 2000.0],
+        "market": ["KOSPI", "KOSDAQ"],
+    }
+    if source is not None:
+        data["mcap_snapshot_source"] = [source, source]
+    pd.DataFrame(data).to_parquet(path, index=False)
+
+
+@_test("mcap quarantine dry-run detects suspect mcap and derived avg-value caches")
+def test_quarantine_suspect_mcap_caches_dry_run():
+    import tools.quarantine_suspect_mcap_caches as tool
+
+    with tempfile.TemporaryDirectory() as tmp:
+        old_root = tool.DATA_ROOT
+        try:
+            tool.DATA_ROOT = Path(tmp)
+            cache_pykrx = tool.DATA_ROOT / "cache_pykrx"
+            cache_misc = tool.DATA_ROOT / "cache_misc"
+            cache_pykrx.mkdir(parents=True, exist_ok=True)
+            cache_misc.mkdir(parents=True, exist_ok=True)
+            _write_mcap_snapshot(cache_pykrx / "mktcap_ALL_20180131.parquet")
+            _write_mcap_snapshot(cache_pykrx / "mktcap_ALL_20250131.parquet")
+            pd.DataFrame({
+                "ticker": ["000001"],
+                "avg_value_60d": [1000.0],
+                "avg_value_source": ["mktcap_value_proxy:20180131"],
+            }).to_parquet(cache_misc / "avg_value_60d_20180131.parquet", index=False)
+            pd.DataFrame({
+                "ticker": ["000001"],
+                "avg_value_60d": [1000.0],
+            }).to_parquet(cache_misc / "avg_value_60d_20250131.parquet", index=False)
+
+            payload = tool.quarantine_suspect_caches(
+                max_span_days=370,
+                quarantine_dir=tool.DATA_ROOT / "quarantine",
+                dry_run=True,
+                include_derived_avg_value=True,
+                rebuild_pit=False,
+            )
+        finally:
+            tool.DATA_ROOT = old_root
+
+        assert payload["dry_run"] is True
+        assert payload["suspect_group_count"] == 1
+        assert payload["suspect_snapshot_count"] == 2
+        assert len(payload["mcap_moves"]) == 2
+        assert len(payload["avg_value_moves"]) == 1
+        assert all(x["moved"] is False for x in payload["mcap_moves"])
+        assert all(x["moved"] is False for x in payload["avg_value_moves"])
+        assert (Path(tmp) / "cache_pykrx" / "mktcap_ALL_20180131.parquet").exists()
+        assert (Path(tmp) / "cache_misc" / "avg_value_60d_20180131.parquet").exists()
+
+
+@_test("mcap quarantine moves suspect caches but preserves price-derived avg-value")
+def test_quarantine_suspect_mcap_caches_moves_files():
+    import tools.quarantine_suspect_mcap_caches as tool
+
+    with tempfile.TemporaryDirectory() as tmp:
+        old_root = tool.DATA_ROOT
+        try:
+            tool.DATA_ROOT = Path(tmp)
+            cache_pykrx = tool.DATA_ROOT / "cache_pykrx"
+            cache_misc = tool.DATA_ROOT / "cache_misc"
+            pit_dir = tool.DATA_ROOT / "data_pit"
+            cache_pykrx.mkdir(parents=True, exist_ok=True)
+            cache_misc.mkdir(parents=True, exist_ok=True)
+            pit_dir.mkdir(parents=True, exist_ok=True)
+            _write_mcap_snapshot(cache_pykrx / "mktcap_ALL_20180131.parquet")
+            _write_mcap_snapshot(cache_pykrx / "mktcap_ALL_20250131.parquet")
+            pd.DataFrame({"ticker": ["000001"]}).to_parquet(pit_dir / "historical_mcap.parquet", index=False)
+            pd.DataFrame({"ticker": ["000001"]}).to_parquet(pit_dir / "listed_history.parquet", index=False)
+            pd.DataFrame({
+                "ticker": ["000001"],
+                "avg_value_60d": [1000.0],
+                "avg_value_source": ["mktcap_value_proxy:20180131"],
+            }).to_parquet(cache_misc / "avg_value_60d_20180131.parquet", index=False)
+            pd.DataFrame({
+                "ticker": ["000001"],
+                "avg_value_60d": [1000.0],
+                "avg_value_source": ["price_ohlcv:20250131"],
+            }).to_parquet(cache_misc / "avg_value_60d_20250131.parquet", index=False)
+
+            payload = tool.quarantine_suspect_caches(
+                max_span_days=370,
+                quarantine_dir=tool.DATA_ROOT / "quarantine",
+                dry_run=False,
+                include_derived_avg_value=True,
+                rebuild_pit=False,
+            )
+        finally:
+            tool.DATA_ROOT = old_root
+
+        assert payload["dry_run"] is False
+        assert len(payload["mcap_moves"]) == 2
+        assert len(payload["avg_value_moves"]) == 1
+        assert len(payload["pit_backups"]) == 0
+        assert all(x["moved"] is True for x in payload["mcap_moves"])
+        assert all(x["moved"] is True for x in payload["avg_value_moves"])
+        assert not (Path(tmp) / "cache_pykrx" / "mktcap_ALL_20180131.parquet").exists()
+        assert not (Path(tmp) / "cache_misc" / "avg_value_60d_20180131.parquet").exists()
+        assert (Path(tmp) / "cache_misc" / "avg_value_60d_20250131.parquet").exists()
+        assert (Path(tmp) / "quarantine" / "cache_pykrx" / "mktcap_ALL_20180131.parquet").exists()
+        assert (Path(tmp) / "quarantine" / "cache_misc" / "avg_value_60d_20180131.parquet").exists()
+
+
+@_test("marcap yearly materializer writes PIT monthly mktcap snapshots")
+def test_materialize_mcap_from_marcap_yearly():
+    import tools.materialize_mcap_from_marcap_yearly as tool
+
+    with tempfile.TemporaryDirectory() as tmp:
+        old_root = tool.DATA_ROOT
+        try:
+            tool.DATA_ROOT = Path(tmp)
+            cache_pykrx = tool.DATA_ROOT / "cache_pykrx"
+            cache_pykrx.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame({
+                "Code": ["1", "2", "3", "1", "2", "4"],
+                "Name": ["A", "B", "C", "A", "B", "D"],
+                "Marcap": [100.0, 200.0, 300.0, 110.0, 210.0, 410.0],
+                "Stocks": [10, 20, 30, 10, 20, 40],
+                "Volume": [1, 2, 3, 4, 5, 6],
+                "Amount": [1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0],
+                "Market": ["KOSPI", "KOSDAQ", "KONEX", "KOSPI", "KOSDAQ", "KOSDAQ GLOBAL"],
+                "Date": pd.to_datetime([
+                    "2025-01-02", "2025-01-02", "2025-01-02",
+                    "2025-01-31", "2025-01-31", "2025-01-31",
+                ]),
+            }).to_parquet(cache_pykrx / "marcap_2025.parquet", index=False)
+
+            payload = tool.materialize_mcap_from_marcap_years(
+                2025,
+                2025,
+                overwrite=False,
+                dry_run=False,
+                rebuild_pit=False,
+            )
+        finally:
+            tool.DATA_ROOT = old_root
+
+        assert len(payload["written"]) == 1
+        out = pd.read_parquet(Path(tmp) / "cache_pykrx" / "mktcap_ALL_20250131.parquet")
+        assert set(out["ticker"]) == {"000001", "000002", "000004"}
+        assert set(out["market"]) == {"KOSPI", "KOSDAQ"}
+        assert float(out.loc[out["ticker"] == "000001", "market_cap"].iloc[0]) == 110.0
+        assert out["mcap_snapshot_source"].eq("marcap_yearly").all()
+        assert pd.Timestamp(out["mcap_snapshot_true_source_date"].iloc[0]) == pd.Timestamp("2025-01-31")
+
+
+@_test("marcap yearly materializer respects max-date as-of guard")
+def test_materialize_mcap_from_marcap_yearly_max_date():
+    import tools.materialize_mcap_from_marcap_yearly as tool
+
+    with tempfile.TemporaryDirectory() as tmp:
+        old_root = tool.DATA_ROOT
+        try:
+            tool.DATA_ROOT = Path(tmp)
+            cache_pykrx = tool.DATA_ROOT / "cache_pykrx"
+            cache_pykrx.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame({
+                "Code": ["1", "1", "1"],
+                "Name": ["A", "A", "A"],
+                "Marcap": [100.0, 110.0, 120.0],
+                "Stocks": [10, 10, 10],
+                "Volume": [1, 2, 3],
+                "Amount": [1000.0, 2000.0, 3000.0],
+                "Market": ["KOSPI", "KOSPI", "KOSPI"],
+                "Date": pd.to_datetime(["2026-01-30", "2026-02-27", "2026-06-05"]),
+            }).to_parquet(cache_pykrx / "marcap_2026.parquet", index=False)
+
+            payload = tool.materialize_mcap_from_marcap_years(
+                2026,
+                2026,
+                overwrite=False,
+                dry_run=False,
+                rebuild_pit=False,
+                max_date="2026-06-04",
+            )
+        finally:
+            tool.DATA_ROOT = old_root
+
+        assert len(payload["written"]) == 2
+        assert payload["max_date"] == "2026-06-04"
+        assert (Path(tmp) / "cache_pykrx" / "mktcap_ALL_20260130.parquet").exists()
+        assert (Path(tmp) / "cache_pykrx" / "mktcap_ALL_20260227.parquet").exists()
+        assert not (Path(tmp) / "cache_pykrx" / "mktcap_ALL_20260605.parquet").exists()
+
+
 @_test("daily broker readiness blocks missing actual holdings evidence")
 def test_daily_broker_check_requires_holdings_file():
     from tools.run_kr1000_daily_broker_check import current_holdings_blockers

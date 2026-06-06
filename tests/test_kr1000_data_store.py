@@ -212,6 +212,146 @@ def test_ticker_history_covering_cache_reuse():
             kr_pykrx_client._TICKER_HISTORY_CACHE_INDEX = old_index
 
 
+@_test("index history fetch can reuse broader covering cache")
+def test_index_history_covering_cache_reuse():
+    import kr_pykrx_client
+
+    old_cache_dir = kr_pykrx_client.CACHE_DIR
+    old_index = kr_pykrx_client._INDEX_HISTORY_CACHE_INDEX
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            kr_pykrx_client.CACHE_DIR = Path(tmp)
+            kr_pykrx_client._INDEX_HISTORY_CACHE_INDEX = None
+            pd.DataFrame({
+                "date": pd.to_datetime(["2020-01-01", "2020-01-31", "2020-02-28"]),
+                "close": [10.0, 11.0, 12.0],
+                "volume": [100, 100, 100],
+                "index_ticker": ["1028", "1028", "1028"],
+            }).to_parquet(
+                Path(tmp) / "index_1028_20200101_20200228.parquet",
+                index=False,
+            )
+            out = kr_pykrx_client._load_covering_index_history_cache(
+                "1028",
+                "20200115",
+                "20200215",
+            )
+            assert out is not None
+            assert len(out) == 1
+            assert float(out.iloc[0]["close"]) == 11.0
+        finally:
+            kr_pykrx_client.CACHE_DIR = old_cache_dir
+            kr_pykrx_client._INDEX_HISTORY_CACHE_INDEX = old_index
+
+
+@_test("ticker history fetch uses local marcap yearly cache before network")
+def test_ticker_history_marcap_yearly_cache():
+    import kr_pykrx_client
+
+    old_cache_dir = kr_pykrx_client.CACHE_DIR
+    old_index = kr_pykrx_client._TICKER_HISTORY_CACHE_INDEX
+    old_marcap = kr_pykrx_client._MARCAP_YEAR_CACHE
+    old_marcap_by_ticker = kr_pykrx_client._MARCAP_YEAR_BY_TICKER_CACHE
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            kr_pykrx_client.CACHE_DIR = Path(tmp)
+            kr_pykrx_client._TICKER_HISTORY_CACHE_INDEX = None
+            kr_pykrx_client._MARCAP_YEAR_CACHE = {}
+            kr_pykrx_client._MARCAP_YEAR_BY_TICKER_CACHE = {}
+            pd.DataFrame({
+                "Code": ["1", "1", "2"],
+                "Date": pd.to_datetime(["2025-01-02", "2025-01-31", "2025-01-31"]),
+                "Open": [9.0, 10.0, 20.0],
+                "High": [11.0, 12.0, 21.0],
+                "Low": [8.0, 9.0, 19.0],
+                "Close": [10.0, 11.0, 20.0],
+                "Volume": [100, 200, 300],
+                "Amount": [1000.0, 2200.0, 6000.0],
+                "ChangesRatio": [0.0, 10.0, 0.0],
+                "Market": ["KOSPI", "KOSPI", "KOSDAQ"],
+            }).to_parquet(Path(tmp) / "marcap_2025.parquet", index=False)
+            out = kr_pykrx_client.fetch_ticker_history("000001", "20250101", "20250131", refresh_days=3650)
+            assert len(out) == 2
+            assert set(out["ticker"]) == {"000001"}
+            assert float(out.iloc[-1]["close"]) == 11.0
+            assert float(out.iloc[-1]["value"]) == 2200.0
+            assert 2025 in kr_pykrx_client._MARCAP_YEAR_BY_TICKER_CACHE
+            assert kr_pykrx_client.fetch_ticker_history("999999", "20250101", "20250131").empty
+        finally:
+            kr_pykrx_client.CACHE_DIR = old_cache_dir
+            kr_pykrx_client._TICKER_HISTORY_CACHE_INDEX = old_index
+            kr_pykrx_client._MARCAP_YEAR_CACHE = old_marcap
+            kr_pykrx_client._MARCAP_YEAR_BY_TICKER_CACHE = old_marcap_by_ticker
+
+
+@_test("scored-panel incremental rebuild can fill earliest missing month first")
+def test_scored_panel_incremental_fill_order_earliest():
+    import kr_pipeline
+
+    calls = []
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        prior_path = root / "prior.parquet"
+        out_path = root / "out.parquet"
+        pd.DataFrame({
+            "rebalance_date": [pd.Timestamp("2019-01-31")],
+            "ticker": ["000001"],
+            "p0_momentum_score": [1.0],
+        }).to_parquet(prior_path, index=False)
+        pd.read_parquet(prior_path).to_parquet(out_path, index=False)
+
+        old_fetch_month_ends = kr_pipeline.fetch_month_end_business_days
+        old_find = kr_pipeline.find_incremental_scored_panel_cache
+        old_cache_path = kr_pipeline.scored_panel_cache_path
+        old_phase = kr_pipeline.phase_is_enabled
+        old_snapshot = kr_pipeline.build_universe_snapshot
+        old_features = kr_pipeline.add_universe_features
+        try:
+            kr_pipeline.fetch_month_end_business_days = lambda start, end: [
+                pd.Timestamp("2018-01-31"),
+                pd.Timestamp("2018-02-28"),
+                pd.Timestamp("2019-01-31"),
+            ]
+            kr_pipeline.find_incremental_scored_panel_cache = lambda *args, **kwargs: prior_path
+            kr_pipeline.scored_panel_cache_path = lambda *args, **kwargs: out_path
+            kr_pipeline.phase_is_enabled = lambda *args, **kwargs: False
+
+            def fake_snapshot(day, cfg=None):
+                calls.append(pd.Timestamp(day).normalize())
+                return pd.DataFrame({
+                    "rebalance_date": [pd.Timestamp(day).normalize()],
+                    "ticker": ["000002"],
+                    "eligible": [True],
+                })
+
+            kr_pipeline.build_universe_snapshot = fake_snapshot
+            kr_pipeline.add_universe_features = lambda eligible, day, fund_panel=None: eligible.assign(
+                p0_momentum_score=2.0
+            )
+            panel = kr_pipeline.build_scored_panel_v0(
+                "2018-01-01",
+                "2019-01-31",
+                cfg={
+                    "reuse_existing_artifacts": True,
+                    "scored_panel_incremental_rebuild": True,
+                    "scored_panel_incremental_max_new_months": 1,
+                    "scored_panel_incremental_fill_order": "earliest",
+                    "forward_label_enabled": False,
+                },
+            )
+        finally:
+            kr_pipeline.fetch_month_end_business_days = old_fetch_month_ends
+            kr_pipeline.find_incremental_scored_panel_cache = old_find
+            kr_pipeline.scored_panel_cache_path = old_cache_path
+            kr_pipeline.phase_is_enabled = old_phase
+            kr_pipeline.build_universe_snapshot = old_snapshot
+            kr_pipeline.add_universe_features = old_features
+
+        assert calls == [pd.Timestamp("2018-01-31")]
+        assert pd.Timestamp("2018-01-31") in set(pd.to_datetime(panel["rebalance_date"]))
+        assert pd.Timestamp("2018-02-28") not in set(pd.to_datetime(panel["rebalance_date"]))
+
+
 @_test("GitHub workflows import and sync private current holdings state")
 def test_workflows_import_and_sync_current_holdings_state():
     daily = (PROJECT_ROOT / ".github" / "workflows" / "daily_kr1000_broker_check.yml").read_text(encoding="utf-8")
