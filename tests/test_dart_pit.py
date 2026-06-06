@@ -139,6 +139,47 @@ def test_infer_period_end_no_rcept_dt():
     assert adjusted is False
 
 
+@_test("add_pit_fundamentals repairs cached future period metadata")
+def test_add_pit_fundamentals_sanitizes_cached_period_end():
+    import os
+    import pandas as pd
+    from kr_features import add_pit_fundamentals
+
+    old = os.environ.get("PHASE_PHASE1_FUNDAMENTAL_ENABLED")
+    os.environ["PHASE_PHASE1_FUNDAMENTAL_ENABLED"] = "1"
+    try:
+        universe = pd.DataFrame({
+            "ticker": ["030960"],
+            "market_cap": [100_000_000_000.0],
+        })
+        fund_panel = pd.DataFrame({
+            "ticker": ["030960"],
+            "corp_code": ["00123456"],
+            "bsns_year": [2019],
+            "reprt_code": ["11014"],
+            "rcept_dt": [pd.Timestamp("2019-05-15")],
+            "period_end": [pd.Timestamp("2019-09-30")],
+            "revenue": [100.0],
+            "operating_income": [10.0],
+            "net_income": [5.0],
+            "total_assets": [200.0],
+            "total_equity": [100.0],
+            "total_liabilities": [100.0],
+        })
+        out = add_pit_fundamentals(universe, pd.Timestamp("2019-05-31"), fund_panel)
+    finally:
+        if old is None:
+            os.environ.pop("PHASE_PHASE1_FUNDAMENTAL_ENABLED", None)
+        else:
+            os.environ["PHASE_PHASE1_FUNDAMENTAL_ENABLED"] = old
+
+    period_end = pd.Timestamp(out.loc[0, "fundamentals_period_end"])
+    rcept_dt = pd.Timestamp(out.loc[0, "fundamentals_rcept_dt"])
+    assert period_end == pd.Timestamp("2019-03-31")
+    assert period_end <= rcept_dt
+    assert period_end <= pd.Timestamp("2019-05-31")
+
+
 @_test("phase_is_enabled('phase1_fundamental') reads env override")
 def test_phase1_toggle():
     import os

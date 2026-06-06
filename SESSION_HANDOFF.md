@@ -5,11 +5,11 @@
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest implementation commit: `4dfe490`.
-Latest GitHub Smoke on `4dfe490` succeeded:
-https://github.com/wscha231/kr-quant-engine/actions/runs/27056564052
+Latest pushed commit: `3667a02`.
+Latest GitHub Smoke on `3667a02` succeeded:
+https://github.com/wscha231/kr-quant-engine/actions/runs/27056628049
 
-Draft PR body has been refreshed for `4dfe490`.
+Draft PR body has been refreshed for `3667a02`.
 
 The active user target has been realigned to:
 
@@ -25,23 +25,21 @@ CAGR `>= 35%` is now a stretch target only, not the official pass gate.
 
 ## Current Local Change Set
 
-This change set has been implemented, locally validated, committed, pushed,
-and reflected in the draft PR:
+There is a new local uncommitted change set after `3667a02`:
 
-- `kr1000_leader_alpha_cfg()["target_cagr_gate"]` changed from `0.35` to
-  `0.30`.
-- `tools/run_kr1000_validation_gate.py` now renders the official target from
-  the configured threshold instead of hard-coding `35%`.
-- Added score profile `pmb_mid_rank_7_23`, which scores only PIT-safe P_MB OOS
-  ranks `7..23`.
-- Added strategy A/B preset `pmb_mid_rank_no_leverage_mdd_gate`, using
-  no-leverage gross `1.0`, daily hard stop `10%`, and the existing portfolio
-  drawdown ladder.
-- Production pass/fail remains tied to locked preset
-  `pmb_defensive_mdd_gate`; the mid-rank preset is a challenger, not the
-  official gate.
-- Tests and `docs/KR1000_GITHUB_OPERATIONS.md` were updated for the `30%`
-  official target and the new challenger.
+- `kr_features.sanitize_fundamental_period_metadata()` repairs stale cached
+  DART rows where `period_end > rcept_dt` before PIT joins.
+- `add_pit_fundamentals()` and `prepare_pit_fundamentals_panel()` now apply
+  that sanitizer, and TTM/YoY helpers sort by `period_end` / `rcept_dt` first.
+- `kr_pykrx_client.fetch_market_cap_market()` has `allow_fdr_fallback`; the
+  daily refresh disables FDR fallback automatically for historical `--as-of`
+  requests older than 14 days.
+- `tools/backfill_mcap_cache_gaps.py` was added for pykrx-only historical mcap
+  gap backfills.
+- `tools/audit_data_integrity.py` now recognizes full validation-gate
+  workflows as broker-backtest automation.
+- New tests cover cached DART period metadata repair and validation-gate
+  workflow audit detection.
 
 Do not stage the unrelated dirty file:
 
@@ -87,7 +85,13 @@ Completed on 2026-06-06 16:41 KST:
   -> planned 14 broker backtests, target CAGR `0.30`, including
   `pmb_mid_rank_7_23` and `pmb_mid_rank_no_leverage_mdd_gate`.
 - `py -3 tools\audit_data_integrity.py --as-of 2026-06-04`
-  -> Critical `0`, High `4`, Medium `1`.
+  -> Critical `0`, High `4`, Medium `0` after the local audit false-positive
+  fix.
+- `py -3 tests\test_dart_pit.py` -> 17 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 8 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_pit_safety`
+  -> planned 14 broker backtests, target CAGR `0.30`.
 
 Data-audit high findings still need follow-up before official 8y performance:
 
@@ -97,6 +101,14 @@ Data-audit high findings still need follow-up before official 8y performance:
 - 293 scored rows have `fundamentals_period_end` after `fundamentals_rcept_dt`;
   audit note says this is likely non-December fiscal-year metadata mapped as
   calendar-year metadata, while `rcept_dt` PIT filtering is checked separately.
+
+Backfill smoke:
+
+- `py -3 tools\backfill_mcap_cache_gaps.py --start 2016-01-01 --end 2026-06-04 --dry-run`
+  -> 28 missing business-month-end mcap cache dates.
+- `py -3 tools\backfill_mcap_cache_gaps.py --start 2016-01-01 --end 2026-06-04 --max-dates 1`
+  -> failed safely: pykrx returned empty for `2016-07-29`, and no FDR
+  fallback current-list data or empty cache parquet was saved.
 
 ## Reproduction Command
 
@@ -111,13 +123,14 @@ Result: CAGR `28.15%`, MDD `-22.18%`, Sharpe `1.29`, KOSPI200 excess
 
 ## Next Production Steps
 
-1. Commit and push the `30%` gate realignment plus mid-rank challenger after
-   validation.
-2. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
+1. Commit/push the local PIT cache-safety and audit-tightening change set.
+2. Resolve remaining data-audit High items: mcap cache gaps, avg-value cache
+   gaps, and stale scored-panel fundamentals metadata.
+3. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
    `2016-01-01`.
-3. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
-4. Run official validation with `--component-ab --strategy-ab`.
-5. If CAGR remains below `30%`, improve signal quality in this order:
+4. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
+5. Run official validation with `--component-ab --strategy-ab`.
+6. If CAGR remains below `30%`, improve signal quality in this order:
    `pmb + RS + flow + technical`, sector/theme RS exits, then macro regime
    sleeve scaling. Avoid exposure-only experiments until the 8y signal
    coverage problem is solved.

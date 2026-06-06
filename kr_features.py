@@ -431,8 +431,48 @@ def prepare_pit_fundamentals_panel(
     # Reverse map corp_code -> ticker
     rev_map = dict(zip(corp_map["corp_code"], corp_map["ticker"]))
     panel["ticker"] = panel["corp_code"].map(rev_map)
+    panel = sanitize_fundamental_period_metadata(panel)
 
     return panel
+
+
+def sanitize_fundamental_period_metadata(fund_panel: pd.DataFrame) -> pd.DataFrame:
+    """Repair impossible DART period metadata while preserving PIT timestamps.
+
+    Older cached `fund_panel_*` artifacts may have used a naive
+    bsns_year/reprt_code calendar mapping. For non-December fiscal-year filers
+    that can create `period_end > rcept_dt`. The filing date remains the
+    authoritative PIT timestamp; this function only prevents stale cache
+    metadata from polluting period ordering and audit trails.
+    """
+    if fund_panel.empty or not {"period_end", "rcept_dt"}.issubset(fund_panel.columns):
+        return fund_panel
+    out = fund_panel.copy()
+    out["period_end"] = pd.to_datetime(out["period_end"], errors="coerce")
+    out["rcept_dt"] = pd.to_datetime(out["rcept_dt"], errors="coerce")
+    if "period_end_adjusted_from_calendar" not in out.columns:
+        out["period_end_adjusted_from_calendar"] = False
+
+    bad = out["period_end"].notna() & out["rcept_dt"].notna() & (out["period_end"] > out["rcept_dt"])
+    if not bad.any() or not {"bsns_year", "reprt_code"}.issubset(out.columns):
+        return out
+
+    from kr_dart_client import infer_report_period_end
+
+    for idx, row in out.loc[bad, ["bsns_year", "reprt_code", "rcept_dt"]].iterrows():
+        try:
+            fixed_period_end, adjusted = infer_report_period_end(
+                int(row["bsns_year"]),
+                str(row["reprt_code"]),
+                row["rcept_dt"],
+            )
+        except Exception:
+            continue
+        out.at[idx, "period_end"] = fixed_period_end
+        out.at[idx, "period_end_adjusted_from_calendar"] = bool(adjusted) or bool(
+            out.at[idx, "period_end_adjusted_from_calendar"]
+        )
+    return out
 
 
 def _compute_ttm_from_panel(corp_panel: pd.DataFrame, as_of: pd.Timestamp) -> dict:
@@ -456,7 +496,8 @@ def _compute_ttm_from_panel(corp_panel: pd.DataFrame, as_of: pd.Timestamp) -> di
     if corp_panel.empty:
         return out
 
-    p = corp_panel.sort_values(["bsns_year", "reprt_code"]).copy()
+    sort_cols = [c for c in ("period_end", "rcept_dt", "bsns_year", "reprt_code") if c in corp_panel.columns]
+    p = corp_panel.sort_values(sort_cols).copy() if sort_cols else corp_panel.copy()
     latest = p.iloc[-1]
 
     # Latest balance sheet (always from most recent filing)
@@ -516,7 +557,8 @@ def _compute_yoy_from_panel(corp_panel: pd.DataFrame) -> dict:
     if corp_panel.empty:
         return out
 
-    p = corp_panel.sort_values(["bsns_year", "reprt_code"]).copy()
+    sort_cols = [c for c in ("period_end", "rcept_dt", "bsns_year", "reprt_code") if c in corp_panel.columns]
+    p = corp_panel.sort_values(sort_cols).copy() if sort_cols else corp_panel.copy()
     if len(p) < 2:
         return out
     latest = p.iloc[-1]
@@ -577,6 +619,8 @@ def add_pit_fundamentals(
     out = universe.copy()
     if out.empty or fund_panel.empty:
         return out
+
+    fund_panel = sanitize_fundamental_period_metadata(fund_panel)
 
     # PIT filter: only rcept_dt <= rebalance_date
     pit = fund_panel[fund_panel["rcept_dt"].notna()

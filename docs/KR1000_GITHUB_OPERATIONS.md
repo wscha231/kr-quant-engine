@@ -218,6 +218,17 @@ Enrich an existing scored panel without a full feature rebuild:
 python tools/enrich_scored_panel_forward_labels.py --label-as-of <latest-observable-date> --out feature_store/scored_panel_v0_forward_labels.parquet --audit-json outputs/scored_panel_forward_labels.json
 ```
 
+Backfill historical market-cap cache gaps safely:
+
+```bash
+python tools/backfill_mcap_cache_gaps.py --start 2016-01-01 --end <latest-trading-date> --dry-run
+python tools/backfill_mcap_cache_gaps.py --start 2016-01-01 --end <latest-trading-date>
+```
+
+This tool disables FDR current-list fallback. If pykrx returns empty for an
+old date, the date is left failed rather than saving current listings into a
+historical PIT cache.
+
 Build purged P_MB OOS picks without overwriting the legacy research CSV:
 
 ```bash
@@ -319,6 +330,12 @@ As of the 2026-06-06 16:41 KST handoff:
   observed-mask defensive broker replay for `2020-2024` produced CAGR `4.26%`,
   MDD `-28.38%`, Sharpe `0.38`, below the legacy P_MB defensive result
   `25.38%` CAGR / `-24.00%` MDD.
+- The workflow-audit false positive is fixed: full validation-gate workflows
+  count as broker-backtest automation. Current data audit is Critical `0`,
+  High `4`, Medium `0`.
+- Historical mcap gap backfill is now PIT-safe but currently source-blocked:
+  a `--max-dates 1` smoke returned an empty pykrx result for `2016-07-29`;
+  no FDR fallback or empty cache parquet was saved.
 - The schema-union regression from `eligible_final=NaN` on historical rows is
   fixed and covered by `tests/test_kr1000_leader.py`.
 - Full score fails after proper NAV sizing (`CAGR -5.61%`, MDD `-50.01%` on
@@ -327,8 +344,10 @@ As of the 2026-06-06 16:41 KST handoff:
   broker-ledger challenger, but it is still below the official CAGR target and
   lacks 8y OOS coverage.
 
-The next production step is a full-feature 2018-current backfill, purged P_MB
-OOS regeneration, then component/strategy A/B toward CAGR `>= 30%` under the
-broker-ledger/MDD gate. CAGR `>= 35%` remains a stretch target after the
-official gate is cleared.
-Avoid more exposure-only experiments until the signal panel is richer.
+The next production step is to resolve the remaining High data-audit findings:
+historical mcap gaps, avg-value cache gaps, and stale scored-panel fundamentals
+metadata. Then run a full-feature 2018-current backfill, purged P_MB OOS
+regeneration, and component/strategy A/B toward CAGR `>= 30%` under the
+broker-ledger/MDD gate. CAGR `>= 35%` remains the stretch target after the
+official gate is cleared. Avoid more exposure-only experiments until the
+signal panel is richer.

@@ -212,12 +212,18 @@ def fetch_daily_ohlcv_market(date: str, market: str = "ALL", refresh_days: int =
     out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     if not out.empty:
         out["date"] = pd.Timestamp(date).normalize()
-    _save_cache(out, cache)
+    if not out.empty or allow_fdr_fallback:
+        _save_cache(out, cache)
     log(f"[pykrx_client] fetch_daily_ohlcv_market({date}, {market}) -> {len(out)} rows")
     return out
 
 
-def fetch_market_cap_market(date: str, market: str = "ALL", refresh_days: int = 1) -> pd.DataFrame:
+def fetch_market_cap_market(
+    date: str,
+    market: str = "ALL",
+    refresh_days: int = 1,
+    allow_fdr_fallback: bool = True,
+) -> pd.DataFrame:
     """Market cap + 주식수 snapshot.
 
     Columns: ticker, market_cap, listed_shares, volume, value, market, date.
@@ -254,7 +260,7 @@ def fetch_market_cap_market(date: str, market: str = "ALL", refresh_days: int = 
         if frames:
             out = pd.concat(frames, ignore_index=True)
 
-    if out.empty and FDR_AVAILABLE:
+    if out.empty and FDR_AVAILABLE and allow_fdr_fallback:
         log(f"[pykrx_client] pykrx empty, falling back to FDR for mcap", level="WARN")
         out = _fetch_listing_via_fdr(market)
         # FDR returns: ticker, name, market, market_cap, listed_shares, close, volume, value

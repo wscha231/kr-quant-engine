@@ -134,6 +134,16 @@ def test_planned_component_ab_jobs():
     assert all(j["start"] <= j["end"] for j in jobs)
 
 
+@_test("workflow audit treats full validation gate as broker backtest automation")
+def test_workflow_summary_counts_validation_gate_backtests():
+    from tools.audit_data_integrity import _workflow_summary
+
+    workflows = _workflow_summary()
+    assert any(v.get("runs_kr1000_validation_gate") for v in workflows.values())
+    assert any(v.get("runs_kr1000_backtest_via_validation_gate") for v in workflows.values())
+    assert any(v.get("runs_kr1000_backtest") for v in workflows.values())
+
+
 @_test("P_MB OOS coverage gate fails when official 8y months are missing")
 def test_pmb_oos_coverage_gate():
     from tools.build_pmb_oos_picks import audit_pmb_oos_coverage

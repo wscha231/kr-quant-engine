@@ -6,6 +6,78 @@
 
 ## 2026-06-06
 
+### 17:07 KST - kr1000-pit-cache-safety-audit-tightening
+
+**Scope**: Tightened PIT data safety around historical market-cap cache
+backfills and stale DART fundamentals metadata.
+
+**What landed**:
+- Added `tools/backfill_mcap_cache_gaps.py`, a pykrx-only historical mcap gap
+  backfill tool that disables FDR current-list fallback.
+- Added `allow_fdr_fallback` to `kr_pykrx_client.fetch_market_cap_market()`.
+- `tools/refresh_kr1000_daily_data.py` now disables FDR fallback automatically
+  when the requested `--as-of` date is more than 14 days before `--run-date`.
+- Added `kr_features.sanitize_fundamental_period_metadata()` and call it from
+  both `prepare_pit_fundamentals_panel()` and `add_pit_fundamentals()`, so
+  old cached DART panels with impossible `period_end > rcept_dt` metadata are
+  repaired before PIT joins.
+- `_compute_ttm_from_panel()` and `_compute_yoy_from_panel()` now sort by
+  `period_end` / `rcept_dt` first, then report metadata.
+- `tools/audit_data_integrity.py` now recognizes full validation-gate
+  workflows as broker-backtest automation instead of requiring a direct
+  `run_kr1000_backtest.py` workflow call.
+
+**Operational result**:
+- `audit_data_integrity.py --as-of 2026-06-04` now reports Medium `0`
+  instead of Medium `1`; the prior "No GitHub workflow runs
+  tools/run_kr1000_backtest.py" false positive is cleared.
+- Remaining High `4` items are real current-data blockers:
+  mcap cache gaps, avg-value cache gaps, and stale scored-panel fundamentals
+  metadata that requires scored-panel rebuild.
+- Historical mcap backfill smoke with `--max-dates 1` failed safely:
+  pykrx returned empty for `2016-07-29`, and no FDR fallback data or empty
+  cache parquet was saved.
+
+**symbols_added**:
+- tools/backfill_mcap_cache_gaps.py
+- kr_features.sanitize_fundamental_period_metadata
+- tests/test_dart_pit.py::test_add_pit_fundamentals_sanitizes_cached_period_end
+- tests/test_kr1000_validation_gate.py::test_workflow_summary_counts_validation_gate_backtests
+
+**symbols_changed**:
+- kr_pykrx_client.fetch_market_cap_market
+- tools/refresh_kr1000_daily_data.main
+- kr_features.prepare_pit_fundamentals_panel
+- kr_features.add_pit_fundamentals
+- kr_features._compute_ttm_from_panel
+- kr_features._compute_yoy_from_panel
+- tools/audit_data_integrity._workflow_summary
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Historical `refresh_kr1000_daily_data.py --as-of <old-date>` runs no longer
+  use FDR fallback for mcap snapshots. This is intentional to prevent current
+  listings from contaminating PIT historical caches.
+
+**Validation**:
+- `py -3 -m py_compile kr_pykrx_client.py tools\refresh_kr1000_daily_data.py tools\backfill_mcap_cache_gaps.py kr_features.py tools\audit_data_integrity.py`
+- `py -3 tests\test_dart_pit.py` -> 17 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 8 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`,
+  High `4`, Medium `0`.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 15 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_pit_safety`
+  -> planned 14 broker backtests, target CAGR `0.30`.
+- `py -3 tools\backfill_mcap_cache_gaps.py --start 2016-01-01 --end 2026-06-04 --dry-run`
+  -> 28 missing business-month-end mcap cache dates.
+- `py -3 tools\backfill_mcap_cache_gaps.py --start 2016-01-01 --end 2026-06-04 --max-dates 1`
+  -> failed safely with 1 empty pykrx result and no cache file written.
+
+---
+
 ### 16:36 KST - kr1000-cagr30-gate-realignment-midrank-challenger
 
 **Scope**: Realigned the official KR1000 broker-ledger gate to CAGR `>= 30%`

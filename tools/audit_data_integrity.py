@@ -259,12 +259,22 @@ def _workflow_summary() -> dict[str, Any]:
         return {"exists": False}
     for path in sorted(wf_dir.glob("*.yml")):
         text = path.read_text(encoding="utf-8", errors="ignore")
+        direct_backtest = "run_kr1000_backtest.py" in text
+        validation_gate = "run_kr1000_validation_gate.py" in text
+        validation_runs_backtests = validation_gate and (
+            "--component-ab" in text
+            or "--strategy-ab" in text
+            or ("mode.outputs.mode" in text and "full" in text)
+        )
         out[path.name] = {
             "mentions_rclone": "rclone" in text,
             "syncs_cache_pykrx": "cache_pykrx" in text and "rclone copy gdrive:kr_quant_engine/cache_pykrx" in text,
             "syncs_data_pit": "data_pit" in text,
             "runs_pit_builder": "build_pit_universe_history.py" in text,
-            "runs_kr1000_backtest": "run_kr1000_backtest.py" in text,
+            "runs_kr1000_validation_gate": validation_gate,
+            "runs_kr1000_backtest": direct_backtest or validation_runs_backtests,
+            "runs_kr1000_backtest_direct": direct_backtest,
+            "runs_kr1000_backtest_via_validation_gate": validation_runs_backtests,
             "runs_kr1000_daily_refresh": "refresh_kr1000_daily_data.py" in text,
             "runs_kr1000_daily_broker_check": "run_kr1000_daily_broker_check.py" in text,
             "cron_lines": [line.strip() for line in text.splitlines() if "cron:" in line],

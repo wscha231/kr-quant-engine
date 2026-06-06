@@ -185,8 +185,15 @@ def main() -> int:
             "historical_mcap_exists": HISTORICAL_MCAP_PATH.exists(),
         })
     else:
+        historical_request = int((run_date - as_of).days) > 14
+        payload["mcap_fdr_fallback_allowed"] = not historical_request
         log(f"[refresh] fetching mcap snapshot for {as_of.date()}")
-        mcap = fetch_market_cap_market(_yyyymmdd(as_of), market="ALL", refresh_days=args.refresh_days)
+        mcap = fetch_market_cap_market(
+            _yyyymmdd(as_of),
+            market="ALL",
+            refresh_days=args.refresh_days,
+            allow_fdr_fallback=not historical_request,
+        )
         snapshot = normalize_mcap_snapshot(mcap, as_of)
         payload["mcap_rows"] = int(len(snapshot))
         payload["mcap_cache_exists"] = expected_mcap_cache.exists()
