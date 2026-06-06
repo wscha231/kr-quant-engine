@@ -5,9 +5,11 @@
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest pushed commit before this local change set: `12497aa`.
-Latest GitHub Smoke on `12497aa` succeeded:
-https://github.com/wscha231/kr-quant-engine/actions/runs/27055771369
+Latest implementation commit: `4dfe490`.
+Latest GitHub Smoke on `4dfe490` succeeded:
+https://github.com/wscha231/kr-quant-engine/actions/runs/27056564052
+
+Draft PR body has been refreshed for `4dfe490`.
 
 The active user target has been realigned to:
 
@@ -23,8 +25,8 @@ CAGR `>= 35%` is now a stretch target only, not the official pass gate.
 
 ## Current Local Change Set
 
-This local change set has been implemented and locally validated. It still
-needs commit/push and PR refresh:
+This change set has been implemented, locally validated, committed, pushed,
+and reflected in the draft PR:
 
 - `kr1000_leader_alpha_cfg()["target_cagr_gate"]` changed from `0.35` to
   `0.30`.
