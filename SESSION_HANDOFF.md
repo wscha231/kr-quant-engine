@@ -1,6 +1,6 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-06 18:11 KST
+## Current Status - 2026-06-06 18:21 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
@@ -37,6 +37,9 @@ Latest data-gate-clear change set after `c01b843`:
 - `tools/run_kr1000_daily_broker_check.py` now blocks production readiness
   when actual holdings evidence is missing or empty. `--allow-empty-holdings`
   exists for research dry-runs only.
+- `kr1000_leader.resolve_current_holdings_path()` was added and default
+  holdings discovery now prefers
+  `DATA_ROOT/state/current_holdings.csv` before project-local state.
 - `docs/KR1000_GITHUB_OPERATIONS.md`, `CHANGELOG.md`, and this handoff were
   updated for the new data repair/readiness behavior.
 
@@ -69,10 +72,13 @@ Daily broker readiness is now correctly tied to actual holdings evidence:
 - `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04`
   -> `blocked`.
 - Blockers: `current_holdings_file_missing`, `current_holdings_empty`.
+- Current canonical missing path:
+  `G:\내 드라이브\kr_quant_engine\state\current_holdings.csv`.
 - Data audit inside the daily check is clean: Critical `0`, High `0`,
   Medium `0`.
 - The tool still writes an inspection trade plan, but it must not be treated as
-  production-ready until `state/current_holdings.csv` is present and non-empty.
+  production-ready until `DATA_ROOT/state/current_holdings.csv` is present and
+  non-empty.
 
 Latest committed functional change set in `1c33aca`:
 
@@ -159,6 +165,8 @@ Completed on 2026-06-06 18:11 KST:
   -> planned 14 broker backtests, target CAGR `0.30`.
 - `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04`
   -> blocked on `current_holdings_file_missing` and `current_holdings_empty`.
+- `py -3 tests\test_kr1000_data_repair_tools.py` was rerun after the
+  DATA_ROOT holdings resolver change -> 5 passed, 0 failed.
 
 Backfill smoke:
 
@@ -187,8 +195,8 @@ Result: CAGR `28.15%`, MDD `-22.18%`, Sharpe `1.29`, KOSPI200 excess
 
 1. If this change set has not yet been pushed, commit/push it and refresh the
    draft PR body.
-2. Provide or sync actual `state/current_holdings.csv`; rerun the daily broker
-   check and require status `completed`.
+2. Provide or sync actual `DATA_ROOT/state/current_holdings.csv`; rerun the
+   daily broker check and require status `completed`.
 3. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
    `2016-01-01`.
 4. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.

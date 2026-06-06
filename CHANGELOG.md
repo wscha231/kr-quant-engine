@@ -6,6 +6,54 @@
 
 ## 2026-06-06
 
+### 18:21 KST - kr1000-current-holdings-data-root-resolution
+
+**Scope**: Aligned current-holdings discovery with the project data-store
+contract.
+
+**What landed**:
+- Added `kr1000_leader.resolve_current_holdings_path()`.
+- `kr1000_leader.load_current_holdings()` now defaults to
+  `DATA_ROOT/state/current_holdings.csv`, with project-local
+  `state/current_holdings.csv` as a fallback.
+- `tools/run_kr1000_daily_broker_check.py` now uses the shared resolver.
+- Updated CLI help and operations docs to state the canonical DATA_ROOT
+  holdings path.
+
+**Operational result**:
+- `tools/run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04`
+  remains correctly `blocked`, now against canonical missing path
+  `G:\내 드라이브\kr_quant_engine\state\current_holdings.csv`.
+- The daily check's data audit is still clean: Critical `0`, High `0`,
+  Medium `0`.
+
+**symbols_added**:
+- kr1000_leader.resolve_current_holdings_path
+- tests/test_kr1000_data_repair_tools.py::test_current_holdings_resolver_prefers_data_root_state
+
+**symbols_changed**:
+- kr1000_leader.load_current_holdings
+- tools.run_kr1000_daily_broker_check.parse_args
+- tools.run_kr1000_daily_broker_check.main
+- tools.run_kr1000_leader.parse_args
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Default current-holdings discovery now prefers `DATA_ROOT/state` before the
+  project-local state directory.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py`
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 5 passed, 0 failed.
+- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04`
+  -> blocked on `current_holdings_file_missing` and `current_holdings_empty`;
+  `current_holdings_path` is `G:\내 드라이브\kr_quant_engine\state\current_holdings.csv`.
+
+---
+
 ### 18:11 KST - kr1000-data-gate-clear-and-holdings-readiness-guard
 
 **Scope**: Cleared the remaining data-integrity High findings and hardened the

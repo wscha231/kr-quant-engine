@@ -132,6 +132,30 @@ def test_daily_broker_check_requires_holdings_file():
     assert current_holdings_blockers(missing, pd.DataFrame(), allow_empty=True) == []
 
 
+@_test("current holdings resolver prefers DATA_ROOT state over project fallback")
+def test_current_holdings_resolver_prefers_data_root_state():
+    from kr1000_leader import resolve_current_holdings_path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        data_root = root / "data"
+        project_root = root / "project"
+        data_state = data_root / "state"
+        project_state = project_root / "state"
+        data_state.mkdir(parents=True)
+        project_state.mkdir(parents=True)
+        data_file = data_state / "current_holdings.csv"
+        project_file = project_state / "current_holdings.csv"
+
+        assert resolve_current_holdings_path(data_root=data_root, project_root=project_root) == data_file
+        project_file.write_text("ticker\n000001\n", encoding="utf-8")
+        assert resolve_current_holdings_path(data_root=data_root, project_root=project_root) == project_file
+        data_file.write_text("ticker\n000002\n", encoding="utf-8")
+        assert resolve_current_holdings_path(data_root=data_root, project_root=project_root) == data_file
+        explicit = root / "custom.csv"
+        assert resolve_current_holdings_path(explicit, data_root=data_root, project_root=project_root) == explicit
+
+
 if __name__ == "__main__":
     print(f"kr1000 data repair tool tests: {PASSED} passed, {FAILED} failed")
     sys.exit(0 if FAILED == 0 else 1)

@@ -65,9 +65,11 @@ engine-version change or suspected cache corruption requires a from-scratch
 - It may be `blocked` when the scored panel is stale or the data audit finds a
   critical issue. Fix data freshness/PIT leakage first; do not record official
   performance from a blocked run.
-- It is also `blocked` when the actual `state/current_holdings.csv` evidence is
-  missing or empty. Use `--allow-empty-holdings` only for research dry-runs;
-  production readiness must be based on actual account holdings.
+- It is also `blocked` when the actual current-holdings evidence is missing or
+  empty. By default the tool looks for
+  `DATA_ROOT/state/current_holdings.csv` first, then project-local
+  `state/current_holdings.csv`. Use `--allow-empty-holdings` only for research
+  dry-runs; production readiness must be based on actual account holdings.
 
 `Quarterly Backtest`
 
@@ -106,8 +108,9 @@ Required folders:
 - `backtest_results`
 - `state`
 
-Private account files such as `state/current_holdings.csv` stay gitignored.
-Only `state/current_holdings.example.csv` is copied into the data store.
+Private account files such as `DATA_ROOT/state/current_holdings.csv` stay
+gitignored. Only `state/current_holdings.example.csv` is copied into the data
+store.
 
 ## Data Update Contract
 
@@ -355,14 +358,14 @@ python tools/run_kr1000_validation_gate.py --component-ab --strategy-ab --dry-ru
 
 ## Current Known Blocker
 
-As of the 2026-06-06 18:11 KST handoff:
+As of the 2026-06-06 18:21 KST handoff:
 
 - The data-integrity blocker is cleared: `tools/audit_data_integrity.py --as-of
   2026-06-04` reports Critical `0`, High `0`, Medium `0`.
 - The daily broker check now correctly blocks when actual holdings evidence is
   missing. Current local status is `blocked` because
-  `H:\kr_quant_engine\state\current_holdings.csv` is absent, even though the
-  trade-plan artifact is still generated for inspection.
+  `G:\내 드라이브\kr_quant_engine\state\current_holdings.csv` is absent, even
+  though the trade-plan artifact is still generated for inspection.
 - The appended `2026-06-04` rows are liquidity-only readiness rows, not
   full-feature backtest rows.
 - Full scored-panel rebuilds now add `forward_min_return_1m` /
@@ -396,9 +399,9 @@ As of the 2026-06-06 18:11 KST handoff:
   broker-ledger challenger, but it is still below the official CAGR target and
   lacks 8y OOS coverage.
 
-The next production step is to provide/sync actual `state/current_holdings.csv`
-for the daily broker readiness path, then run a full-feature 2018-current
-backfill, purged P_MB OOS regeneration, and component/strategy A/B toward CAGR
-`>= 30%` under the broker-ledger/MDD gate. CAGR `>= 35%` remains the stretch
-target after the official gate is cleared. Avoid more exposure-only experiments
-until the signal panel is richer.
+The next production step is to provide/sync actual
+`DATA_ROOT/state/current_holdings.csv` for the daily broker readiness path, then
+run a full-feature 2018-current backfill, purged P_MB OOS regeneration, and
+component/strategy A/B toward CAGR `>= 30%` under the broker-ledger/MDD gate.
+CAGR `>= 35%` remains the stretch target after the official gate is cleared.
+Avoid more exposure-only experiments until the signal panel is richer.

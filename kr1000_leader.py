@@ -87,6 +87,31 @@ CURRENT_HOLDINGS_COLUMNS = (
 )
 
 
+def resolve_current_holdings_path(
+    path: str | Path | None = None,
+    *,
+    data_root: str | Path | None = None,
+    project_root: str | Path | None = None,
+) -> Path:
+    """Resolve the canonical current-holdings path.
+
+    Private holdings live under DATA_ROOT/state in normal production/GDrive
+    runs. The project-local state path remains a fallback for developer
+    sandboxes and explicit local overrides.
+    """
+    if path:
+        return Path(path)
+    dr = Path(data_root) if data_root is not None else DATA_ROOT
+    pr = Path(project_root) if project_root is not None else PROJECT_ROOT
+    data_path = dr / "state" / "current_holdings.csv"
+    project_path = pr / "state" / "current_holdings.csv"
+    if data_path.exists():
+        return data_path
+    if project_path.exists():
+        return project_path
+    return data_path
+
+
 def _cfg(cfg: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     if cfg and cfg.get("strategy_name") == "KR1000 Leader Alpha":
         return dict(cfg)
@@ -606,7 +631,7 @@ def portfolio_drawdown_exposure_scale(
 
 def load_current_holdings(path: str | Path | None = None) -> pd.DataFrame:
     """Load current holdings. Missing file returns an empty schema frame."""
-    p = Path(path) if path else PROJECT_ROOT / "state" / "current_holdings.csv"
+    p = resolve_current_holdings_path(path)
     if not p.exists():
         return pd.DataFrame(columns=CURRENT_HOLDINGS_COLUMNS)
     df = pd.read_csv(p, dtype={"ticker": str})

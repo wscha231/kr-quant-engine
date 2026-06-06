@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--candidates-csv", default=None,
                    help="Optional prebuilt candidate panel with component features.")
     p.add_argument("--current-holdings", default=None,
-                   help="Optional state/current_holdings.csv override.")
+                   help="Optional current holdings CSV override. Default=DATA_ROOT/state/current_holdings.csv, with project state fallback.")
     p.add_argument("--out-dir", default=None)
     p.add_argument("--top-holdings", type=int, default=None)
     p.add_argument("--scored-panel-csv", default=None,

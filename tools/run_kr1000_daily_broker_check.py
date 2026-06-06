@@ -31,6 +31,7 @@ from kr1000_leader import (  # noqa: E402
     compute_leader_scores,
     generate_trade_plan,
     load_current_holdings,
+    resolve_current_holdings_path,
 )
 from tools.audit_data_integrity import build_audit  # noqa: E402
 
@@ -44,7 +45,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--scored-panel", default=None,
                    help="Optional scored_panel parquet/csv. Default=latest scored_panel_v0.")
     p.add_argument("--current-holdings", default=None,
-                   help="Optional current holdings CSV. Default=state/current_holdings.csv.")
+                   help="Optional current holdings CSV. Default=DATA_ROOT/state/current_holdings.csv, with project state fallback.")
     p.add_argument("--allow-empty-holdings", action="store_true",
                    help="Do not block when current holdings file is missing/empty. For research dry-runs only.")
     p.add_argument("--out-dir", default=None,
@@ -73,10 +74,6 @@ def _latest_scored_panel_path() -> Path:
 
 def _yyyymmdd(day: pd.Timestamp) -> str:
     return pd.Timestamp(day).strftime("%Y%m%d")
-
-
-def resolve_current_holdings_path(path: str | Path | None = None) -> Path:
-    return Path(path) if path else PROJECT_ROOT / "state" / "current_holdings.csv"
 
 
 def current_holdings_blockers(
