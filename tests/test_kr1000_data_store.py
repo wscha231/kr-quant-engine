@@ -174,6 +174,17 @@ def test_latest_snapshot_classifier_feature_carry_is_pit_safe():
     assert meta["carried_feature_count"] >= 1
 
 
+@_test("GitHub workflows import and sync private current holdings state")
+def test_workflows_import_and_sync_current_holdings_state():
+    daily = (PROJECT_ROOT / ".github" / "workflows" / "daily_kr1000_broker_check.yml").read_text(encoding="utf-8")
+    validation = (PROJECT_ROOT / ".github" / "workflows" / "kr1000_data_update_and_validation.yml").read_text(encoding="utf-8")
+    for text in (daily, validation):
+        assert "tools/import_current_holdings.py" in text
+        assert "data/state/current_holdings.csv" in text
+        assert "broker_holdings.csv" in text
+        assert "rclone copy data/state gdrive:kr_quant_engine/state" in text
+
+
 if __name__ == "__main__":
     print(f"kr1000 data-store tests: {PASSED} passed, {FAILED} failed")
     sys.exit(0 if FAILED == 0 else 1)

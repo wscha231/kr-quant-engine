@@ -101,6 +101,32 @@ jobs:
       - name: Setup KR1000 data store
         run: python tools/setup_kr1000_data_store.py
 
+      - name: Import broker holdings export if present
+        shell: bash
+        run: |
+          RAW=""
+          for f in \
+            data/state/current_holdings_raw.csv \
+            data/state/current_holdings_raw.tsv \
+            data/state/broker_holdings.csv \
+            data/state/broker_holdings.tsv \
+            data/state/holdings_export.csv \
+            data/state/holdings_export.tsv
+          do
+            if [ -f "$f" ]; then RAW="$f"; break; fi
+          done
+          if [ -n "$RAW" ]; then
+            ARGS="--input $RAW --out data/state/current_holdings.csv --account-id broker"
+            if [ -n "${{ steps.mode.outputs.as_of }}" ]; then
+              ARGS="$ARGS --as-of ${{ steps.mode.outputs.as_of }}"
+            fi
+            python tools/import_current_holdings.py $ARGS
+          elif [ -f data/state/current_holdings.csv ]; then
+            python tools/import_current_holdings.py --input data/state/current_holdings.csv --out data/state/current_holdings.csv --dry-run
+          else
+            echo "No current holdings file or raw broker export found in data/state."
+          fi
+
       - name: Run KR1000 validation gate
         id: gate
         shell: bash
@@ -152,6 +178,7 @@ jobs:
           rclone copy data/cache_dart gdrive:kr_quant_engine/cache_dart -P || true
           rclone copy data/feature_store gdrive:kr_quant_engine/feature_store -P || true
           rclone copy data/models gdrive:kr_quant_engine/models -P || true
+          rclone copy data/state gdrive:kr_quant_engine/state -P || true
           if [ "${{ steps.mode.outputs.mode }}" = "full" ]; then
             rclone copy data/cache_pykrx gdrive:kr_quant_engine/cache_pykrx -P || true
           fi
@@ -168,6 +195,7 @@ jobs:
             data/outputs/kr1000_daily_broker_check_*.md
             data/outputs/kr1000_daily_broker_trade_plan_*.csv
             data/outputs/kr1000_daily_data_refresh_*.json
+            data/outputs/current_holdings_import_audit.json
             data/outputs/p_mb_oos_picks_purged_3sleeve*.csv
             data/outputs/p_mb_oos_picks_purged_3sleeve*.json
           retention-days: 180

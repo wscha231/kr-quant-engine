@@ -65,6 +65,31 @@ jobs:
       - name: Setup KR1000 data store
         run: python tools/setup_kr1000_data_store.py
 
+      - name: Import broker holdings export if present
+        run: |
+          RAW=""
+          for f in \
+            data/state/current_holdings_raw.csv \
+            data/state/current_holdings_raw.tsv \
+            data/state/broker_holdings.csv \
+            data/state/broker_holdings.tsv \
+            data/state/holdings_export.csv \
+            data/state/holdings_export.tsv
+          do
+            if [ -f "$f" ]; then RAW="$f"; break; fi
+          done
+          if [ -n "$RAW" ]; then
+            ARGS="--input $RAW --out data/state/current_holdings.csv --account-id broker"
+            if [ -n "${{ github.event.inputs.evaluation_date }}" ]; then
+              ARGS="$ARGS --as-of ${{ github.event.inputs.evaluation_date }}"
+            fi
+            python tools/import_current_holdings.py $ARGS
+          elif [ -f data/state/current_holdings.csv ]; then
+            python tools/import_current_holdings.py --input data/state/current_holdings.csv --out data/state/current_holdings.csv --dry-run
+          else
+            echo "No current holdings file or raw broker export found in data/state."
+          fi
+
       - name: Refresh latest mcap and PIT data
         run: |
           ARGS=""
@@ -107,6 +132,7 @@ jobs:
           rclone copy data/cache_misc gdrive:kr_quant_engine/cache_misc -P || true
           rclone copy data/cache_pykrx gdrive:kr_quant_engine/cache_pykrx -P || true
           rclone copy data/feature_store gdrive:kr_quant_engine/feature_store -P || true
+          rclone copy data/state gdrive:kr_quant_engine/state -P || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -118,4 +144,5 @@ jobs:
             data/outputs/kr1000_daily_broker_check_*.md
             data/outputs/kr1000_daily_broker_trade_plan_*.csv
             data/outputs/kr1000_daily_data_refresh_*.json
+            data/outputs/current_holdings_import_audit.json
           retention-days: 90

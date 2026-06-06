@@ -112,6 +112,25 @@ Private account files such as `DATA_ROOT/state/current_holdings.csv` stay
 gitignored. Only `state/current_holdings.example.csv` is copied into the data
 store.
 
+To feed actual account holdings into daily readiness, place either the
+canonical file or a raw broker export in the GDrive `state` folder:
+
+- canonical: `state/current_holdings.csv`
+- raw exports auto-imported by GitHub workflows:
+  `state/current_holdings_raw.csv`, `state/current_holdings_raw.tsv`,
+  `state/broker_holdings.csv`, `state/broker_holdings.tsv`,
+  `state/holdings_export.csv`, `state/holdings_export.tsv`
+
+The import step writes or validates `state/current_holdings.csv` before the
+daily broker check:
+
+```bash
+python tools/import_current_holdings.py --input state/broker_holdings.csv --out state/current_holdings.csv --as-of <latest-trading-date> --account-id broker
+```
+
+Common English and Korean broker headers are normalized into the canonical
+schema. The import fails when no positive-share positions remain.
+
 ## Data Update Contract
 
 Daily light automation is allowed to update market/PIT/readiness artifacts
@@ -186,6 +205,13 @@ This path is for daily broker readiness only. With a classifier available,
 latest candidates by `score_profile=pmb_pre_surge`. Without a classifier it
 falls back to `latest_fast_liquidity_only` rows. Do not use either latest-only
 path as official CAGR/MDD evidence.
+
+Import or validate current holdings manually:
+
+```bash
+python tools/import_current_holdings.py --input <broker-export.csv> --as-of <latest-trading-date> --account-id <account-name>
+python tools/import_current_holdings.py --input <broker-export.csv> --dry-run
+```
 
 Light validation with the same ordering GitHub uses:
 

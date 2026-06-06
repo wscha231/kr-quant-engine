@@ -1,6 +1,6 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-06 18:21 KST
+## Current Status - 2026-06-06 18:35 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
@@ -40,6 +40,14 @@ Latest data-gate-clear change set after `c01b843`:
 - `kr1000_leader.resolve_current_holdings_path()` was added and default
   holdings discovery now prefers
   `DATA_ROOT/state/current_holdings.csv` before project-local state.
+- `tools/import_current_holdings.py` was added so raw broker CSV/TSV exports
+  can be normalized into `DATA_ROOT/state/current_holdings.csv`.
+- Daily and validation GitHub workflows now auto-import raw holdings exports
+  from `data/state/current_holdings_raw.{csv,tsv}`,
+  `data/state/broker_holdings.{csv,tsv}`, or
+  `data/state/holdings_export.{csv,tsv}` before broker readiness, then sync
+  `data/state` back to GDrive.
+- Daily readiness now also blocks holdings files whose `shares` are all zero.
 - `docs/KR1000_GITHUB_OPERATIONS.md`, `CHANGELOG.md`, and this handoff were
   updated for the new data repair/readiness behavior.
 
@@ -73,7 +81,11 @@ Daily broker readiness is now correctly tied to actual holdings evidence:
   -> `blocked`.
 - Blockers: `current_holdings_file_missing`, `current_holdings_empty`.
 - Current canonical missing path:
-  `G:\내 드라이브\kr_quant_engine\state\current_holdings.csv`.
+  `DATA_ROOT/state/current_holdings.csv`.
+- Accepted raw export drop locations in GDrive `state/`:
+  `current_holdings_raw.csv`, `current_holdings_raw.tsv`,
+  `broker_holdings.csv`, `broker_holdings.tsv`, `holdings_export.csv`,
+  `holdings_export.tsv`.
 - Data audit inside the daily check is clean: Critical `0`, High `0`,
   Medium `0`.
 - The tool still writes an inspection trade plan, but it must not be treated as
@@ -167,6 +179,9 @@ Completed on 2026-06-06 18:11 KST:
   -> blocked on `current_holdings_file_missing` and `current_holdings_empty`.
 - `py -3 tests\test_kr1000_data_repair_tools.py` was rerun after the
   DATA_ROOT holdings resolver change -> 5 passed, 0 failed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` was rerun after the broker
+  holdings import automation change -> 7 passed, 0 failed.
+- `py -3 tests\test_kr1000_data_store.py` -> 7 passed, 0 failed.
 
 Backfill smoke:
 
@@ -196,7 +211,9 @@ Result: CAGR `28.15%`, MDD `-22.18%`, Sharpe `1.29`, KOSPI200 excess
 1. If this change set has not yet been pushed, commit/push it and refresh the
    draft PR body.
 2. Provide or sync actual `DATA_ROOT/state/current_holdings.csv`; rerun the
-   daily broker check and require status `completed`.
+   daily broker check and require status `completed`. A raw broker export can
+   be dropped into `DATA_ROOT/state/broker_holdings.csv` or one of the accepted
+   raw filenames above and imported with `tools/import_current_holdings.py`.
 3. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
    `2016-01-01`.
 4. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.

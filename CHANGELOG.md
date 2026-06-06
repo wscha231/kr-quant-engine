@@ -6,6 +6,62 @@
 
 ## 2026-06-06
 
+### 18:35 KST - kr1000-broker-holdings-import-automation
+
+**Scope**: Added a broker-export import path so actual holdings can be fed
+into daily readiness without hand-editing the canonical schema.
+
+**What landed**:
+- Added `tools/import_current_holdings.py`.
+- The importer normalizes common English/Korean broker headers into
+  `CURRENT_HOLDINGS_COLUMNS`, computes missing market value/weights when
+  possible, and fails when no positive-share positions remain.
+- `tools/run_kr1000_daily_broker_check.py` now blocks holdings files whose
+  shares are all zero.
+- Daily and validation GitHub workflows now auto-import raw holdings exports
+  from `data/state/current_holdings_raw.{csv,tsv}`,
+  `data/state/broker_holdings.{csv,tsv}`, or
+  `data/state/holdings_export.{csv,tsv}` before broker readiness.
+- Workflows now sync `data/state` back to `gdrive:kr_quant_engine/state` and
+  upload `current_holdings_import_audit.json`.
+
+**Operational result**:
+- Users can drop a raw broker export into GDrive `state/` and the automation
+  will write/validate `state/current_holdings.csv` before the daily check.
+- Current local daily broker check remains blocked because no actual holdings
+  file or raw broker export exists yet.
+
+**symbols_added**:
+- tools/import_current_holdings.py
+- tools.import_current_holdings.read_source_table
+- tools.import_current_holdings.normalize_holdings_frame
+- tools.import_current_holdings.validate_current_holdings_frame
+- tests/test_kr1000_data_repair_tools.py::test_import_current_holdings_normalizes_korean_headers
+- tests/test_kr1000_data_repair_tools.py::test_import_current_holdings_rejects_empty_positions
+- tests/test_kr1000_data_store.py::test_workflows_import_and_sync_current_holdings_state
+
+**symbols_changed**:
+- tools.run_kr1000_daily_broker_check.current_holdings_blockers
+- .github/workflows/daily_kr1000_broker_check.yml
+- .github/workflows/kr1000_data_update_and_validation.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Daily broker readiness now blocks holdings files with no positive-share rows.
+
+**Validation**:
+- `py -3 -m py_compile tools\import_current_holdings.py tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py tests\test_kr1000_data_store.py`
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 7 passed, 0 failed.
+- `py -3 tests\test_kr1000_data_store.py` -> 7 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04`
+  -> still blocked on missing/empty holdings, as expected.
+
+---
+
 ### 18:21 KST - kr1000-current-holdings-data-root-resolution
 
 **Scope**: Aligned current-holdings discovery with the project data-store

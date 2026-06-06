@@ -130,6 +130,9 @@ def test_daily_broker_check_requires_holdings_file():
     assert "current_holdings_file_missing" in blockers
     assert "current_holdings_empty" in blockers
     assert current_holdings_blockers(missing, pd.DataFrame(), allow_empty=True) == []
+    zero_share = pd.DataFrame({"ticker": ["000001"], "shares": [0]})
+    blockers = current_holdings_blockers(missing, zero_share, allow_empty=False)
+    assert "current_holdings_no_positive_shares" in blockers
 
 
 @_test("current holdings resolver prefers DATA_ROOT state over project fallback")
@@ -154,6 +157,43 @@ def test_current_holdings_resolver_prefers_data_root_state():
         assert resolve_current_holdings_path(data_root=data_root, project_root=project_root) == data_file
         explicit = root / "custom.csv"
         assert resolve_current_holdings_path(explicit, data_root=data_root, project_root=project_root) == explicit
+
+
+@_test("current holdings import normalizes Korean broker headers")
+def test_import_current_holdings_normalizes_korean_headers():
+    from tools.import_current_holdings import normalize_holdings_frame
+
+    raw = pd.DataFrame({
+        "종목코드": ["005930", "000660", "CASH"],
+        "종목명": ["삼성전자", "SK하이닉스", "현금"],
+        "보유수량": ["10", "2", ""],
+        "매입단가": ["70,000", "180,000", ""],
+        "현재가": ["72,000", "190,000", ""],
+        "평가금액": ["720,000", "380,000", ""],
+        "수익률": ["2.86%", "5.56%", ""],
+    })
+    out, audit = normalize_holdings_frame(raw, as_of_date="2026-06-04", account_id="main")
+    assert audit["summary"]["critical"] == 0
+    assert audit["source_rows"] == 3
+    assert audit["output_rows"] == 2
+    assert set(out["ticker"]) == {"005930", "000660"}
+    assert out.loc[out["ticker"] == "005930", "account_id"].iloc[0] == "main"
+    assert float(out.loc[out["ticker"] == "005930", "weight"].iloc[0]) > 0.0
+    assert abs(float(out.loc[out["ticker"] == "005930", "unrealized_pnl_pct"].iloc[0]) - 0.0286) < 1e-6
+
+
+@_test("current holdings import fails empty or non-position source")
+def test_import_current_holdings_rejects_empty_positions():
+    from tools.import_current_holdings import normalize_holdings_frame
+
+    raw = pd.DataFrame({
+        "종목코드": ["005930"],
+        "보유수량": ["0"],
+    })
+    out, audit = normalize_holdings_frame(raw, as_of_date="2026-06-04")
+    assert out.empty
+    assert audit["summary"]["critical"] > 0
+    assert any(x["message"] == "current_holdings_empty" for x in audit["issues"])
 
 
 if __name__ == "__main__":

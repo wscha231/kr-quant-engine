@@ -92,6 +92,10 @@ def current_holdings_blockers(
         blockers.append("current_holdings_empty")
     elif "ticker" not in holdings.columns or holdings["ticker"].astype(str).str.strip().eq("").all():
         blockers.append("current_holdings_missing_tickers")
+    else:
+        shares = pd.to_numeric(holdings.get("shares", 0), errors="coerce").fillna(0.0)
+        if not (shares > 0).any():
+            blockers.append("current_holdings_no_positive_shares")
     return blockers
 
 
