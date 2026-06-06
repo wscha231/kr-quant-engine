@@ -256,6 +256,36 @@ def test_forward_label_builder():
     assert abs(float(out.loc[0, "forward_min_return_1m"]) - (-0.20)) < 1e-9
 
 
+@_test("forward label enrichment helper fills only requested date window")
+def test_forward_label_enrichment_helper():
+    from tools.enrich_scored_panel_forward_labels import enrich_panel_with_forward_labels
+
+    panel = pd.DataFrame({
+        "rebalance_date": [pd.Timestamp("2024-01-31"), pd.Timestamp("2024-03-31")],
+        "ticker": ["000001", "000001"],
+    })
+    prices = pd.DataFrame({
+        "date": pd.to_datetime([
+            "2024-01-31", "2024-02-05", "2024-02-29",
+            "2024-03-31", "2024-04-30",
+        ]),
+        "ticker": ["000001"] * 5,
+        "close": [100.0, 90.0, 120.0, 200.0, 210.0],
+    })
+    out, audit = enrich_panel_with_forward_labels(
+        panel,
+        cfg={"forward_label_horizon_months": 1},
+        price_panel=prices,
+        start="2024-01-01",
+        end="2024-01-31",
+    )
+    assert abs(float(out.loc[0, "forward_return_1m"]) - 0.20) < 1e-9
+    assert abs(float(out.loc[0, "forward_min_return_1m"]) - (-0.10)) < 1e-9
+    assert pd.isna(out.loc[1, "forward_return_1m"])
+    assert audit["active_rows"] == 1
+    assert audit["newly_label_ready_rows"] == 1
+
+
 @_test("train_entry_classifier exposes purged split controls")
 def test_train_entry_classifier_purged_signature():
     import inspect

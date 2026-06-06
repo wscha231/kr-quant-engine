@@ -91,6 +91,12 @@ def parse_args() -> argparse.Namespace:
                    help="Append a fast latest scored snapshot after data refresh and before daily broker readiness.")
     p.add_argument("--build-pmb-oos-picks", action="store_true",
                    help="Build purged 3-sleeve P_MB OOS picks before broker backtests.")
+    p.add_argument("--enrich-forward-labels", action="store_true",
+                   help=(
+                       "Add forward target labels to the selected scored panel before "
+                       "building P_MB OOS picks/backtests. Useful when reusing an older "
+                       "full-feature panel without rebuilding all features."
+                   ))
     p.add_argument("--pmb-oos-picks", default=None,
                    help="PIT-safe P_MB OOS picks CSV passed to broker backtests.")
     p.add_argument("--require-pmb-oos-coverage", action="store_true",
@@ -644,17 +650,32 @@ def main() -> int:
             ],
         })
 
+    if args.enrich_forward_labels:
+        enriched_panel = out_dir / "scored_panel_v0_forward_labels.parquet"
+        cmd = [
+            sys.executable,
+            _script("tools/enrich_scored_panel_forward_labels.py"),
+            "--out", str(enriched_panel),
+        ]
+        if args.scored_panel:
+            cmd.extend(["--panel", str(args.scored_panel)])
+        commands.append({"step": "enrich_forward_labels", "cmd": cmd})
+        args.scored_panel = str(enriched_panel)
+
     if args.build_pmb_oos_picks:
+        build_cmd = [
+            sys.executable,
+            _script("tools/build_pmb_oos_picks.py"),
+            "--out", str(args.pmb_oos_picks),
+            "--coverage-json", str(out_dir / "p_mb_oos_picks_purged_3sleeve.coverage.json"),
+            "--target-start", "2018-01-01",
+            "--target-end", str(as_of.date()),
+        ]
+        if args.scored_panel:
+            build_cmd.extend(["--panel", str(args.scored_panel)])
         commands.append({
             "step": "build_pmb_oos_picks",
-            "cmd": [
-                sys.executable,
-                _script("tools/build_pmb_oos_picks.py"),
-                "--out", str(args.pmb_oos_picks),
-                "--coverage-json", str(out_dir / "p_mb_oos_picks_purged_3sleeve.coverage.json"),
-                "--target-start", "2018-01-01",
-                "--target-end", str(as_of.date()),
-            ],
+            "cmd": build_cmd,
         })
 
     if args.dry_run:

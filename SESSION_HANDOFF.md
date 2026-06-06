@@ -1,13 +1,13 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-06 14:30 KST
+## Current Status - 2026-06-06 14:36 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest pushed commit: `df28efb`.
-Latest GitHub Smoke on `df28efb` succeeded:
-https://github.com/wscha231/kr-quant-engine/actions/runs/27053488434
+Latest checked pushed commit: `58230d4`.
+Latest GitHub Smoke on `58230d4` succeeded:
+https://github.com/wscha231/kr-quant-engine/actions/runs/27053746266
 
 The active user target is:
 
@@ -33,7 +33,7 @@ portfolio DD ladder:
 This is not an official pass because CAGR is below `35%` and P_MB OOS picks
 cover only `2020-01-31` to `2024-12-30`.
 
-## What Changed After df28efb
+## Recent Changes
 
 Forward risk labels are now being added to the full scored-panel path:
 
@@ -50,6 +50,20 @@ Forward risk labels are now being added to the full scored-panel path:
 
 This should allow the purged 3-sleeve P_MB risk model to stop falling back to
 all-zero `is_risk` after the scored panel is rebuilt.
+
+The current bridge work also lets agents enrich an existing scored panel
+without a full feature rebuild:
+
+- `tools/enrich_scored_panel_forward_labels.py` reads an existing
+  `scored_panel_v0_*.parquet`, fills `forward_return_1m` and
+  `forward_min_return_1m`, and writes a new panel plus audit JSON.
+- `tools/run_kr1000_validation_gate.py --enrich-forward-labels` runs that
+  bridge before `tools/build_pmb_oos_picks.py` and passes the enriched panel
+  into both P_MB OOS generation and broker backtests.
+- `--scored-panel ... --build-pmb-oos-picks` now passes the selected scored
+  panel into the P_MB OOS builder.
+- `.github/workflows/quarterly_backtest.yml` enriches the copied feature-store
+  panel before building purged P_MB OOS picks.
 
 ## Data / Performance Facts
 
@@ -81,12 +95,18 @@ Validation after current forward-label edits:
 
 - `py -3 -m py_compile kr_pipeline.py kr_config.py tools\run_kr1000_validation_gate.py`
   -> passed.
-- `py -3 tests\test_walkforward.py` -> 11 passed, 0 failed.
+- `py -3 -m py_compile tools\enrich_scored_panel_forward_labels.py tools\run_kr1000_validation_gate.py kr_pipeline.py`
+  -> passed.
+- `py -3 tests\test_walkforward.py` -> 12 passed, 0 failed.
 - `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
 - `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
 - `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_cagr35_forward_labels`
   -> planned `build_pmb_oos_picks`, 12 broker backtests, target CAGR `0.35`,
   and all backtests include `--pmb-oos-picks`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --enrich-forward-labels --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_cagr35_forward_enrich`
+  -> planned `enrich_forward_labels`, then `build_pmb_oos_picks`, 12 broker
+  backtests, target CAGR `0.35`, and all backtests include `--scored-panel`.
 - `git diff --check` -> passed.
 
 ## Git / Worktree Notes
@@ -99,24 +119,26 @@ Validation after current forward-label edits:
 
 Files intended for the next commit:
 
-- `kr_config.py`
-- `kr_pipeline.py`
+- `.github/workflows/quarterly_backtest.yml`
+- `tools/enrich_scored_panel_forward_labels.py`
 - `tools/run_kr1000_validation_gate.py`
-- `tests/test_kr1000_validation_gate.py`
 - `tests/test_walkforward.py`
-- `tests/smoke_test.py`
 - `docs/KR1000_GITHUB_OPERATIONS.md`
 - `SESSION_HANDOFF.md`
 - `CHANGELOG.md`
 
 ## Next Step
 
-1. Validate and commit/push the forward-label and 35% target alignment.
-2. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
+1. Commit/push the forward-label enrichment bridge and update the draft PR
+   body from the stale `30%` text to the active `35%` target.
+2. Run the bridge on the current GDrive scored panel if a full rebuild is too
+   slow:
+   `py -3 tools\enrich_scored_panel_forward_labels.py --out <feature_store\scored_panel_v0_forward_labels.parquet>`.
+3. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
    `2016-01-01`.
-3. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
-4. Run official validation with `--component-ab --strategy-ab`.
-5. If CAGR remains below `35%`, improve signal quality in this order:
+4. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
+5. Run official validation with `--component-ab --strategy-ab`.
+6. If CAGR remains below `35%`, improve signal quality in this order:
    hybrid `pmb+RS+flow+technical`, sector/theme RS exits, then macro regime
    sleeve scaling. Avoid exposure-only experiments until signal coverage
    improves.

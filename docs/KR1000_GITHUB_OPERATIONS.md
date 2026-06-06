@@ -136,6 +136,12 @@ Full scored-panel rebuilds add `forward_return_1m` and
 P_MB risk-sleeve labeling and are excluded from classifier features by the
 `forward_` prefix.
 
+When a usable full-feature scored panel already exists but lacks those target
+labels, use `tools/enrich_scored_panel_forward_labels.py` instead of rebuilding
+all features. `tools/run_kr1000_validation_gate.py --enrich-forward-labels`
+runs that bridge before P_MB OOS generation and passes the enriched scored
+panel into both the OOS builder and broker backtests.
+
 Official production pass/fail uses the locked `pmb_defensive_mdd_gate` strategy
 preset when `--strategy-ab` is run. The `full` score profile remains a baseline
 gate for diagnosis. P_MB and hybrid jobs cannot pass the official gate unless
@@ -192,6 +198,18 @@ Dry-run command manifest:
 
 ```bash
 python tools/run_kr1000_validation_gate.py --build-pmb-oos-picks --component-ab --strategy-ab --dry-run
+```
+
+Dry-run with existing scored-panel forward-label enrichment:
+
+```bash
+python tools/run_kr1000_validation_gate.py --build-pmb-oos-picks --enrich-forward-labels --component-ab --strategy-ab --dry-run
+```
+
+Enrich an existing scored panel without a full feature rebuild:
+
+```bash
+python tools/enrich_scored_panel_forward_labels.py --out feature_store/scored_panel_v0_forward_labels.parquet --audit-json outputs/scored_panel_forward_labels.json
 ```
 
 Build purged P_MB OOS picks without overwriting the legacy research CSV:
@@ -270,8 +288,9 @@ As of the 2026-06-05 19:12 KST handoff:
 - The appended `2026-06-04` rows are liquidity-only readiness rows, not
   full-feature backtest rows.
 - Full scored-panel rebuilds now add `forward_min_return_1m` /
-  `forward_return_1m`; rebuild the current GDrive panel so the purged
-  3-sleeve P_MB risk sleeve stops falling back to zero.
+  `forward_return_1m`. Existing full-feature panels can be bridged with
+  `tools/enrich_scored_panel_forward_labels.py` so the purged 3-sleeve P_MB
+  risk sleeve stops falling back to zero before a complete rebuild is ready.
 - The schema-union regression from `eligible_final=NaN` on historical rows is
   fixed and covered by `tests/test_kr1000_leader.py`.
 - Full score fails after proper NAV sizing (`CAGR -5.61%`, MDD `-50.01%` on

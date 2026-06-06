@@ -50,9 +50,16 @@ jobs:
       - name: Setup KR1000 data store
         run: python tools/setup_kr1000_data_store.py
 
+      - name: Enrich scored panel forward labels
+        run: |
+          python tools/enrich_scored_panel_forward_labels.py \
+            --out data/feature_store/scored_panel_v0_quarterly_forward_labels.parquet \
+            --audit-json data/outputs/scored_panel_forward_labels_quarterly.json
+
       - name: Build purged P_MB OOS picks
         run: |
           python tools/build_pmb_oos_picks.py \
+            --panel data/feature_store/scored_panel_v0_quarterly_forward_labels.parquet \
             --out data/outputs/p_mb_oos_picks_purged_3sleeve_latest.csv \
             --coverage-json data/outputs/p_mb_oos_picks_purged_3sleeve_latest.coverage.json
 

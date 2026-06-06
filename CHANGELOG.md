@@ -6,6 +6,57 @@
 
 ## 2026-06-06
 
+### 14:34 KST - kr1000-forward-label-enrichment-bridge
+
+**Scope**: Added a scored-panel forward-label enrichment bridge so existing
+full-feature panels can activate the P_MB risk sleeve without waiting for a
+complete feature rebuild.
+
+**What landed**:
+- Added `tools/enrich_scored_panel_forward_labels.py`.
+- Added `--enrich-forward-labels` to `tools/run_kr1000_validation_gate.py`.
+- Validation dry-runs now route the enriched scored panel into both
+  `tools/build_pmb_oos_picks.py --panel ...` and broker backtests.
+- `tools/run_kr1000_validation_gate.py --scored-panel ... --build-pmb-oos-picks`
+  now passes the same scored panel to the P_MB OOS builder.
+- Quarterly GitHub diagnostics now enrich the copied feature-store panel before
+  building purged P_MB OOS picks.
+- Updated operations docs with the enrichment bridge commands.
+
+**Operational result**:
+- This separates the current blockers:
+  - label availability can be fixed by enrichment;
+  - 8y+ coverage still requires a scored panel starting no later than
+    `2018-01-01`, preferably `2016-01-01`;
+  - the official target remains CAGR `>= 35%`, MDD `>= -25%`.
+
+**symbols_added**:
+- tools/enrich_scored_panel_forward_labels.py::enrich_panel_with_forward_labels
+- tools/enrich_scored_panel_forward_labels.py::main
+- tests/test_walkforward.py::test_forward_label_enrichment_helper
+
+**symbols_changed**:
+- tools/run_kr1000_validation_gate.parse_args
+- tools/run_kr1000_validation_gate.main
+- .github/workflows/quarterly_backtest.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\enrich_scored_panel_forward_labels.py tools\run_kr1000_validation_gate.py kr_pipeline.py`
+  -> passed.
+- `py -3 tests\test_walkforward.py` -> 12 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --enrich-forward-labels --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_cagr35_forward_enrich`
+  -> planned `enrich_forward_labels`, then `build_pmb_oos_picks`, 12 broker
+  backtests, target CAGR `0.35`, and all backtests include `--scored-panel`.
+
+---
+
 ### 14:30 KST - kr1000-forward-risk-labels-cagr35
 
 **Scope**: Restored the active objective to CAGR `>= 35%` / MDD `>= -25%`
