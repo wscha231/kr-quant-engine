@@ -45,6 +45,8 @@ def parse_args() -> argparse.Namespace:
                    help="Optional scored_panel parquet/csv. Default=latest scored_panel_v0.")
     p.add_argument("--current-holdings", default=None,
                    help="Optional current holdings CSV. Default=state/current_holdings.csv.")
+    p.add_argument("--allow-empty-holdings", action="store_true",
+                   help="Do not block when current holdings file is missing/empty. For research dry-runs only.")
     p.add_argument("--out-dir", default=None,
                    help="Default DATA_ROOT/outputs.")
     p.add_argument("--max-signal-age-days", type=int, default=7,
@@ -71,6 +73,29 @@ def _latest_scored_panel_path() -> Path:
 
 def _yyyymmdd(day: pd.Timestamp) -> str:
     return pd.Timestamp(day).strftime("%Y%m%d")
+
+
+def resolve_current_holdings_path(path: str | Path | None = None) -> Path:
+    return Path(path) if path else PROJECT_ROOT / "state" / "current_holdings.csv"
+
+
+def current_holdings_blockers(
+    path: Path,
+    holdings: pd.DataFrame,
+    *,
+    allow_empty: bool = False,
+) -> list[str]:
+    """Return broker-readiness blockers for actual account holdings evidence."""
+    if allow_empty:
+        return []
+    blockers: list[str] = []
+    if not path.exists():
+        blockers.append("current_holdings_file_missing")
+    if holdings.empty:
+        blockers.append("current_holdings_empty")
+    elif "ticker" not in holdings.columns or holdings["ticker"].astype(str).str.strip().eq("").all():
+        blockers.append("current_holdings_missing_tickers")
+    return blockers
 
 
 def previous_krx_close_date(run_date: pd.Timestamp) -> pd.Timestamp:
@@ -197,7 +222,8 @@ def main() -> int:
         cfg["score_profile"] = embedded_profiles[0]
     latest = compute_leader_scores(latest, cfg)
     target = build_target_portfolio(latest, cfg, as_of_date=signal_date)
-    holdings_raw = load_current_holdings(args.current_holdings)
+    holdings_path = resolve_current_holdings_path(args.current_holdings)
+    holdings_raw = load_current_holdings(holdings_path)
     holdings, price_status = mark_holdings_to_previous_close(holdings_raw, evaluation_date, args.refresh_days)
     plan = generate_trade_plan(holdings, target, latest, cfg, as_of_date=evaluation_date)
     plan["metric_mode"] = "broker_ledger_next_close"
@@ -212,6 +238,13 @@ def main() -> int:
         blockers.append(f"latest_signal_stale_{signal_age}d_gt_{args.max_signal_age_days}d")
     if int(audit.get("summary", {}).get("critical", 0)) > 0:
         blockers.append("data_integrity_audit_has_critical")
+    blockers.extend(
+        current_holdings_blockers(
+            holdings_path,
+            holdings_raw,
+            allow_empty=bool(args.allow_empty_holdings),
+        )
+    )
     missing_prices = [x["ticker"] for x in price_status if x.get("status") != "priced"]
     if missing_prices:
         blockers.append(f"missing_holding_prices_{len(missing_prices)}")
@@ -225,6 +258,9 @@ def main() -> int:
         "latest_signal_date": str(signal_date.date()),
         "signal_age_days": signal_age,
         "scored_panel": str(scored_path),
+        "current_holdings_path": str(holdings_path),
+        "current_holdings_file_exists": holdings_path.exists(),
+        "allow_empty_holdings": bool(args.allow_empty_holdings),
         "current_holding_count": int(len(holdings)),
         "trade_plan_rows": int(len(plan)),
         "action_counts": {str(k): int(v) for k, v in action_counts.items()},

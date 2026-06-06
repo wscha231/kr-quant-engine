@@ -65,6 +65,9 @@ engine-version change or suspected cache corruption requires a from-scratch
 - It may be `blocked` when the scored panel is stale or the data audit finds a
   critical issue. Fix data freshness/PIT leakage first; do not record official
   performance from a blocked run.
+- It is also `blocked` when the actual `state/current_holdings.csv` evidence is
+  missing or empty. Use `--allow-empty-holdings` only for research dry-runs;
+  production readiness must be based on actual account holdings.
 
 `Quarterly Backtest`
 
@@ -229,6 +232,34 @@ This tool disables FDR current-list fallback. If pykrx returns empty for an
 old date, the date is left failed rather than saving current listings into a
 historical PIT cache.
 
+Materialize PIT-safe carried-forward mcap proxy caches when pykrx is source
+blocked:
+
+```bash
+python tools/materialize_mcap_carry_forward_caches.py --start 2016-01-01 --end <latest-trading-date> --dry-run
+python tools/materialize_mcap_carry_forward_caches.py --start 2016-01-01 --end <latest-trading-date>
+```
+
+This writes missing `mktcap_ALL_YYYYMMDD.parquet` files by carrying forward
+only the latest prior PIT snapshot, never a future/current listing. The output
+keeps `mcap_snapshot_source`, `mcap_snapshot_source_date`,
+`mcap_snapshot_true_source_date`, and `mcap_snapshot_carry_days` provenance so
+future diagnostics can separate true pykrx snapshots from PIT-safe proxy
+snapshots.
+
+Repair stale scored-panel DART period metadata:
+
+```bash
+python tools/repair_scored_panel_fundamental_metadata.py --dry-run
+python tools/repair_scored_panel_fundamental_metadata.py
+```
+
+This bridge is for cached scored panels created before
+`kr_features.sanitize_fundamental_period_metadata()` existed. It repairs only
+the audit-trail `fundamentals_period_end` metadata using `rcept_dt` as the PIT
+authority. A full scored-panel rebuild is still preferred before official
+performance evidence.
+
 Materialize PIT-safe avg-value proxy caches:
 
 ```bash
@@ -324,10 +355,14 @@ python tools/run_kr1000_validation_gate.py --component-ab --strategy-ab --dry-ru
 
 ## Current Known Blocker
 
-As of the 2026-06-06 16:41 KST handoff:
+As of the 2026-06-06 18:11 KST handoff:
 
-- The daily-readiness data blocker is cleared: latest `scored_panel_v0` signal
-  is `2026-06-04`, data gate Critical `0`, and daily broker check completed.
+- The data-integrity blocker is cleared: `tools/audit_data_integrity.py --as-of
+  2026-06-04` reports Critical `0`, High `0`, Medium `0`.
+- The daily broker check now correctly blocks when actual holdings evidence is
+  missing. Current local status is `blocked` because
+  `H:\kr_quant_engine\state\current_holdings.csv` is absent, even though the
+  trade-plan artifact is still generated for inspection.
 - The appended `2026-06-04` rows are liquidity-only readiness rows, not
   full-feature backtest rows.
 - Full scored-panel rebuilds now add `forward_min_return_1m` /
@@ -345,10 +380,14 @@ As of the 2026-06-06 16:41 KST handoff:
 - The workflow-audit false positive is fixed: full validation-gate workflows
   count as broker-backtest automation.
 - PIT-safe avg-value proxy caches were materialized for `2025-01-31` through
-  `2026-03-31`; current data audit is Critical `0`, High `3`, Medium `0`.
-- Historical mcap gap backfill is now PIT-safe but currently source-blocked:
-  a `--max-dates 1` smoke returned an empty pykrx result for `2016-07-29`;
-  no FDR fallback or empty cache parquet was saved.
+  `2026-03-31`.
+- Historical mcap pykrx backfill is source-blocked in this environment, so
+  missing month-end mcap caches were materialized with carried-forward PIT
+  proxies. `historical_mcap.parquet` now has `366,782` rows and `137`
+  snapshots.
+- The stale scored-panel DART metadata audit trail was repaired in a separate
+  `_fundmeta_repaired.parquet` panel: `293` period-after-rcept rows and `113`
+  period-after-signal rows were reduced to `0`.
 - The schema-union regression from `eligible_final=NaN` on historical rows is
   fixed and covered by `tests/test_kr1000_leader.py`.
 - Full score fails after proper NAV sizing (`CAGR -5.61%`, MDD `-50.01%` on
@@ -357,9 +396,9 @@ As of the 2026-06-06 16:41 KST handoff:
   broker-ledger challenger, but it is still below the official CAGR target and
   lacks 8y OOS coverage.
 
-The next production step is to resolve the remaining High data-audit findings:
-historical mcap gaps and stale scored-panel fundamentals metadata. Then run a
-full-feature 2018-current backfill, purged P_MB OOS regeneration, and
-component/strategy A/B toward CAGR `>= 30%` under the broker-ledger/MDD gate.
-CAGR `>= 35%` remains the stretch target after the official gate is cleared.
-Avoid more exposure-only experiments until the signal panel is richer.
+The next production step is to provide/sync actual `state/current_holdings.csv`
+for the daily broker readiness path, then run a full-feature 2018-current
+backfill, purged P_MB OOS regeneration, and component/strategy A/B toward CAGR
+`>= 30%` under the broker-ledger/MDD gate. CAGR `>= 35%` remains the stretch
+target after the official gate is cleared. Avoid more exposure-only experiments
+until the signal panel is richer.

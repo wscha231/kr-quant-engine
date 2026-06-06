@@ -224,7 +224,10 @@ def build_historical_mcap_panel(save: bool = True) -> pd.DataFrame:
         df["ticker"] = df["ticker"].astype(str).str.zfill(6)
         df["snapshot_date"] = snap_dt
         keep = [c for c in ("ticker", "snapshot_date", "market",
-                             "market_cap", "listed_shares", "volume", "value")
+                             "market_cap", "listed_shares", "volume", "value",
+                             "mcap_snapshot_source", "mcap_snapshot_source_date",
+                             "mcap_snapshot_true_source_date",
+                             "mcap_snapshot_carry_days")
                 if c in df.columns]
         rows.append(df[keep])
 

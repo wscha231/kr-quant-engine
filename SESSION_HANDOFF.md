@@ -1,15 +1,15 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-06 17:32 KST
+## Current Status - 2026-06-06 18:11 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest functional commit: `1c33aca`.
-Latest GitHub Smoke on `1c33aca` succeeded:
-https://github.com/wscha231/kr-quant-engine/actions/runs/27057463059
+Latest pushed commit before this handoff: `c01b843`.
+Latest GitHub Smoke on `c01b843` succeeded:
+https://github.com/wscha231/kr-quant-engine/actions/runs/27057599166
 
-Draft PR body has been refreshed for `1c33aca`.
+Draft PR body was last refreshed for `c01b843`.
 
 The active user target has been realigned to:
 
@@ -25,10 +25,54 @@ CAGR `>= 35%` is now a stretch target only, not the official pass gate.
 
 ## Current Local Change Set
 
-No project changes are currently uncommitted except this unrelated dirty file,
-which must stay unstaged:
+Latest data-gate-clear change set after `c01b843`:
+
+- `tools/materialize_mcap_carry_forward_caches.py` was added.
+- `tools/repair_scored_panel_fundamental_metadata.py` was added.
+- `tests/test_kr1000_data_repair_tools.py` was added.
+- `kr_pykrx_client.fetch_daily_ohlcv_market()` no longer references the
+  undefined `allow_fdr_fallback` name.
+- `kr_pit_universe.build_historical_mcap_panel()` preserves mcap
+  carry-forward provenance columns.
+- `tools/run_kr1000_daily_broker_check.py` now blocks production readiness
+  when actual holdings evidence is missing or empty. `--allow-empty-holdings`
+  exists for research dry-runs only.
+- `docs/KR1000_GITHUB_OPERATIONS.md`, `CHANGELOG.md`, and this handoff were
+  updated for the new data repair/readiness behavior.
+
+Do not stage the unrelated dirty file:
 
 - `research/10_theme_lifecycle/leader_themes_per_quarter.csv`
+
+## Data Gate Result
+
+Data-integrity blockers are cleared for the latest available local signal date:
+
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04`
+  -> Critical `0`, High `0`, Medium `0`.
+- `tools/materialize_mcap_carry_forward_caches.py --start 2016-01-01 --end 2026-06-04`
+  wrote `28` PIT-safe mcap carry-forward proxy caches, skipped `97`, failed
+  `0`, and rebuilt `historical_mcap.parquet` to `366,782` rows / `137`
+  snapshots.
+- `tools/repair_scored_panel_fundamental_metadata.py` wrote:
+  `feature_store/scored_panel_v0_2019-01-01_2026-06-04_2026-06-05-p1-pit-data-audit_forward_labels_fundmeta_repaired.parquet`
+  and reduced stale DART metadata audit counts from period-after-rcept `293`
+  and period-after-signal `113` to `0`.
+- pykrx historical mcap backfill remains source-blocked in this environment:
+  all `28` missing month-end fetches returned empty, so the mcap repair used
+  prior PIT snapshots only and kept provenance in each proxy file.
+
+## Daily Broker Readiness
+
+Daily broker readiness is now correctly tied to actual holdings evidence:
+
+- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04`
+  -> `blocked`.
+- Blockers: `current_holdings_file_missing`, `current_holdings_empty`.
+- Data audit inside the daily check is clean: Critical `0`, High `0`,
+  Medium `0`.
+- The tool still writes an inspection trade plan, but it must not be treated as
+  production-ready until `state/current_holdings.csv` is present and non-empty.
 
 Latest committed functional change set in `1c33aca`:
 
@@ -101,13 +145,20 @@ Completed on 2026-06-06 16:41 KST:
 - `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_pit_safety`
   -> planned 14 broker backtests, target CAGR `0.30`.
 
-Data-audit high findings still need follow-up before official 8y performance:
+Completed on 2026-06-06 18:11 KST:
 
-- mcap cache has month-level gaps >45 days.
-- 113 scored rows have `fundamentals_period_end` after `rebalance_date`.
-- 293 scored rows have `fundamentals_period_end` after `fundamentals_rcept_dt`;
-  audit note says this is likely non-December fiscal-year metadata mapped as
-  calendar-year metadata, while `rcept_dt` PIT filtering is checked separately.
+- `py -3 -m py_compile kr_pykrx_client.py kr_pit_universe.py tools\materialize_mcap_carry_forward_caches.py tools\repair_scored_panel_fundamental_metadata.py tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py`
+  -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 4 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_dart_pit.py` -> 17 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 8 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04`
+  -> Critical `0`, High `0`, Medium `0`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_data_gate_clear`
+  -> planned 14 broker backtests, target CAGR `0.30`.
+- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04`
+  -> blocked on `current_holdings_file_missing` and `current_holdings_empty`.
 
 Backfill smoke:
 
@@ -134,13 +185,15 @@ Result: CAGR `28.15%`, MDD `-22.18%`, Sharpe `1.29`, KOSPI200 excess
 
 ## Next Production Steps
 
-1. Resolve remaining data-audit High items: mcap cache gaps and stale
-   scored-panel fundamentals metadata.
-2. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
+1. If this change set has not yet been pushed, commit/push it and refresh the
+   draft PR body.
+2. Provide or sync actual `state/current_holdings.csv`; rerun the daily broker
+   check and require status `completed`.
+3. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
    `2016-01-01`.
-3. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
-4. Run official validation with `--component-ab --strategy-ab`.
-5. If CAGR remains below `30%`, improve signal quality in this order:
+4. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
+5. Run official validation with `--component-ab --strategy-ab`.
+6. If CAGR remains below `30%`, improve signal quality in this order:
    `pmb + RS + flow + technical`, sector/theme RS exits, then macro regime
    sleeve scaling. Avoid exposure-only experiments until the 8y signal
    coverage problem is solved.

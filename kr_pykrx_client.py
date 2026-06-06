@@ -212,8 +212,7 @@ def fetch_daily_ohlcv_market(date: str, market: str = "ALL", refresh_days: int =
     out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     if not out.empty:
         out["date"] = pd.Timestamp(date).normalize()
-    if not out.empty or allow_fdr_fallback:
-        _save_cache(out, cache)
+    _save_cache(out, cache)
     log(f"[pykrx_client] fetch_daily_ohlcv_market({date}, {market}) -> {len(out)} rows")
     return out
 

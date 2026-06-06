@@ -6,6 +6,75 @@
 
 ## 2026-06-06
 
+### 18:11 KST - kr1000-data-gate-clear-and-holdings-readiness-guard
+
+**Scope**: Cleared the remaining data-integrity High findings and hardened the
+daily broker check so production readiness requires actual holdings evidence.
+
+**What landed**:
+- Added `tools/materialize_mcap_carry_forward_caches.py`.
+- Added `tools/repair_scored_panel_fundamental_metadata.py`.
+- Added `tests/test_kr1000_data_repair_tools.py`.
+- Preserved mcap carry-forward provenance in `kr_pit_universe.build_historical_mcap_panel()`.
+- Fixed `kr_pykrx_client.fetch_daily_ohlcv_market()` cache write path so it no
+  longer references an undefined `allow_fdr_fallback` name.
+- Added `--allow-empty-holdings` to `tools/run_kr1000_daily_broker_check.py`
+  for research dry-runs only; production status now blocks when
+  `state/current_holdings.csv` is missing or empty.
+
+**Operational result**:
+- pykrx historical mcap backfill was source-blocked and returned empty for all
+  28 missing month-end dates, so missing mcap caches were filled with
+  carried-forward PIT snapshots only.
+- `tools/materialize_mcap_carry_forward_caches.py --start 2016-01-01 --end 2026-06-04`
+  wrote `28` mcap proxy caches, skipped `97`, failed `0`, and rebuilt
+  `historical_mcap.parquet` to `366,782` rows / `137` snapshots.
+- `tools/repair_scored_panel_fundamental_metadata.py` repaired `293`
+  stale DART period metadata rows; period-after-rcept and period-after-signal
+  audit counts are both `0`.
+- `tools/audit_data_integrity.py --as-of 2026-06-04` now reports Critical `0`,
+  High `0`, Medium `0`.
+- `tools/run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04` now
+  correctly returns `blocked` because actual `state/current_holdings.csv` is
+  absent, while still writing an inspection trade plan.
+
+**symbols_added**:
+- tools/materialize_mcap_carry_forward_caches.py
+- tools/repair_scored_panel_fundamental_metadata.py
+- tests/test_kr1000_data_repair_tools.py
+- tools.run_kr1000_daily_broker_check.resolve_current_holdings_path
+- tools.run_kr1000_daily_broker_check.current_holdings_blockers
+
+**symbols_changed**:
+- kr_pit_universe.build_historical_mcap_panel
+- kr_pykrx_client.fetch_daily_ohlcv_market
+- tools.run_kr1000_daily_broker_check.parse_args
+- tools.run_kr1000_daily_broker_check.main
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- `tools/run_kr1000_daily_broker_check.py` now exits blocked when actual
+  current holdings evidence is missing or empty. Use `--allow-empty-holdings`
+  only for non-production research dry-runs.
+
+**Validation**:
+- `py -3 -m py_compile kr_pykrx_client.py kr_pit_universe.py tools\materialize_mcap_carry_forward_caches.py tools\repair_scored_panel_fundamental_metadata.py tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py`
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 4 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_dart_pit.py` -> 17 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 8 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`,
+  High `0`, Medium `0`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_data_gate_clear`
+  -> planned 14 broker backtests, target CAGR `0.30`.
+- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04`
+  -> blocked on `current_holdings_file_missing` and `current_holdings_empty`.
+
+---
+
 ### 17:34 KST - kr1000-handoff-after-avg-value-proxy-push
 
 **Scope**: Refreshed the single-inbox handoff after pushing the PIT-safe
