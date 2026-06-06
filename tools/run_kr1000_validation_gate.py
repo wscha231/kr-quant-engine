@@ -61,10 +61,31 @@ KR1000_STRATEGY_AB_PRESETS = {
         "portfolio_dd_thresholds": [-0.10, -0.18, -0.24],
         "portfolio_dd_scales": [0.80, 0.60, 0.35],
     },
+    "pmb_pre_entry_defensive_mdd_gate": {
+        "score_profile": "pmb_pre_entry_defensive",
+        "top_holdings": 15,
+        "buy_rank_threshold": 15,
+        "hold_rank_threshold": 30,
+        "gross_exposure": 1.00,
+        "hard_stop_loss_pct": 0.10,
+        "portfolio_dd_ladder": True,
+        "portfolio_dd_thresholds": [-0.10, -0.18, -0.24],
+        "portfolio_dd_scales": [0.80, 0.60, 0.35],
+    },
 }
 
 PRODUCTION_GATE_STRATEGY_PRESET = "pmb_defensive_mdd_gate"
-PMB_SCORE_PROFILES = {"pmb_pre_surge", "pmb_mid_rank_7_23", "hybrid_pmb_rs"}
+PMB_SCORE_PROFILES = {
+    "pmb_pre_surge",
+    "pmb_pre_entry",
+    "pmb_pre_entry_defensive",
+    "pmb_pre_entry_blend",
+    "pmb_pre_entry_blend_regime",
+    "pmb_mid_rank_7_23",
+    "pmb_mid_rank_regime",
+    "pmb_mid_tech_regime",
+    "hybrid_pmb_rs",
+}
 DATA_GATE_BLOCKING_HIGH_MESSAGES = {
     "mktcap cache has month-level gaps >45 days": "data_integrity_mktcap_cache_gap",
     "avg_trading_value cache has gaps >45 days": "data_integrity_avg_value_cache_gap",

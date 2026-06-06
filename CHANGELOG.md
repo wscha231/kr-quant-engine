@@ -6,6 +6,85 @@
 
 ## 2026-06-07
 
+### 08:30 KST - pmb-pre-entry-risk-rerank-challengers
+
+**Scope**: Preserved P_MB OOS risk/pre-entry columns in the broker path,
+blocked sparse OOS merge leakage fallback, added pre-entry/risk challenger
+profiles, and added a PIT realized-history reranking sidecar. The experiments
+improved some MDD diagnostics but still failed the CAGR target.
+
+**What landed**:
+- `tools.run_kr1000_backtest.merge_pmb_oos_predictions` now carries
+  `p_pre_entry`, `p_continuation`, `p_risk`, `p_combined`, and
+  `pmb_oos_fold_id` from sparse P_MB OOS picks.
+- Sparse OOS non-pick rows are now explicit zeroes for P_MB generated columns;
+  the broker path no longer falls back to panel/live classifier values when a
+  PIT OOS picks file is supplied.
+- Added challenger score profiles:
+  `pmb_pre_entry`, `pmb_pre_entry_defensive`,
+  `pmb_pre_entry_blend`, and `pmb_pre_entry_blend_regime`.
+- Added `tools/build_pmb_realized_rerank_picks.py`, which trains a
+  pre-embargo realized-return/loss reranker from prior P_MB OOS rows and writes
+  sparse picks compatible with the broker backtester.
+- Added `tests/test_pmb_realized_rerank.py` and wired it into GitHub Smoke.
+- Extended `tools/analyze_pmb_oos_quality.py` factor/filter output to include
+  P_MB sleeve probabilities and pre-entry defensive filters.
+
+**Diagnostic result**:
+- Realized diagnostic now includes P_MB sleeve columns. Key filter:
+  `pre_entry_defensive_high_bench_3m_pos` mean `1.937%`, median `-0.630%`,
+  loss `< -10%` rate `16.30%`, average min return `-8.01%`.
+- Broker-ledger 2018-01-01 to 2026-06-04 still fails:
+  - `pmb_pre_surge` strict OOS top20: CAGR `3.99%`, MDD `-35.87%`.
+  - `pmb_pre_entry` top20: CAGR `3.37%`, MDD `-29.00%`.
+  - `pmb_pre_entry_defensive` top15 + DD ladder: CAGR `3.38%`, MDD
+    `-26.29%`.
+  - `pmb_pre_entry_blend_regime` top15: CAGR `1.64%`, MDD `-23.80%`.
+  - realized-history rerank top20: CAGR `2.30%`, MDD `-39.30%`.
+- Conclusion: pre-entry/risk filters can approach the MDD gate, but they do not
+  restore CAGR. Simple realized-history linear reranking is not enough.
+
+**symbols_added**:
+- tools/build_pmb_realized_rerank_picks.py
+- tools.build_pmb_realized_rerank_picks.build_realized_rerank_picks
+- kr1000_leader score profile `pmb_pre_entry`
+- kr1000_leader score profile `pmb_pre_entry_defensive`
+- kr1000_leader score profile `pmb_pre_entry_blend`
+- kr1000_leader score profile `pmb_pre_entry_blend_regime`
+- tests/test_pmb_realized_rerank.py
+- tests/test_pmb_realized_rerank.py::test_reranker_uses_pre_embargo_rows
+- tests/test_pmb_realized_rerank.py::test_reranker_fallback_before_history
+
+**symbols_changed**:
+- tools.run_kr1000_backtest.merge_pmb_oos_predictions
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES
+- kr1000_leader.KR1000_AB_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
+- tools.run_kr1000_validation_gate.PMB_SCORE_PROFILES
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS
+- tools.analyze_pmb_oos_quality._factor_correlations
+- tools.analyze_pmb_oos_quality._filter_summary
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+- .github/workflows/smoke_test.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none for production commands, but official P_MB OOS
+backtests with a supplied sparse picks file now obey the documented behavior:
+non-picked rows receive zero generated P_MB probability instead of inheriting
+any panel-side classifier value.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_backtest.py tools\run_kr1000_validation_gate.py tools\analyze_pmb_oos_quality.py tools\build_pmb_realized_rerank_picks.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\test_pmb_oos_quality.py` -> 3 passed, 0 failed.
+- `py -3 tests\test_pmb_realized_rerank.py` -> 2 passed, 0 failed.
+- `py -3 tools\build_pmb_realized_rerank_picks.py --pmb-rows outputs\pmb_oos_quality_realized_preentry_2018_20260604\pmb_rows.parquet --target-start 2018-01-01 --target-end 2026-06-04 --out outputs\p_mb_oos_picks_realized_rerank_2018_20260604.csv --k-per-month 30 --embargo-months 3 --min-train-rows 240 --risk-penalty 0.12 --fail-on-coverage-gap` -> passed.
+
 ### 08:05 KST - pmb-oos-realized-return-diagnostics
 
 **Scope**: Extended the P_MB OOS quality audit to use broker-like realized

@@ -136,6 +136,10 @@ def test_planned_component_ab_jobs():
         "rs_flow_technical",
         "legacy_p1_blended",
         "pmb_pre_surge",
+        "pmb_pre_entry",
+        "pmb_pre_entry_defensive",
+        "pmb_pre_entry_blend",
+        "pmb_pre_entry_blend_regime",
         "pmb_mid_rank_7_23",
         "pmb_mid_rank_regime",
         "pmb_mid_tech_regime",
@@ -151,6 +155,11 @@ def test_planned_component_ab_jobs():
     assert mid_rank_jobs[0]["profile"] == "pmb_mid_rank_7_23"
     assert "--gross-exposure" in mid_rank_jobs[0]["cmd"]
     assert "1.0" in mid_rank_jobs[0]["cmd"]
+    pre_entry_jobs = [j for j in official if j.get("strategy_preset") == "pmb_pre_entry_defensive_mdd_gate"]
+    assert len(pre_entry_jobs) == 1
+    assert pre_entry_jobs[0]["profile"] == "pmb_pre_entry_defensive"
+    assert "--top-holdings" in pre_entry_jobs[0]["cmd"]
+    assert "15" in pre_entry_jobs[0]["cmd"]
     assert {j["profile"] for j in stress} == {"full"}
     assert all("--score-profile" in j["cmd"] for j in jobs)
     assert all("--pmb-oos-picks" in j["cmd"] for j in jobs)
@@ -200,7 +209,8 @@ def test_merge_pmb_oos_predictions():
     panel = pd.DataFrame({
         "rebalance_date": pd.to_datetime(["2024-01-31", "2024-01-31"]),
         "ticker": ["000001", "2"],
-        "p_pre_surge": [0.0, 0.0],
+        "p_pre_surge": [0.99, 0.0],
+        "p_pre_entry": [0.99, 0.0],
     })
     with tempfile.TemporaryDirectory() as tmp:
         picks_path = Path(tmp) / "picks.csv"
@@ -208,13 +218,24 @@ def test_merge_pmb_oos_predictions():
             "rebalance_date": ["2024-01-31"],
             "ticker": ["000002"],
             "p_pre_surge": [0.77],
+            "p_pre_entry": [0.88],
+            "p_continuation": [0.11],
+            "p_risk": [0.22],
+            "p_combined": [0.55],
+            "fold_id": [4],
             "rank_in_month": [3],
         }).to_csv(picks_path, index=False)
         out = merge_pmb_oos_predictions(panel, picks_path)
     by_ticker = out.set_index("ticker")
     assert by_ticker.loc["000002", "p_pre_surge"] == 0.77
+    assert by_ticker.loc["000002", "p_pre_entry"] == 0.88
+    assert by_ticker.loc["000002", "p_continuation"] == 0.11
+    assert by_ticker.loc["000002", "p_risk"] == 0.22
+    assert by_ticker.loc["000002", "p_combined"] == 0.55
     assert by_ticker.loc["000002", "pmb_oos_rank"] == 3
+    assert by_ticker.loc["000002", "pmb_oos_fold_id"] == 4
     assert by_ticker.loc["000001", "p_pre_surge"] == 0.0
+    assert by_ticker.loc["000001", "p_pre_entry"] == 0.0
 
 
 @_test("scored-panel window gate fails on missing monthly signals")

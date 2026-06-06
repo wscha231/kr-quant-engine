@@ -122,6 +122,15 @@ def _default_pmb_oos_picks_path() -> Path:
     return PROJECT_ROOT / "research" / "06_walkforward_baselines" / "p_mb_v1_oos_picks.csv"
 
 
+PMB_OOS_NUMERIC_COLUMNS = (
+    "p_pre_surge",
+    "p_pre_entry",
+    "p_continuation",
+    "p_risk",
+    "p_combined",
+)
+
+
 def _yyyymmdd(day: pd.Timestamp) -> str:
     return pd.Timestamp(day).strftime("%Y%m%d")
 
@@ -253,8 +262,9 @@ def merge_pmb_oos_predictions(
         return panel.copy()
     path = Path(picks_path) if picks_path else _default_pmb_oos_picks_path()
     out = panel.copy()
-    if "p_pre_surge" not in out.columns:
-        out["p_pre_surge"] = 0.0
+    for col in PMB_OOS_NUMERIC_COLUMNS:
+        if col not in out.columns:
+            out[col] = 0.0
     if not path.exists():
         out["pmb_oos_source"] = ""
         return out
@@ -268,11 +278,16 @@ def merge_pmb_oos_predictions(
     p = picks.copy()
     p["rebalance_date"] = pd.to_datetime(p["rebalance_date"], errors="coerce").dt.normalize()
     p["ticker"] = _normalise_ticker(p["ticker"])
-    p["p_pre_surge"] = pd.to_numeric(p["p_pre_surge"], errors="coerce").fillna(0.0)
-    keep = ["rebalance_date", "ticker", "p_pre_surge"]
+    for col in PMB_OOS_NUMERIC_COLUMNS:
+        if col in p.columns:
+            p[col] = pd.to_numeric(p[col], errors="coerce").fillna(0.0)
+    keep = ["rebalance_date", "ticker"] + [c for c in PMB_OOS_NUMERIC_COLUMNS if c in p.columns]
     if "rank_in_month" in p.columns:
         p["pmb_oos_rank"] = pd.to_numeric(p["rank_in_month"], errors="coerce")
         keep.append("pmb_oos_rank")
+    if "fold_id" in p.columns:
+        p["pmb_oos_fold_id"] = pd.to_numeric(p["fold_id"], errors="coerce")
+        keep.append("pmb_oos_fold_id")
     p = p[keep].dropna(subset=["rebalance_date", "ticker"]).drop_duplicates(
         ["rebalance_date", "ticker"],
         keep="first",
@@ -280,16 +295,21 @@ def merge_pmb_oos_predictions(
 
     out["ticker"] = _normalise_ticker(out["ticker"])
     out["rebalance_date"] = pd.to_datetime(out["rebalance_date"], errors="coerce").dt.normalize()
-    out = out.drop(columns=[c for c in ("pmb_oos_rank",) if c in out.columns])
+    out = out.drop(columns=[c for c in ("pmb_oos_rank", "pmb_oos_fold_id") if c in out.columns])
     out = out.merge(p, on=["rebalance_date", "ticker"], how="left", suffixes=("", "_oos"))
-    if "p_pre_surge_oos" in out.columns:
-        out["p_pre_surge"] = pd.to_numeric(out["p_pre_surge_oos"], errors="coerce").fillna(
-            pd.to_numeric(out["p_pre_surge"], errors="coerce").fillna(0.0)
-        )
-        out = out.drop(columns=["p_pre_surge_oos"])
-    out["p_pre_surge"] = pd.to_numeric(out["p_pre_surge"], errors="coerce").fillna(0.0)
+    for col in PMB_OOS_NUMERIC_COLUMNS:
+        oos_col = f"{col}_oos"
+        if oos_col in out.columns:
+            # OOS files are sparse: non-selected rows must be explicit zeroes.
+            # Falling back to a panel's generated/live classifier columns would
+            # leak non-OOS scores into official broker backtests.
+            out[col] = pd.to_numeric(out[oos_col], errors="coerce").fillna(0.0)
+            out = out.drop(columns=[oos_col])
+        out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.0)
     if "pmb_oos_rank" not in out.columns:
         out["pmb_oos_rank"] = np.nan
+    if "pmb_oos_fold_id" not in out.columns:
+        out["pmb_oos_fold_id"] = np.nan
     out["pmb_oos_source"] = str(path)
     return out
 

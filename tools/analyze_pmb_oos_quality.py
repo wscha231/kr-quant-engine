@@ -114,6 +114,10 @@ def _factor_correlations(df: pd.DataFrame, return_col: str = "analysis_return") 
         return_col = "forward_return_1m"
     target = pd.to_numeric(df.get(return_col), errors="coerce")
     cols = [
+        "p_pre_entry",
+        "p_continuation",
+        "p_risk",
+        "p_combined",
         "p_pre_surge",
         "pmb_oos_rank",
         "rs_1m",
@@ -158,12 +162,18 @@ def _filter_summary(
         return pd.to_numeric(df[col], errors="coerce")
 
     rank = num("pmb_oos_rank")
+    pre_entry = num("p_pre_entry", 0.0).fillna(0.0)
+    continuation = num("p_continuation", 0.0).fillna(0.0).clip(lower=0.0, upper=0.95)
+    risk = num("p_risk", 0.0).fillna(0.0).clip(lower=0.0, upper=0.95)
+    defensive_pre_entry = pre_entry * (1.0 - continuation) * (1.0 - risk)
     rs3 = num("rs_3m", 0.0).fillna(0.0)
     tech = num("technical_score", 0.0).fillna(0.0)
     bench3 = num("bench_ret_3m", 0.0).fillna(0.0)
     trend_pass = num("trend_template_pass", 0.0).fillna(0.0) > 0
     mcap = num("market_cap")
     large = mcap >= mcap.median()
+    pre_hi = pre_entry >= pre_entry[pre_entry > 0].median()
+    def_hi = defensive_pre_entry >= defensive_pre_entry[defensive_pre_entry > 0].median()
     filters = {
         "all_pmb_oos": pd.Series(True, index=df.index),
         "rank_7_23": rank.between(7, 23, inclusive="both"),
@@ -175,6 +185,11 @@ def _filter_summary(
         "trend_template_pass": trend_pass,
         "largecap_half": large.fillna(False),
         "rank_7_23_largecap_half": rank.between(7, 23, inclusive="both") & large.fillna(False),
+        "pre_entry_high": pre_hi.fillna(False),
+        "pre_entry_high_largecap_half": pre_hi.fillna(False) & large.fillna(False),
+        "pre_entry_defensive_high": def_hi.fillna(False),
+        "pre_entry_defensive_high_bench_3m_pos": def_hi.fillna(False) & (bench3 > 0),
+        "pre_entry_defensive_high_large_bench_3m_pos": def_hi.fillna(False) & large.fillna(False) & (bench3 > 0),
     }
     rows = []
     for name, mask in filters.items():

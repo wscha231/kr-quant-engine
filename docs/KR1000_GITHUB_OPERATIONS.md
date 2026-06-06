@@ -47,6 +47,22 @@ return correlation was `-0.0076`. The new `pmb_mid_rank_regime` and
 `pmb_mid_tech_regime` challengers are diagnostic profiles only; both still
 fail the official 8y broker-ledger gate.
 
+The follow-up pre-entry/risk pass preserved P_MB OOS sleeve columns in the
+broker path and blocked sparse OOS merge fallback leakage. With a supplied PIT
+OOS picks file, non-picked rows now receive zero P_MB generated probabilities
+instead of inheriting any panel-side live/classifier value. This makes official
+P_MB broker diagnostics stricter and closer to the documented OOS protocol.
+
+The same pass added `pmb_pre_entry`, `pmb_pre_entry_defensive`,
+`pmb_pre_entry_blend`, and `pmb_pre_entry_blend_regime`. These are still
+challengers, not production. The best MDD defensive result was
+`pmb_pre_entry_blend_regime` top15 with CAGR `1.64%`, MDD `-23.80%`; it passes
+the MDD threshold but fails CAGR/excess return badly. A PIT realized-history
+reranker sidecar (`tools/build_pmb_realized_rerank_picks.py`) also failed:
+reranked top20 produced CAGR `2.30%`, MDD `-39.30%`. The current evidence says
+simple P_MB pre-entry filtering and linear realized-history reranking are not
+enough to reach the target.
+
 ## GitHub Workflows
 
 Production automation is split into three lanes:
@@ -437,6 +453,7 @@ python tests/test_kr1000_data_store.py
 python tests/test_kr1000_leader.py
 python tests/test_kr1000_validation_gate.py
 python tests/test_pmb_oos_quality.py
+python tests/test_pmb_realized_rerank.py
 python tools/run_kr1000_validation_gate.py --component-ab --strategy-ab --dry-run
 ```
 
@@ -497,10 +514,16 @@ As of the 2026-06-07 08:05 KST handoff:
   `2,438/2,708` rows have realized observations, all-P_MB mean return is only
   `0.758%`, median is `-1.606%`, and the best rank-window broker grid tested
   so far (`r7_23_antirs`, top15) produced CAGR `6.235%` with MDD `-34.18%`.
+- Pre-entry/risk filters improve drawdown but not return. The best MDD
+  challenger from the 2026-06-07 pass, `pmb_pre_entry_blend_regime` top15,
+  produced CAGR `1.64%`, MDD `-23.80%`, excess CAGR `-16.93%`.
+- PIT realized-history reranking did not fix the signal. The reranked top20
+  broker run produced CAGR `2.30%`, MDD `-39.30%`.
 
 The next production step is to provide/sync actual
 `DATA_ROOT/state/current_holdings.csv` for the daily broker readiness path, then
-improve the P_MB label/ranking and drawdown-risk model before another full
-broker-ledger optimization pass. CAGR `>= 35%` remains the stretch target after
-the official `>= 30%` gate is cleared. Avoid more exposure-only experiments
-until the realized signal-quality audit improves.
+rebuild the P_MB label design itself. In particular, inspect fold-level false
+positives and train a loss-aware model from a broader universe, not only from
+already selected P_MB rows. CAGR `>= 35%` remains the stretch target after the
+official `>= 30%` gate is cleared. Avoid more exposure-only experiments until
+the realized signal-quality audit improves.

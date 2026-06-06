@@ -94,7 +94,12 @@ def test_score_profiles():
         "p0_momentum_score": [0.2, 0.8],
         "p1_blended_score": [0.1, 0.9],
         "p_pre_surge": [0.7, 0.2],
+        "p_pre_entry": [0.9, 0.1],
+        "p_continuation": [0.1, 0.8],
+        "p_risk": [0.0, 0.2],
         "pmb_oos_rank": [8, 1],
+        "bench_ret_3m": [0.05, 0.05],
+        "market_cap": [1000.0, 900.0],
     })
     rs_only = apply_kr1000_score_profile(candidates, "rs_only")
     assert rs_only["score_profile"].eq("rs_only").all()
@@ -115,6 +120,29 @@ def test_score_profiles():
 
     pmb = apply_kr1000_score_profile(candidates, "pmb_pre_surge")
     assert pmb.loc[0, "leader_score"] > pmb.loc[1, "leader_score"]
+
+    pre_entry = apply_kr1000_score_profile(candidates, "pmb_pre_entry")
+    assert pre_entry.loc[0, "leader_score"] > pre_entry.loc[1, "leader_score"]
+
+    pre_def = apply_kr1000_score_profile(candidates, "pmb_pre_entry_defensive")
+    assert pre_def.loc[0, "leader_score"] > 0
+    assert pre_def.loc[1, "leader_score"] == 0
+    assert bool(pre_def.loc[0, "score_profile_eligible_flag"]) is True
+    assert bool(pre_def.loc[1, "score_profile_eligible_flag"]) is False
+
+    pre_blend = apply_kr1000_score_profile(
+        candidates.assign(p_combined=[0.7, 0.2]),
+        "pmb_pre_entry_blend",
+    )
+    assert pre_blend.loc[0, "leader_score"] > pre_blend.loc[1, "leader_score"]
+
+    pre_blend_regime = apply_kr1000_score_profile(
+        candidates.assign(p_combined=[0.7, 0.2], bench_ret_3m=[0.05, -0.05]),
+        "pmb_pre_entry_blend_regime",
+    )
+    assert pre_blend_regime.loc[0, "leader_score"] > 0
+    assert pre_blend_regime.loc[1, "leader_score"] == 0
+    assert bool(pre_blend_regime.loc[1, "score_profile_eligible_flag"]) is False
 
     mid_rank = apply_kr1000_score_profile(candidates, "pmb_mid_rank_7_23")
     assert mid_rank.loc[0, "leader_score"] > 0
