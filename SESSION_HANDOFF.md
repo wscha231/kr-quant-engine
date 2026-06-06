@@ -1,20 +1,24 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-06 14:05 KST
+## Current Status - 2026-06-06 14:30 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest pushed commit before this pass: `3743b8f`.
-Latest GitHub Smoke on `3743b8f` succeeded:
-https://github.com/wscha231/kr-quant-engine/actions/runs/27051203839
+Latest pushed commit: `df28efb`.
+Latest GitHub Smoke on `df28efb` succeeded:
+https://github.com/wscha231/kr-quant-engine/actions/runs/27053488434
 
-The official user target is now:
+The active user target is:
 
-- 8y+ broker-ledger CAGR `>= 30%`, MDD `>= -25%`, KOSPI200 excess CAGR `> 0`,
-  Sharpe `> 1.0`, IR `> 0.5`.
-- `35%` CAGR is a stretch target, not the current official gate.
-- Official metrics must be `broker_ledger_next_close` with next-close fills.
+- 8y+ broker-ledger CAGR `>= 35%`
+- MDD `>= -25%`
+- KOSPI200 excess CAGR `> 0`
+- Sharpe `> 1.0`
+- IR `> 0.5`
+- daily account/broker readiness based on actual holdings
+
+Official metrics must be `broker_ledger_next_close` with next-close fills.
 
 Current best broker-ledger challenger remains the available 2020-2024 P_MB OOS
 window with `pmb_pre_surge`, gross `0.70`, daily hard-exit enabled, and
@@ -26,31 +30,26 @@ portfolio DD ladder:
 - IR `1.00`
 - KOSPI200 excess `+23.12%`
 
-This is still not an official pass because the P_MB OOS picks cover only
-`2020-01-31` to `2024-12-30` and do not satisfy the 8y coverage gate.
+This is not an official pass because CAGR is below `35%` and P_MB OOS picks
+cover only `2020-01-31` to `2024-12-30`.
 
-## What Changed In This Pass
+## What Changed After df28efb
 
-Re-centered the validation system around leakage-safe 8y P_MB evidence:
+Forward risk labels are now being added to the full scored-panel path:
 
-- `kr1000_leader_alpha_cfg()` now uses `target_cagr_gate = 0.30`.
-- Added `tools/build_pmb_oos_picks.py` as the official purged 3-sleeve P_MB OOS
-  picks builder.
-- P_MB OOS feature selection excludes forward/future/target/generated columns.
-- `run_classifier_retrain.py --purged --embargo-months 9` now actually passes
-  purged split controls into `train_entry_classifier()`.
-- Removed fold test-set early stopping from `train_entry_classifier()` so the
-  test fold is not used for training control.
-- `run_kr1000_validation_gate.py` now audits:
-  - scored-panel official start coverage;
-  - P_MB OOS 8y coverage;
-  - P_MB coverage as a required gate for P_MB/hybrid/production jobs.
-- Cache-preserving scored-panel rebuild now widens the start to `2018-01-01`
-  when the latest compatible cache starts later.
-- `pmb_defensive_mdd_gate` is now the official production gate when
-  `--strategy-ab` is run. `full` remains a baseline gate.
-- GitHub full validation and quarterly backtest now build/use purged P_MB OOS
-  picks instead of silently relying on the legacy research CSV.
+- `kr_config.PHASE4_PMB_TARGET_COLUMNS` adds:
+  - `forward_return_1m`
+  - `forward_min_return_1m`
+- `kr_pipeline.add_forward_return_labels()` computes 1-month forward return
+  and intra-horizon minimum return from daily closes.
+- `kr_pipeline.build_scored_panel_v0()` applies these labels before saving the
+  scored panel when `forward_label_enabled=True`.
+- The labels are targets, not features. `tools/build_pmb_oos_picks.py` already
+  excludes `forward_` prefixed columns from classifier feature selection.
+- `kr1000_leader_alpha_cfg()` target CAGR is back to `0.35`.
+
+This should allow the purged 3-sleeve P_MB risk model to stop falling back to
+all-zero `is_risk` after the scored panel is rebuilt.
 
 ## Data / Performance Facts
 
@@ -66,7 +65,9 @@ Re-centered the validation system around leakage-safe 8y P_MB evidence:
 - Full score 2019-2025 broker-ledger run remains poor:
   CAGR `-5.61%`, MDD `-50.01%`.
 
-## Validation To Run Before Commit
+## Latest Validation
+
+Validation on `df28efb` before the current forward-label edits:
 
 - `py -3 -m py_compile tools\build_pmb_oos_picks.py tools\run_kr1000_validation_gate.py tools\run_classifier_retrain.py kr_multibagger_classifier.py`
   -> passed.
@@ -74,16 +75,19 @@ Re-centered the validation system around leakage-safe 8y P_MB evidence:
 - `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
 - `py -3 tests\test_kr1000_leader.py` -> 11 passed, 0 failed.
 - `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
-- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_pmb_oos`
-  -> planned `build_pmb_oos_picks`, 12 broker backtests, target CAGR `0.30`,
-  all backtests include `--pmb-oos-picks`.
-- `py -3 tools\build_pmb_oos_picks.py --target-start 2018-01-01 --target-end 2026-06-04 --iterations 20 --out H:\kr_quant_engine\outputs\p_mb_oos_picks_purged_3sleeve_smoke.csv --coverage-json H:\kr_quant_engine\outputs\p_mb_oos_picks_purged_3sleeve_smoke.coverage.json`
-  -> 1800 picks across 60 months, `2020-01-31` to `2024-12-30`, split gap
-  `10` months, coverage failed `60/102` months as expected. Risk sleeve was
-  skipped because the current panel lacks `forward_min_return_1m` /
-  `forward_return_1m`.
-- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04`
-  -> Critical `0`, High `4`, Medium `1`.
+- GitHub Smoke on `df28efb` -> success.
+
+Validation after current forward-label edits:
+
+- `py -3 -m py_compile kr_pipeline.py kr_config.py tools\run_kr1000_validation_gate.py`
+  -> passed.
+- `py -3 tests\test_walkforward.py` -> 11 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_cagr35_forward_labels`
+  -> planned `build_pmb_oos_picks`, 12 broker backtests, target CAGR `0.35`,
+  and all backtests include `--pmb-oos-picks`.
+- `git diff --check` -> passed.
 
 ## Git / Worktree Notes
 
@@ -93,29 +97,26 @@ Re-centered the validation system around leakage-safe 8y P_MB evidence:
 - Backtest/test output directories under `outputs/` are evidence only and are
   gitignored.
 
-Files intended for this commit:
+Files intended for the next commit:
 
-- `.github/workflows/kr1000_data_update_and_validation.yml`
-- `.github/workflows/quarterly_backtest.yml`
 - `kr_config.py`
-- `kr_multibagger_classifier.py`
-- `tools/build_pmb_oos_picks.py`
-- `tools/run_classifier_retrain.py`
+- `kr_pipeline.py`
 - `tools/run_kr1000_validation_gate.py`
 - `tests/test_kr1000_validation_gate.py`
 - `tests/test_walkforward.py`
-- `CHANGELOG.md`
-- `SESSION_HANDOFF.md`
+- `tests/smoke_test.py`
 - `docs/KR1000_GITHUB_OPERATIONS.md`
+- `SESSION_HANDOFF.md`
+- `CHANGELOG.md`
 
 ## Next Step
 
-1. Validate and commit/push the gate realignment and purged OOS tooling.
-2. Run or schedule full scored-panel rebuild from at least `2018-01-01`,
-   preferably `2016-01-01`.
-3. Generate purged P_MB OOS picks for `2018-current`.
+1. Validate and commit/push the forward-label and 35% target alignment.
+2. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
+   `2016-01-01`.
+3. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
 4. Run official validation with `--component-ab --strategy-ab`.
-5. If CAGR remains below `30%`, improve signal quality in this order:
+5. If CAGR remains below `35%`, improve signal quality in this order:
    hybrid `pmb+RS+flow+technical`, sector/theme RS exits, then macro regime
    sleeve scaling. Avoid exposure-only experiments until signal coverage
    improves.

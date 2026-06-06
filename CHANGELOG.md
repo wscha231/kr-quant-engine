@@ -6,6 +6,72 @@
 
 ## 2026-06-06
 
+### 14:30 KST - kr1000-forward-risk-labels-cagr35
+
+**Scope**: Restored the active objective to CAGR `>= 35%` / MDD `>= -25%`
+and added forward target labels needed to activate the P_MB risk sleeve during
+purged OOS generation.
+
+**What landed**:
+- Restored `kr1000_leader_alpha_cfg()["target_cagr_gate"]` to `0.35`.
+- Added `PHASE4_PMB_TARGET_COLUMNS` for `forward_return_1m` and
+  `forward_min_return_1m`.
+- Added `kr_pipeline.add_forward_return_labels()`.
+- `build_scored_panel_v0()` now appends 1-month forward return and intra-month
+  minimum forward return labels before writing the scored panel.
+- Kept the labels out of classifier features by retaining the existing
+  `forward_` prefix exclusion in `tools/build_pmb_oos_picks.py`.
+- Updated operations docs and handoff so the next required production step is
+  a 2018-current or 2016-current scored-panel rebuild with active risk labels.
+
+**Operational result**:
+- This does not itself improve the already-recorded 2020-2024 broker result.
+- It removes the current P_MB OOS smoke warning where `label_risk()` fell back
+  to all-zero risk labels because the scored panel lacked
+  `forward_min_return_1m` / `forward_return_1m`.
+- A full scored-panel rebuild is still required before official 8y OOS
+  validation can pass.
+
+**symbols_added**:
+- kr_config.PHASE4_PMB_TARGET_COLUMNS
+- kr_pipeline.add_forward_return_labels
+- kr_pipeline._last_close_at_or_before_series
+- tests/test_walkforward.py::test_forward_label_builder
+
+**symbols_changed**:
+- kr_config.ALL_PHASE_COLUMNS
+- kr_config.kr1000_leader_alpha_cfg
+- kr_pipeline.build_scored_panel_v0
+- tools/run_kr1000_validation_gate.evaluate_backtest_metrics
+- tools/run_kr1000_validation_gate._render_report
+- tests/test_kr1000_validation_gate.py::test_official_metric_gate
+- tests/test_kr1000_validation_gate.py::test_pmb_job_requires_oos_coverage
+- tests/smoke_test.py::test_kr1000_leader_registered
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**:
+- `forward_label_enabled`
+- `forward_label_horizon_months`
+- `forward_label_refresh_days`
+
+**breaking_changes**:
+- Official CAGR gate is again `0.35`; runs passing `30%` but below `35%` are
+  not complete for the active goal.
+
+**Validation**:
+- `py -3 -m py_compile kr_pipeline.py kr_config.py tools\run_kr1000_validation_gate.py`
+  -> passed.
+- `py -3 tests\test_walkforward.py` -> 11 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_cagr35_forward_labels`
+  -> planned `build_pmb_oos_picks`, 12 broker backtests, target CAGR `0.35`,
+  and all backtests include `--pmb-oos-picks`.
+- `git diff --check` -> passed.
+
+---
+
 ### 14:05 KST - kr1000-official-gate-pmb-oos-realignment
 
 **Scope**: Realigned the official KR1000 validation target to the current user

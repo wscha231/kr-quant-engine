@@ -41,7 +41,7 @@ def test_official_metric_gate():
     cfg = kr1000_leader_alpha_cfg()
     metrics = {
         "years": 8.25,
-        "cagr": 0.31,
+        "cagr": 0.36,
         "mdd": -0.24,
         "excess_cagr": 0.01,
         "sharpe": 1.05,
@@ -54,7 +54,7 @@ def test_official_metric_gate():
     assert gate["all_pass"] is True
 
     weak = dict(metrics)
-    weak["cagr"] = 0.29
+    weak["cagr"] = 0.34
     weak_gate = evaluate_backtest_metrics(weak, cfg)
     assert weak_gate["all_pass"] is False
     assert weak_gate["checks"]["cagr"]["pass"] is False
@@ -68,7 +68,7 @@ def test_pmb_job_requires_oos_coverage():
     cfg = kr1000_leader_alpha_cfg()
     metrics = {
         "years": 8.25,
-        "cagr": 0.31,
+        "cagr": 0.36,
         "mdd": -0.24,
         "excess_cagr": 0.01,
         "sharpe": 1.05,

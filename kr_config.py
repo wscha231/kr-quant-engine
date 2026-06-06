@@ -334,6 +334,11 @@ PHASE4_KR1000_LEADER_COLUMNS = (
     "max_weight",
 )
 
+PHASE4_PMB_TARGET_COLUMNS = (
+    "forward_return_1m",
+    "forward_min_return_1m",
+)
+
 # All phase columns combined (for keep_cols total)
 ALL_PHASE_COLUMNS = (
     PHASE0_MOMENTUM_COLUMNS
@@ -344,6 +349,7 @@ ALL_PHASE_COLUMNS = (
     + PHASE3_MACRO_COLUMNS
     + PHASE3_REGIME_COLUMNS
     + PHASE4_KR1000_LEADER_COLUMNS
+    + PHASE4_PMB_TARGET_COLUMNS
 )
 
 
@@ -495,13 +501,16 @@ def kr1000_leader_alpha_cfg(overrides: dict[str, Any] | None = None) -> dict[str
         "gross_exposure_min": 0.45,
         "gross_exposure_max": 1.00,
         "gross_exposure_default": 1.00,
-        "target_cagr_gate": 0.30,
+        "target_cagr_gate": 0.35,
         "target_mdd_gate": -0.25,
         "target_excess_cagr_gate": 0.0,
         "target_sharpe_gate": 1.0,
         "target_information_ratio_gate": 0.5,
         "target_min_backtest_years": 8.0,
         "score_profile": "full",
+        "forward_label_enabled": True,
+        "forward_label_horizon_months": 1,
+        "forward_label_refresh_days": 3650,
         "hold_band_weight": 0.01,
         "min_notional_krw": 100000.0,
         "metric_mode": "broker_ledger_next_close",

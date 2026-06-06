@@ -234,6 +234,28 @@ def test_pmb_oos_feature_selector_excludes_leakage():
         assert col not in features, f"leaky/generated column selected: {col}"
 
 
+@_test("forward label builder computes 1m return and min forward drawdown")
+def test_forward_label_builder():
+    from kr_pipeline import add_forward_return_labels
+
+    panel = pd.DataFrame({
+        "rebalance_date": [pd.Timestamp("2024-01-31")],
+        "ticker": ["000001"],
+    })
+    prices = pd.DataFrame({
+        "date": pd.to_datetime(["2024-01-31", "2024-02-05", "2024-02-29"]),
+        "ticker": ["000001", "000001", "000001"],
+        "close": [100.0, 80.0, 110.0],
+    })
+    out = add_forward_return_labels(
+        panel,
+        cfg={"forward_label_horizon_months": 1},
+        price_panel=prices,
+    )
+    assert abs(float(out.loc[0, "forward_return_1m"]) - 0.10) < 1e-9
+    assert abs(float(out.loc[0, "forward_min_return_1m"]) - (-0.20)) < 1e-9
+
+
 @_test("train_entry_classifier exposes purged split controls")
 def test_train_entry_classifier_purged_signature():
     import inspect

@@ -252,8 +252,8 @@ def evaluate_backtest_metrics(metrics: dict[str, Any], cfg: dict[str, Any]) -> d
         },
         "cagr": {
             "value": metric_value(metrics, "cagr", "strategy_cagr"),
-            "threshold": float(cfg.get("target_cagr_gate", 0.30)),
-            "pass": metric_value(metrics, "cagr", "strategy_cagr") >= float(cfg.get("target_cagr_gate", 0.30)),
+            "threshold": float(cfg.get("target_cagr_gate", 0.35)),
+            "pass": metric_value(metrics, "cagr", "strategy_cagr") >= float(cfg.get("target_cagr_gate", 0.35)),
         },
         "mdd": {
             "value": metric_value(metrics, "mdd", "max_dd"),
@@ -516,7 +516,7 @@ def _render_report(payload: dict[str, Any]) -> str:
         "",
         f"- Status: `{payload.get('status')}`",
         f"- As of: `{payload.get('as_of')}`",
-        f"- Official target: `CAGR >= 30%, MDD >= -25%, excess CAGR > 0`",
+        f"- Official target: `CAGR >= 35%, MDD >= -25%, excess CAGR > 0`",
         f"- Data gate: `{payload.get('data_gate', {}).get('status')}`",
         f"- Daily broker check: `{payload.get('daily_broker_check', {}).get('status')}`",
         "",

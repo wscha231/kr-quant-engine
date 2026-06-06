@@ -23,6 +23,7 @@ from kr_config import (
     DEFAULT_ROUND_TRIP_COST,
     KR_ENGINE_REUSE_VERSION,
     DATA_ROOT,
+    PHASE4_PMB_TARGET_COLUMNS,
 )
 from kr_features import (
     add_universe_features,
@@ -36,6 +37,91 @@ from kr_pykrx_client import (
     fetch_ticker_history,
 )
 from kr_universe import build_universe_snapshot
+
+
+# ---------------------------------------------------------------------------
+# Forward target labels for P_MB risk sleeve
+# ---------------------------------------------------------------------------
+def _last_close_at_or_before_series(close: pd.Series, day: pd.Timestamp) -> float:
+    sub = close.loc[close.index <= pd.Timestamp(day).normalize()]
+    if sub.empty:
+        return float("nan")
+    return float(sub.iloc[-1])
+
+
+def add_forward_return_labels(
+    scored_panel: pd.DataFrame,
+    cfg: Optional[dict] = None,
+    price_panel: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Add forward return / forward drawdown labels for classifier targets.
+
+    These columns are target labels for walk-forward classifier training, not
+    tradable features. Downstream feature selection excludes the `forward_`
+    prefix to avoid leakage.
+    """
+    cfg = {**DEFAULT_CFG, **(cfg or {})}
+    out = scored_panel.copy()
+    for col in PHASE4_PMB_TARGET_COLUMNS:
+        if col not in out.columns:
+            out[col] = np.nan
+    if out.empty or not {"rebalance_date", "ticker"}.issubset(out.columns):
+        return out
+
+    horizon_months = int(cfg.get("forward_label_horizon_months", 1) or 1)
+    refresh_days = int(cfg.get("forward_label_refresh_days", cfg.get("avg_value_refresh_days", 3650)) or 3650)
+    out["rebalance_date"] = pd.to_datetime(out["rebalance_date"], errors="coerce").dt.normalize()
+    out["ticker"] = out["ticker"].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6)
+    missing = out[list(PHASE4_PMB_TARGET_COLUMNS)].isna().any(axis=1)
+    work = out.loc[missing & out["rebalance_date"].notna(), ["rebalance_date", "ticker"]]
+    if work.empty:
+        return out
+
+    prices_by_ticker: dict[str, pd.DataFrame] = {}
+    if price_panel is not None and not price_panel.empty:
+        pp = price_panel.copy()
+        pp["ticker"] = pp["ticker"].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6)
+        pp["date"] = pd.to_datetime(pp["date"], errors="coerce").dt.normalize()
+        if "close" in pp.columns:
+            pp["close"] = pd.to_numeric(pp["close"], errors="coerce")
+            for tk, group in pp.dropna(subset=["date", "close"]).groupby("ticker"):
+                prices_by_ticker[str(tk)] = group.sort_values("date")
+
+    min_date = pd.Timestamp(work["rebalance_date"].min()).normalize()
+    max_date = pd.Timestamp(work["rebalance_date"].max()).normalize()
+    fetch_start = (min_date - pd.Timedelta(days=10)).strftime("%Y%m%d")
+    fetch_end = (max_date + pd.DateOffset(months=horizon_months) + pd.Timedelta(days=10)).strftime("%Y%m%d")
+
+    filled = 0
+    for tk, idxs in work.groupby("ticker").groups.items():
+        hist = prices_by_ticker.get(str(tk))
+        if hist is None:
+            hist = fetch_ticker_history(str(tk), fetch_start, fetch_end, refresh_days=refresh_days)
+            if hist is None or hist.empty:
+                continue
+            hist = hist.copy()
+            if "close" not in hist.columns:
+                continue
+            hist["date"] = pd.to_datetime(hist["date"], errors="coerce").dt.normalize()
+            hist["close"] = pd.to_numeric(hist["close"], errors="coerce")
+            hist = hist.dropna(subset=["date", "close"]).sort_values("date")
+        if hist.empty:
+            continue
+        close = hist.drop_duplicates("date", keep="last").set_index("date")["close"].sort_index()
+        for idx in idxs:
+            rd = pd.Timestamp(out.at[idx, "rebalance_date"]).normalize()
+            entry_close = _last_close_at_or_before_series(close, rd)
+            if not np.isfinite(entry_close) or entry_close <= 0:
+                continue
+            horizon_end = rd + pd.DateOffset(months=horizon_months)
+            future = close.loc[(close.index > rd) & (close.index <= horizon_end)]
+            if future.empty:
+                continue
+            out.at[idx, "forward_return_1m"] = float(future.iloc[-1] / entry_close - 1.0)
+            out.at[idx, "forward_min_return_1m"] = float(future.min() / entry_close - 1.0)
+            filled += 1
+    log(f"[pipeline] forward labels filled {filled}/{len(work)} missing rows")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +261,8 @@ def build_scored_panel_v0(
         panel["ticker"] = panel["ticker"].astype(str).str.zfill(6)
         panel = panel.drop_duplicates(["rebalance_date", "ticker"], keep="last")
         panel = panel.sort_values(["rebalance_date", "ticker"]).reset_index(drop=True)
+    if cfg.get("forward_label_enabled", True):
+        panel = add_forward_return_labels(panel, cfg=cfg)
     try:
         panel.to_parquet(cache_path, index=False)
         log(f"[pipeline] saved scored panel ({len(panel)} rows) -> {cache_path}")

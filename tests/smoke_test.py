@@ -297,6 +297,7 @@ def test_kr1000_leader_registered():
     cfg_src = (PROJECT_ROOT / "kr_config.py").read_text(encoding="utf-8")
     mod_src = (PROJECT_ROOT / "kr1000_leader.py").read_text(encoding="utf-8")
     assert "PHASE4_KR1000_LEADER_COLUMNS" in cfg_src
+    assert "PHASE4_PMB_TARGET_COLUMNS" in cfg_src
     assert "def kr1000_leader_alpha_cfg(" in cfg_src
     assert "target_cagr_gate" in cfg_src
     assert "target_mdd_gate" in cfg_src

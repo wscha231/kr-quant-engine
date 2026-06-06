@@ -6,7 +6,7 @@ KR1000 Leader Alpha is accepted only when the official broker-ledger path
 passes the current gate:
 
 - 8y+ backtest from `2018-01-01`
-- CAGR `>= 30%`
+- CAGR `>= 35%`
 - MDD `>= -25%`
 - KOSPI200 excess CAGR `> 0`
 - Sharpe `> 1.0`
@@ -14,9 +14,8 @@ passes the current gate:
 - `metric_mode = broker_ledger_next_close`
 - `fill_mode = next_close`
 
-Do not treat vectorized or next-open runs as production metrics.
-`35%` CAGR is tracked as a stretch target only. The current official pass/fail
-gate is `30%`.
+Do not treat vectorized or next-open runs as production metrics. The active
+objective remains CAGR `>= 35%` with MDD no worse than `-25%`.
 
 ## GitHub Workflows
 
@@ -132,6 +131,11 @@ caches before broker backtests. If the weekly run is too slow, first improve
 cache reuse and scoped backfill; do not substitute a liquidity-only latest
 snapshot for official CAGR/MDD evidence.
 
+Full scored-panel rebuilds add `forward_return_1m` and
+`forward_min_return_1m` target-label columns. These columns are used only for
+P_MB risk-sleeve labeling and are excluded from classifier features by the
+`forward_` prefix.
+
 Official production pass/fail uses the locked `pmb_defensive_mdd_gate` strategy
 preset when `--strategy-ab` is run. The `full` score profile remains a baseline
 gate for diagnosis. P_MB and hybrid jobs cannot pass the official gate unless
@@ -205,9 +209,8 @@ python tools/run_kr1000_backtest.py --start 2020-01-01 --end 2024-12-31 --score-
 As of the 2026-06-05 drawdown-ladder pass, this diagnostic produced CAGR
 `25.38%`, MDD `-24.00%`, Sharpe `1.23`, IR `1.00`, and KOSPI200 excess
 `+23.12%` on the available 2020-2024 P_MB OOS window. It is the current best
-broker-ledger challenger, but it does not satisfy the `35%` stretch target and
-is not an 8y official pass. It is also below the current official CAGR
-`>= 30%` gate.
+broker-ledger challenger, but it does not satisfy the official CAGR `>= 35%`
+target and is not an 8y official pass.
 
 Daily hard-exit disabled A/B on the same P_MB OOS window worsened to CAGR
 `21.64%`, MDD `-31.22%`, Sharpe `1.00`. Keep daily hard-exit enabled until a
@@ -266,9 +269,9 @@ As of the 2026-06-05 19:12 KST handoff:
   is `2026-06-04`, data gate Critical `0`, and daily broker check completed.
 - The appended `2026-06-04` rows are liquidity-only readiness rows, not
   full-feature backtest rows.
-- The current scored panel lacks `forward_min_return_1m` /
-  `forward_return_1m`, so the purged 3-sleeve P_MB OOS builder skips the risk
-  sleeve until forward drawdown labels are added to the full-feature panel.
+- Full scored-panel rebuilds now add `forward_min_return_1m` /
+  `forward_return_1m`; rebuild the current GDrive panel so the purged
+  3-sleeve P_MB risk sleeve stops falling back to zero.
 - The schema-union regression from `eligible_final=NaN` on historical rows is
   fixed and covered by `tests/test_kr1000_leader.py`.
 - Full score fails after proper NAV sizing (`CAGR -5.61%`, MDD `-50.01%` on
@@ -278,6 +281,6 @@ As of the 2026-06-05 19:12 KST handoff:
   coverage.
 
 The next production step is a full-feature 2018-current backfill, purged P_MB
-OOS regeneration, then component/strategy A/B toward CAGR `>= 30%` under the
+OOS regeneration, then component/strategy A/B toward CAGR `>= 35%` under the
 broker-ledger/MDD gate.
 Avoid more exposure-only experiments until the signal panel is richer.
