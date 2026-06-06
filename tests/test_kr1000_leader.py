@@ -125,6 +125,34 @@ def test_score_profiles():
     assert not hybrid["leader_score"].isna().any()
 
 
+@_test("stale zero component placeholders are recomputed from live sources")
+def test_zero_component_placeholders_recomputed():
+    from kr1000_leader import apply_kr1000_score_profile
+
+    candidates = pd.DataFrame({
+        "ticker": ["000001", "000002", "000003", "000004", "000005"],
+        "rs_score": [0.0] * 5,
+        "technical_score": [0.0] * 5,
+        "flow_score": [0.0] * 5,
+        "rs_1m": [0.10, -0.05, 0.02, 0.03, -0.01],
+        "rs_3m": [0.30, -0.20, 0.05, 0.04, -0.03],
+        "rs_6m": [0.50, -0.30, 0.10, 0.06, -0.05],
+        "trend_template_score": [8.0, 0.0, 4.0, 3.0, 1.0],
+        "breakout_flag": [1, 0, 0, 0, 0],
+        "dist_from_52w_high": [0.0, -0.5, -0.1, -0.2, -0.4],
+        "volume_zscore_50": [2.0, -1.0, 0.5, 0.2, -0.5],
+        "atr_pct": [0.03, 0.05, 0.04, 0.04, 0.06],
+        "trend_template_pass": [1, 0, 1, 0, 0],
+    })
+    rs_only = apply_kr1000_score_profile(candidates, "rs_only")
+    tech = apply_kr1000_score_profile(candidates, "rs_flow_technical")
+
+    assert rs_only["rs_score"].std() > 0
+    assert tech["technical_score"].std() > 0
+    assert rs_only.loc[0, "leader_score"] > rs_only.loc[1, "leader_score"]
+    assert tech.loc[0, "leader_score"] > rs_only.loc[0, "leader_score"]
+
+
 @_test("P_MB mid-rank profile admits only OOS ranks 7 through 23")
 def test_pmb_mid_rank_profile_window():
     from kr1000_leader import apply_kr1000_score_profile
@@ -219,6 +247,22 @@ def test_trade_plan_current_holdings_reconciled():
     assert plan.loc[plan["ticker"] == "000002", "action"].iloc[0] == "SELL"
     assert plan["reason_code"].astype(str).str.len().gt(0).all()
     assert set(plan["action"]).issubset({"BUY", "ADD", "HOLD", "TRIM", "SELL", "BLOCKED", "NO_TRADE"})
+
+
+@_test("trade plan returns empty schema when no holdings or targets exist")
+def test_trade_plan_empty_schema():
+    from kr1000_leader import generate_trade_plan
+
+    plan = generate_trade_plan(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        cfg={},
+        as_of_date="2024-04-01",
+    )
+    assert plan.empty
+    assert "reason_code" in plan.columns
+    assert "action" in plan.columns
 
 
 @_test("trade plan weights holdings against account NAV when cash is present")

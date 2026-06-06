@@ -195,6 +195,36 @@ def _z(df: pd.DataFrame, col: str) -> pd.Series:
     return _score_series(_numeric(df, col))
 
 
+def _has_informative_source(df: pd.DataFrame, cols: tuple[str, ...]) -> bool:
+    """Return True when any source column has usable cross-sectional variation."""
+    for col in cols:
+        if col not in df.columns:
+            continue
+        s = pd.to_numeric(df[col], errors="coerce").replace([np.inf, -np.inf], np.nan)
+        if s.notna().sum() >= 2 and s.nunique(dropna=True) > 1:
+            return True
+    return False
+
+
+def _should_recompute_component(df: pd.DataFrame, component_col: str, source_cols: tuple[str, ...]) -> bool:
+    """Detect stale schema-union component placeholders.
+
+    Older panels may contain component columns such as `rs_score` with only
+    NaN/zero placeholders while the underlying `rs_1m`/`rs_3m`/`rs_6m` inputs
+    are present. In that case the component must be rebuilt, otherwise every
+    score profile collapses to a liquidity tie-break.
+    """
+    if component_col not in df.columns:
+        return True
+    s = pd.to_numeric(df[component_col], errors="coerce").replace([np.inf, -np.inf], np.nan)
+    if s.notna().sum() == 0:
+        return True
+    has_signal = bool((s.fillna(0.0).abs() > 1e-12).any() and s.nunique(dropna=True) > 1)
+    if has_signal:
+        return False
+    return _has_informative_source(df, source_cols)
+
+
 def _normalise_ticker(s: pd.Series) -> pd.Series:
     return s.astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6)
 
@@ -374,7 +404,7 @@ def compute_kospi200_relative_strength(
 def add_leader_component_scores(df: pd.DataFrame) -> pd.DataFrame:
     """Add component scores used by leader_score."""
     out = df.copy()
-    if "rs_score" not in out.columns:
+    if _should_recompute_component(out, "rs_score", ("rs_1m", "rs_3m", "rs_6m", "rs_kospi_3m")):
         if all(c in out.columns for c in ("rs_1m", "rs_3m", "rs_6m")):
             out["rs_score"] = (
                 0.25 * _z(out, "rs_1m")
@@ -384,7 +414,18 @@ def add_leader_component_scores(df: pd.DataFrame) -> pd.DataFrame:
         else:
             out["rs_score"] = 0.0
 
-    if "flow_score" not in out.columns:
+    if _should_recompute_component(out, "flow_score", (
+        "foreign_netbuy_20d_to_mcap",
+        "inst_netbuy_20d_to_mcap",
+        "foreign_netbuy_60d_to_mcap",
+        "flow_acceleration",
+        "foreign_holding_change_20d",
+        "foreign_buying_streak_days",
+        "foreign_net_buy_20d_zscore",
+        "inst_net_buy_20d_zscore",
+        "foreign_inst_combined_zscore_20d",
+        "individual_net_buy_20d_zscore",
+    )):
         out["flow_score"] = (
             0.35 * _z(out, "foreign_netbuy_20d_to_mcap")
             + 0.25 * _z(out, "inst_netbuy_20d_to_mcap")
@@ -398,7 +439,14 @@ def add_leader_component_scores(df: pd.DataFrame) -> pd.DataFrame:
             - 0.15 * _z(out, "individual_net_buy_20d_zscore").clip(lower=0)
         )
 
-    if "technical_score" not in out.columns:
+    if _should_recompute_component(out, "technical_score", (
+        "trend_template_score",
+        "breakout_flag",
+        "dist_from_52w_high",
+        "volume_zscore_50",
+        "atr_pct",
+        "trend_template_pass",
+    )):
         trend_flag = _numeric(out, "trend_template_pass", 0.0)
         out["technical_score"] = (
             0.30 * _z(out, "trend_template_score")
@@ -409,7 +457,13 @@ def add_leader_component_scores(df: pd.DataFrame) -> pd.DataFrame:
             + 0.15 * trend_flag.fillna(0.0)
         )
 
-    if "quality_growth_score" not in out.columns:
+    if _should_recompute_component(out, "quality_growth_score", (
+        "revenue_growth_yoy",
+        "operating_income_growth_yoy",
+        "roe",
+        "quality_score",
+        "fcf_yield",
+    )):
         out["quality_growth_score"] = (
             0.30 * _z(out, "revenue_growth_yoy")
             + 0.25 * _z(out, "operating_income_growth_yoy")
@@ -418,13 +472,24 @@ def add_leader_component_scores(df: pd.DataFrame) -> pd.DataFrame:
             + 0.10 * _z(out, "fcf_yield")
         )
 
-    if "valuation_score" not in out.columns:
+    if _should_recompute_component(out, "valuation_score", (
+        "per",
+        "pbr",
+        "value_score",
+        "revenue_growth_yoy",
+    )):
         cheap = 0.35 * (-_z(out, "per")) + 0.30 * (-_z(out, "pbr")) + 0.20 * _z(out, "value_score")
         growth_confirm = 0.15 * _z(out, "revenue_growth_yoy")
         extreme_penalty = ((_numeric(out, "per") > 150) & (_numeric(out, "revenue_growth_yoy") <= 0)).astype(float)
         out["valuation_score"] = cheap + growth_confirm - extreme_penalty
 
-    if "theme_sector_score" not in out.columns:
+    if _should_recompute_component(out, "theme_sector_score", (
+        "theme_rs_1m",
+        "theme_rs_3m",
+        "theme_rs_6m",
+        "theme_phase_score",
+        "sector_rs_3m",
+    )):
         out["theme_sector_score"] = (
             0.25 * _z(out, "theme_rs_1m")
             + 0.30 * _z(out, "theme_rs_3m")
@@ -433,7 +498,15 @@ def add_leader_component_scores(df: pd.DataFrame) -> pd.DataFrame:
             + 0.25 * _z(out, "sector_rs_3m")
         )
 
-    if "event_governance_score" not in out.columns:
+    if _should_recompute_component(out, "event_governance_score", (
+        "disclosure_event_total_score",
+        "event_insider_holdings_score",
+        "event_treasury_buyback_score",
+        "event_major_holders_score",
+        "capital_allocation_quality_score",
+        "governance_risk_score",
+        "owner_dilution_risk_score",
+    )):
         out["event_governance_score"] = (
             0.45 * _z(out, "disclosure_event_total_score")
             + 0.20 * _z(out, "event_insider_holdings_score")
@@ -758,9 +831,17 @@ def generate_trade_plan(
             "risk_veto_flag": risk_veto,
             "hard_exit_flag": hard_exit,
         })
+    trade_plan_columns = [
+        "date", "ticker", "name", "action", "reason_code", "leader_rank",
+        "leader_score", "current_weight", "target_weight", "delta_weight",
+        "estimated_trade_krw", "shares", "manual_lock", "risk_veto_flag",
+        "hard_exit_flag",
+    ]
+    if not rows:
+        return pd.DataFrame(columns=trade_plan_columns)
     out = pd.DataFrame(rows)
     out["reason_code"] = out["reason_code"].replace("", "NO_TRADE_MIN_NOTIONAL").fillna("NO_TRADE_MIN_NOTIONAL")
-    return out.sort_values(["action", "leader_rank", "ticker"]).reset_index(drop=True)
+    return out[trade_plan_columns].sort_values(["action", "leader_rank", "ticker"]).reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------

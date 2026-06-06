@@ -6,6 +6,67 @@
 
 ## 2026-06-07
 
+### 06:45 KST - kr1000-component-score-recompute-and-signal-diagnostic
+
+**Scope**: Fixed collapsed KR1000 component A/B scoring caused by stale
+schema-union placeholders, then reran the official 8y broker-ledger component
+diagnostic against the active CAGR `>= 30%` / MDD `>= -25%` gate.
+
+**What landed**:
+- Added stale component detection in `kr1000_leader.add_leader_component_scores`
+  so columns such as `rs_score` and `technical_score` are recomputed when they
+  contain only NaN/zero placeholders but their source columns have live
+  cross-sectional variation.
+- Applied the recompute guard to RS, flow, technical, quality/growth,
+  valuation, theme/sector, and event/governance component scores.
+- Added an empty-schema return path to
+  `kr1000_leader.generate_trade_plan` so fully cash/no-target diagnostic
+  months do not fail on missing `reason_code`.
+- Added regression tests for zero-placeholder component recomputation and empty
+  trade-plan schema behavior.
+
+**Diagnostic result**:
+- Before this fix, `full`, `rs_only`, `rs_flow`, and `rs_flow_technical`
+  collapsed to identical broker metrics because component columns existed but
+  carried no signal.
+- After this fix, RS and technical components have live variation again, but
+  the official 8y signal quality still fails badly:
+  - `pmb_mid_rank_7_23 default`: CAGR `6.65%`, MDD `-44.12%`.
+  - `pmb_pre_surge default`: CAGR `3.99%`, MDD `-35.87%`.
+  - `full`: CAGR `-6.44%`, MDD `-64.11%`.
+  - `rs_flow_technical`: CAGR `-16.99%`, MDD `-86.49%`.
+  - `rs_only`: CAGR `-21.86%`, MDD `-92.44%`.
+- Regime/technical diagnostic filters can reduce MDD near or below the target,
+  but CAGR remains around `4%`; the confirmed bottleneck remains alpha/signal
+  quality, not the broker ledger or data coverage.
+
+**symbols_added**:
+- kr1000_leader._has_informative_source
+- kr1000_leader._should_recompute_component
+- tests/test_kr1000_leader.py::test_zero_component_placeholders_recomputed
+- tests/test_kr1000_leader.py::test_trade_plan_empty_schema
+
+**symbols_changed**:
+- kr1000_leader.add_leader_component_scores
+- kr1000_leader.generate_trade_plan
+- docs/KR1000_GITHUB_OPERATIONS.md
+- MASTER_PLAN.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 14 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 15 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --periods official_8y --profiles full --component-ab --require-pmb-oos-coverage ...`
+  -> `failed_performance`; component score collapse fixed, official target not
+  met.
+
 ### 05:55 KST - kr1000-pit-repair-2016-oos-coverage-and-official-fail
 
 **Scope**: Replaced suspect KR1000 mcap history with PIT marcap yearly sources,

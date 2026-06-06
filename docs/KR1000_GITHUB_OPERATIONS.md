@@ -18,6 +18,17 @@ Do not treat vectorized or next-open runs as production metrics. The active
 objective remains CAGR `>= 30%` with MDD no worse than `-25%`. CAGR `>= 35%`
 is a stretch target, not the official pass gate.
 
+## Current Signal Diagnosis
+
+The data and broker-ledger harness are usable, but the strategy has not passed
+the official performance gate. A June 2026 component A/B repair found that
+schema-union score columns could carry all-zero placeholders; these are now
+recomputed from live source columns. After the repair, component profiles no
+longer collapse to identical rankings, but the 2018-current official 8y
+broker-ledger results still fail. Treat further work as signal-quality research:
+improve P_MB OOS ranking, then add RS/flow/technical confirmation and regime
+scaling only after positive excess CAGR appears.
+
 ## GitHub Workflows
 
 Production automation is split into three lanes:
