@@ -1,15 +1,15 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-06 16:36 KST
+## Current Status - 2026-06-06 17:32 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest pushed commit: `24fbc9b`.
-Latest GitHub Smoke on `24fbc9b` succeeded:
-https://github.com/wscha231/kr-quant-engine/actions/runs/27057233429
+Latest functional commit: `1c33aca`.
+Latest GitHub Smoke on `1c33aca` succeeded:
+https://github.com/wscha231/kr-quant-engine/actions/runs/27057463059
 
-Draft PR body has been refreshed for `24fbc9b`.
+Draft PR body has been refreshed for `1c33aca`.
 
 The active user target has been realigned to:
 
@@ -25,7 +25,12 @@ CAGR `>= 35%` is now a stretch target only, not the official pass gate.
 
 ## Current Local Change Set
 
-There is a new local uncommitted change set after `24fbc9b`:
+No project changes are currently uncommitted except this unrelated dirty file,
+which must stay unstaged:
+
+- `research/10_theme_lifecycle/leader_themes_per_quarter.csv`
+
+Latest committed functional change set in `1c33aca`:
 
 - `tools/materialize_avg_value_proxy_caches.py` was added.
 - PIT-safe avg-value proxy caches were materialized for `2025-01-31` through
@@ -48,10 +53,6 @@ Prior committed change set in `ca002b3`:
   workflows as broker-backtest automation.
 - New tests cover cached DART period metadata repair and validation-gate
   workflow audit detection.
-
-Do not stage the unrelated dirty file:
-
-- `research/10_theme_lifecycle/leader_themes_per_quarter.csv`
 
 ## Data / Performance Facts
 
@@ -133,14 +134,13 @@ Result: CAGR `28.15%`, MDD `-22.18%`, Sharpe `1.29`, KOSPI200 excess
 
 ## Next Production Steps
 
-1. Commit/push the local avg-value proxy cache materialization tool/docs.
-2. Resolve remaining data-audit High items: mcap cache gaps and stale
+1. Resolve remaining data-audit High items: mcap cache gaps and stale
    scored-panel fundamentals metadata.
-3. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
+2. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
    `2016-01-01`.
-4. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
-5. Run official validation with `--component-ab --strategy-ab`.
-6. If CAGR remains below `30%`, improve signal quality in this order:
+3. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
+4. Run official validation with `--component-ab --strategy-ab`.
+5. If CAGR remains below `30%`, improve signal quality in this order:
    `pmb + RS + flow + technical`, sector/theme RS exits, then macro regime
    sleeve scaling. Avoid exposure-only experiments until the 8y signal
    coverage problem is solved.

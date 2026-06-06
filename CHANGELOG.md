@@ -6,6 +6,38 @@
 
 ## 2026-06-06
 
+### 17:34 KST - kr1000-handoff-after-avg-value-proxy-push
+
+**Scope**: Refreshed the single-inbox handoff after pushing the PIT-safe
+avg-value proxy cache materialization change.
+
+**What landed**:
+- Updated `SESSION_HANDOFF.md` to point at latest functional commit `1c33aca`.
+- Recorded the successful GitHub Smoke run for `1c33aca`.
+- Removed the stale instruction to commit the already-pushed avg-value proxy
+  cache materialization tool/docs.
+
+**Operational result**:
+- Next agents should start from the remaining data blockers only: historical
+  mcap cache gaps and stale scored-panel fundamentals metadata.
+- `research/10_theme_lifecycle/leader_themes_per_quarter.csv` remains
+  explicitly unstaged and unrelated.
+
+**symbols_added**: none.
+
+**symbols_changed**:
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- GitHub Smoke Test on `1c33aca` succeeded:
+  https://github.com/wscha231/kr-quant-engine/actions/runs/27057463059
+
+---
+
 ### 17:26 KST - kr1000-avg-value-proxy-cache-backfill
 
 **Scope**: Materialized PIT-safe avg-value proxy caches to remove the
