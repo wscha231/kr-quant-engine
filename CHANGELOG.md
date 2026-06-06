@@ -6,6 +6,30 @@
 
 ## 2026-06-06
 
+### 16:05 KST - kr1000-handoff-after-risk-guard-push
+
+**Scope**: Refreshed `SESSION_HANDOFF.md` after pushing `7b139c9` and
+confirming GitHub Smoke success.
+
+**What landed**:
+- Removed completed commit/push instructions from the handoff.
+- Kept the next-step warning that the new full-panel forward-label P_MB
+  diagnostics should not replace the legacy P_MB challenger.
+
+**symbols_added**: none.
+
+**symbols_changed**:
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- Documentation-only follow-up after GitHub Smoke success on `7b139c9`.
+
+---
+
 ### 16:00 KST - kr1000-forward-label-cache-guard-risk-observed
 
 **Scope**: Hardened forward-label enrichment against incomplete-horizon

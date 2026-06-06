@@ -1,16 +1,15 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-06 16:00 KST
+## Current Status - 2026-06-06 16:05 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest pushed commit: `b850775`.
-Latest GitHub Smoke on `b850775` succeeded:
-https://github.com/wscha231/kr-quant-engine/actions/runs/27053991700
-Draft PR body has been updated to the active `35%` target and bridge status.
-Current local follow-up hardens the bridge against incomplete-horizon leakage
-and risk-label missing-target false negatives; commit/push this follow-up next.
+Latest implementation commit: `7b139c9`.
+Latest GitHub Smoke on `7b139c9` succeeded:
+https://github.com/wscha231/kr-quant-engine/actions/runs/27055697502
+Draft PR body still needs one final refresh if a handoff-only commit is added
+after `7b139c9`.
 
 The active user target is:
 
@@ -138,31 +137,18 @@ Validation after current forward-label edits:
 - Backtest/test output directories under `outputs/` are evidence only and are
   gitignored.
 
-Files pending in the current local follow-up:
-
-- `kr_config.py`
-- `kr_pipeline.py`
-- `kr_multibagger_classifier.py`
-- `kr_backtester_realistic.py`
-- `tools/build_pmb_oos_picks.py`
-- `tools/enrich_scored_panel_forward_labels.py`
-- `tests/test_walkforward.py`
-- `docs/KR1000_GITHUB_OPERATIONS.md`
-- `SESSION_HANDOFF.md`
-- `CHANGELOG.md`
+No KR1000 implementation files are pending after `7b139c9`.
 
 ## Next Step
 
-1. Commit/push the current leakage-guard/risk-observed follow-up and update
-   the draft PR body.
-2. Do not promote the new full-panel forward-label P_MB diagnostics; they are
+1. Do not promote the new full-panel forward-label P_MB diagnostics; they are
    far below the legacy P_MB defensive challenger.
-3. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
+2. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
    `2016-01-01`.
-4. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve,
+3. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve,
    but compare against the legacy P_MB result before promoting.
-5. Run official validation with `--component-ab --strategy-ab`.
-6. If CAGR remains below `35%`, improve signal quality in this order:
+4. Run official validation with `--component-ab --strategy-ab`.
+5. If CAGR remains below `35%`, improve signal quality in this order:
    hybrid `pmb+RS+flow+technical`, sector/theme RS exits, then macro regime
    sleeve scaling. Avoid exposure-only experiments until signal coverage
    improves.
