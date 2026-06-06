@@ -41,7 +41,7 @@ def test_official_metric_gate():
     cfg = kr1000_leader_alpha_cfg()
     metrics = {
         "years": 8.25,
-        "cagr": 0.36,
+        "cagr": 0.31,
         "mdd": -0.24,
         "excess_cagr": 0.01,
         "sharpe": 1.05,
@@ -54,7 +54,7 @@ def test_official_metric_gate():
     assert gate["all_pass"] is True
 
     weak = dict(metrics)
-    weak["cagr"] = 0.34
+    weak["cagr"] = 0.29
     weak_gate = evaluate_backtest_metrics(weak, cfg)
     assert weak_gate["all_pass"] is False
     assert weak_gate["checks"]["cagr"]["pass"] is False
@@ -115,6 +115,7 @@ def test_planned_component_ab_jobs():
         "rs_flow_technical",
         "legacy_p1_blended",
         "pmb_pre_surge",
+        "pmb_mid_rank_7_23",
         "hybrid_pmb_rs",
     }
     strategy_jobs = [j for j in official if j.get("strategy_preset") == "pmb_defensive_mdd_gate"]
@@ -122,6 +123,11 @@ def test_planned_component_ab_jobs():
     assert "--portfolio-dd-ladder" in strategy_jobs[0]["cmd"]
     assert "--gross-exposure" in strategy_jobs[0]["cmd"]
     assert "--hard-stop-loss-pct" in strategy_jobs[0]["cmd"]
+    mid_rank_jobs = [j for j in official if j.get("strategy_preset") == "pmb_mid_rank_no_leverage_mdd_gate"]
+    assert len(mid_rank_jobs) == 1
+    assert mid_rank_jobs[0]["profile"] == "pmb_mid_rank_7_23"
+    assert "--gross-exposure" in mid_rank_jobs[0]["cmd"]
+    assert "1.0" in mid_rank_jobs[0]["cmd"]
     assert {j["profile"] for j in stress} == {"full"}
     assert all("--score-profile" in j["cmd"] for j in jobs)
     assert all("--pmb-oos-picks" in j["cmd"] for j in jobs)

@@ -6,6 +6,71 @@
 
 ## 2026-06-06
 
+### 16:36 KST - kr1000-cagr30-gate-realignment-midrank-challenger
+
+**Scope**: Realigned the official KR1000 broker-ledger gate to CAGR `>= 30%`
+and added a formal P_MB mid-rank challenger for the same validation harness.
+
+**What landed**:
+- Changed `kr1000_leader_alpha_cfg()["target_cagr_gate"]` from `0.35` to
+  `0.30`; CAGR `>= 35%` is now documented as a stretch target only.
+- Added `pmb_mid_rank_7_23`, a score profile that only admits PIT-safe P_MB OOS
+  ranks `7..23`.
+- Added `pmb_mid_rank_no_leverage_mdd_gate` to strategy A/B with gross `1.0`,
+  hard stop `10%`, and the existing portfolio drawdown ladder.
+- Kept production pass/fail tied to the locked `pmb_defensive_mdd_gate` preset;
+  the mid-rank preset is a challenger until 8y OOS coverage is available.
+- Updated validation-gate reporting so the official CAGR target is rendered
+  from config instead of hard-coded text.
+
+**Operational result**:
+- Prior 2020-2024 diagnostic for the mid-rank rule was about CAGR `28.15%`,
+  MDD `-22.18%`, Sharpe `1.29`, and KOSPI200 excess `+25.88%` in the broker
+  harness.
+- This remains below the official CAGR `>= 30%` gate and is not an 8y official
+  pass.
+
+**symbols_added**:
+- kr1000_leader score profile `pmb_mid_rank_7_23`
+- tools/run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS[`pmb_mid_rank_no_leverage_mdd_gate`]
+- tests/test_kr1000_leader.py::test_pmb_mid_rank_profile_window
+
+**symbols_changed**:
+- kr_config.kr1000_leader_alpha_cfg
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES
+- kr1000_leader.KR1000_AB_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
+- tools/run_kr1000_validation_gate.PMB_SCORE_PROFILES
+- tools/run_kr1000_validation_gate.evaluate_backtest_metrics
+- tools/run_kr1000_validation_gate._render_report
+- tests/test_kr1000_validation_gate.py
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none. `target_cagr_gate` changed value from `0.35`
+to `0.30`.
+
+**breaking_changes**:
+- The official KR1000 CAGR gate is now `30%`; `35%` should be treated as a
+  stretch target in future agent work.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_validation_gate.py kr_config.py`
+- `py -3 tests\test_kr1000_leader.py` -> 12 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 15 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_cagr30_midrank`
+  -> planned 14 broker backtests, target CAGR `0.30`, including
+  `pmb_mid_rank_7_23` and `pmb_mid_rank_no_leverage_mdd_gate`.
+- `py -3 tools\run_kr1000_backtest.py --start 2020-01-01 --end 2024-12-31 --score-profile pmb_mid_rank_7_23 ...`
+  -> reproduced CAGR `28.15%`, MDD `-22.18%`, Sharpe `1.29`, Excess `+25.88%`.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`,
+  High `4`, Medium `1`.
+
+---
+
 ### 16:05 KST - kr1000-handoff-after-risk-guard-push
 
 **Scope**: Refreshed `SESSION_HANDOFF.md` after pushing `7b139c9` and

@@ -94,6 +94,7 @@ def test_score_profiles():
         "p0_momentum_score": [0.2, 0.8],
         "p1_blended_score": [0.1, 0.9],
         "p_pre_surge": [0.7, 0.2],
+        "pmb_oos_rank": [8, 1],
     })
     rs_only = apply_kr1000_score_profile(candidates, "rs_only")
     assert rs_only["score_profile"].eq("rs_only").all()
@@ -115,9 +116,32 @@ def test_score_profiles():
     pmb = apply_kr1000_score_profile(candidates, "pmb_pre_surge")
     assert pmb.loc[0, "leader_score"] > pmb.loc[1, "leader_score"]
 
+    mid_rank = apply_kr1000_score_profile(candidates, "pmb_mid_rank_7_23")
+    assert mid_rank.loc[0, "leader_score"] > 0
+    assert mid_rank.loc[1, "leader_score"] == 0
+
     hybrid = apply_kr1000_score_profile(candidates, "hybrid_pmb_rs")
     assert hybrid["score_profile"].eq("hybrid_pmb_rs").all()
     assert not hybrid["leader_score"].isna().any()
+
+
+@_test("P_MB mid-rank profile admits only OOS ranks 7 through 23")
+def test_pmb_mid_rank_profile_window():
+    from kr1000_leader import apply_kr1000_score_profile
+
+    candidates = pd.DataFrame({
+        "ticker": ["000001", "000002", "000003", "000004", "000005"],
+        "p_pre_surge": [0.99, 0.95, 0.50, 0.60, 0.70],
+        "pmb_oos_rank": [1, 6, 7, 23, 24],
+    })
+    scored = apply_kr1000_score_profile(candidates, "pmb_mid_rank_7_23")
+    by_ticker = scored.set_index("ticker")
+    assert by_ticker.loc["000001", "leader_score"] == 0
+    assert by_ticker.loc["000002", "leader_score"] == 0
+    assert by_ticker.loc["000003", "leader_score"] > 0
+    assert by_ticker.loc["000004", "leader_score"] > 0
+    assert by_ticker.loc["000005", "leader_score"] == 0
+    assert by_ticker.loc["000004", "leader_score"] > by_ticker.loc["000003", "leader_score"]
 
 
 @_test("sparse P_MB OOS probabilities rank above zero non-picks")

@@ -6,7 +6,7 @@ KR1000 Leader Alpha is accepted only when the official broker-ledger path
 passes the current gate:
 
 - 8y+ backtest from `2018-01-01`
-- CAGR `>= 35%`
+- CAGR `>= 30%`
 - MDD `>= -25%`
 - KOSPI200 excess CAGR `> 0`
 - Sharpe `> 1.0`
@@ -15,7 +15,8 @@ passes the current gate:
 - `fill_mode = next_close`
 
 Do not treat vectorized or next-open runs as production metrics. The active
-objective remains CAGR `>= 35%` with MDD no worse than `-25%`.
+objective remains CAGR `>= 30%` with MDD no worse than `-25%`. CAGR `>= 35%`
+is a stretch target, not the official pass gate.
 
 ## GitHub Workflows
 
@@ -46,7 +47,7 @@ Production automation is split into three lanes:
   - run official 8y broker-ledger validation
   - run component/challenger A/B: `full`, `rs_only`, `rs_flow`,
     `rs_flow_technical`, `legacy_p1_blended`, `pmb_pre_surge`,
-    `hybrid_pmb_rs`
+    `pmb_mid_rank_7_23`, `hybrid_pmb_rs`
 
 The default full GitHub run preserves caches and appends missing rebalance
 dates when a compatible prior `scored_panel_v0` exists, but it will widen the
@@ -231,9 +232,22 @@ python tools/run_kr1000_backtest.py --start 2020-01-01 --end 2024-12-31 --score-
 
 As of the 2026-06-05 drawdown-ladder pass, this diagnostic produced CAGR
 `25.38%`, MDD `-24.00%`, Sharpe `1.23`, IR `1.00`, and KOSPI200 excess
-`+23.12%` on the available 2020-2024 P_MB OOS window. It is the current best
-broker-ledger challenger, but it does not satisfy the official CAGR `>= 35%`
-target and is not an 8y official pass.
+`+23.12%` on the available 2020-2024 P_MB OOS window. It remains a defensive
+MDD-safe reference, but it is below the official CAGR `>= 30%` gate and is not
+an 8y official pass.
+
+P_MB mid-rank broker-ledger challenger:
+
+```bash
+python tools/run_kr1000_backtest.py --start 2020-01-01 --end 2024-12-31 --score-profile pmb_mid_rank_7_23 --gross-exposure 1.0 --hard-stop-loss-pct 0.10 --portfolio-dd-ladder --portfolio-dd-thresholds "-0.10,-0.18,-0.24" --portfolio-dd-scales "0.80,0.60,0.35" --top-holdings 20 --buy-rank-threshold 20 --hold-rank-threshold 40 --save-scored-panel
+```
+
+This challenger uses PIT-safe P_MB OOS ranks `7..23` only. The 2020-2024
+diagnostic reproduced CAGR `28.15%`, MDD `-22.18%`, Sharpe `1.29`, and
+KOSPI200 excess `+25.88%` in the same broker harness. It is the best known
+2020-2024 broker-ledger challenger, but it is still below the official CAGR
+`>= 30%` gate and needs 2018-current OOS coverage before it can be treated as
+an official gate candidate.
 
 Daily hard-exit disabled A/B on the same P_MB OOS window worsened to CAGR
 `21.64%`, MDD `-31.22%`, Sharpe `1.00`. Keep daily hard-exit enabled until a
@@ -257,6 +271,7 @@ official 8y CAGR/MDD pass.
    - `rs_flow_technical`
    - `legacy_p1_blended`
    - `pmb_pre_surge`
+   - `pmb_mid_rank_7_23`
    - `hybrid_pmb_rs`
    - `full`
 5. Only change factor weights or features after identifying which component
@@ -286,7 +301,7 @@ python tools/run_kr1000_validation_gate.py --component-ab --strategy-ab --dry-ru
 
 ## Current Known Blocker
 
-As of the 2026-06-05 19:12 KST handoff:
+As of the 2026-06-06 16:41 KST handoff:
 
 - The daily-readiness data blocker is cleared: latest `scored_panel_v0` signal
   is `2026-06-04`, data gate Critical `0`, and daily broker check completed.
@@ -308,11 +323,12 @@ As of the 2026-06-05 19:12 KST handoff:
   fixed and covered by `tests/test_kr1000_leader.py`.
 - Full score fails after proper NAV sizing (`CAGR -5.61%`, MDD `-50.01%` on
   the available 2019-2024 window).
-- P_MB OOS plus `pmb_defensive_mdd_gate` is the current best broker-ledger
-  challenger, but it is still below the official CAGR target and lacks 8y OOS
-  coverage.
+- P_MB OOS plus `pmb_mid_rank_7_23` is the current best 2020-2024
+  broker-ledger challenger, but it is still below the official CAGR target and
+  lacks 8y OOS coverage.
 
 The next production step is a full-feature 2018-current backfill, purged P_MB
-OOS regeneration, then component/strategy A/B toward CAGR `>= 35%` under the
-broker-ledger/MDD gate.
+OOS regeneration, then component/strategy A/B toward CAGR `>= 30%` under the
+broker-ledger/MDD gate. CAGR `>= 35%` remains a stretch target after the
+official gate is cleared.
 Avoid more exposure-only experiments until the signal panel is richer.

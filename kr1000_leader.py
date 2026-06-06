@@ -52,6 +52,7 @@ KR1000_DIRECT_SCORE_PROFILES = (
     "legacy_p0_momentum",
     "legacy_p1_blended",
     "pmb_pre_surge",
+    "pmb_mid_rank_7_23",
     "hybrid_pmb_rs",
 )
 
@@ -67,6 +68,7 @@ KR1000_AB_SCORE_PROFILES = (
     "rs_flow_technical",
     "legacy_p1_blended",
     "pmb_pre_surge",
+    "pmb_mid_rank_7_23",
     "hybrid_pmb_rs",
 )
 CURRENT_HOLDINGS_COLUMNS = (
@@ -464,6 +466,11 @@ def apply_kr1000_score_profile(
         out["leader_score"] = _score_series(source.fillna(fallback))
     elif profile == "pmb_pre_surge":
         out["leader_score"] = _sparse_positive_rank_score(_numeric(out, "p_pre_surge", 0.0))
+    elif profile == "pmb_mid_rank_7_23":
+        pmb = _numeric(out, "p_pre_surge", 0.0).fillna(0.0)
+        rank = _numeric(out, "pmb_oos_rank", np.nan)
+        mid_rank = rank.between(7, 23, inclusive="both")
+        out["leader_score"] = _sparse_positive_rank_score(pmb.where(mid_rank, 0.0))
     elif profile == "hybrid_pmb_rs":
         pmb = _sparse_positive_rank_score(_numeric(out, "p_pre_surge", 0.0))
         out["leader_score"] = (
