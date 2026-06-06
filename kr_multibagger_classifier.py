@@ -314,12 +314,16 @@ def label_risk(
     if use_col is None:
         log(f"[mb-classifier] label_risk: no {fwd_min_col} or {fwd_ret_col} "
             f"column -> all is_risk=0", level="WARN")
+        out["is_risk_observed"] = 0
         return out
     fwd = pd.to_numeric(out[use_col], errors="coerce")
+    out["is_risk_observed"] = fwd.notna().astype(int)
     out["is_risk"] = (fwd <= drawdown_threshold).fillna(False).astype(int)
     pos = int(out["is_risk"].sum())
+    observed = int(out["is_risk_observed"].sum())
     log(f"[mb-classifier] label_risk: {pos} positive (DD<={drawdown_threshold:.0%}) "
-        f"using {use_col} ({pos/max(len(out),1):.2%} prevalence)")
+        f"using {use_col} ({pos/max(observed,1):.2%} observed prevalence, "
+        f"{observed}/{len(out)} observed)")
     return out
 
 

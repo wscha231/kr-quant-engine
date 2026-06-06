@@ -168,7 +168,6 @@ def generate_oos_picks_purged_3sleeve(
     fold_results = []
 
     for k, (tr_idx, te_idx) in enumerate(splits, 1):
-        X_tr = panel.iloc[tr_idx][feature_cols].fillna(0).values
         X_te = panel.iloc[te_idx][feature_cols].fillna(0).values
         sub = panel.iloc[te_idx][["rebalance_date", "ticker"]].copy()
         if "name" in panel.columns:
@@ -177,9 +176,22 @@ def generate_oos_picks_purged_3sleeve(
             sub["market_cap"] = panel.iloc[te_idx]["market_cap"].values
 
         for label in have:
-            y_tr = panel.iloc[tr_idx][label].values.astype(int)
+            label_tr_idx = np.asarray(tr_idx)
+            if label == "is_risk" and "is_risk_observed" in panel.columns:
+                observed = pd.to_numeric(
+                    panel.iloc[label_tr_idx]["is_risk_observed"],
+                    errors="coerce",
+                ).fillna(0).astype(int).values == 1
+                label_tr_idx = label_tr_idx[observed]
+            X_tr = panel.iloc[label_tr_idx][feature_cols].fillna(0).values
+            y_tr = panel.iloc[label_tr_idx][label].values.astype(int)
             if y_tr.sum() < 5:
                 log(f"[oos-3s] fold {k} label {label}: <5 positives, skip",
+                    level="WARN")
+                sub[f"p_{label.replace('is_','')}"] = 0.0
+                continue
+            if len(np.unique(y_tr)) < 2:
+                log(f"[oos-3s] fold {k} label {label}: one-class train, skip",
                     level="WARN")
                 sub[f"p_{label.replace('is_','')}"] = 0.0
                 continue

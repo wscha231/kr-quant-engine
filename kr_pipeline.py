@@ -70,6 +70,13 @@ def add_forward_return_labels(
 
     horizon_months = int(cfg.get("forward_label_horizon_months", 1) or 1)
     refresh_days = int(cfg.get("forward_label_refresh_days", cfg.get("avg_value_refresh_days", 3650)) or 3650)
+    fetch_missing_prices = bool(cfg.get("forward_label_fetch_missing_prices", True))
+    label_as_of_raw = cfg.get("forward_label_as_of_date")
+    label_as_of = (
+        pd.Timestamp(label_as_of_raw).normalize()
+        if label_as_of_raw
+        else pd.Timestamp.today().normalize()
+    )
     out["rebalance_date"] = pd.to_datetime(out["rebalance_date"], errors="coerce").dt.normalize()
     out["ticker"] = out["ticker"].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6)
     missing = out[list(PHASE4_PMB_TARGET_COLUMNS)].isna().any(axis=1)
@@ -93,9 +100,15 @@ def add_forward_return_labels(
     fetch_end = (max_date + pd.DateOffset(months=horizon_months) + pd.Timedelta(days=10)).strftime("%Y%m%d")
 
     filled = 0
-    for tk, idxs in work.groupby("ticker").groups.items():
+    groups = work.groupby("ticker").groups
+    total_tickers = len(groups)
+    for i, (tk, idxs) in enumerate(groups.items(), start=1):
+        if i == 1 or i % 100 == 0 or i == total_tickers:
+            log(f"[pipeline] forward labels ticker {i}/{total_tickers}")
         hist = prices_by_ticker.get(str(tk))
         if hist is None:
+            if not fetch_missing_prices:
+                continue
             hist = fetch_ticker_history(str(tk), fetch_start, fetch_end, refresh_days=refresh_days)
             if hist is None or hist.empty:
                 continue
@@ -114,6 +127,8 @@ def add_forward_return_labels(
             if not np.isfinite(entry_close) or entry_close <= 0:
                 continue
             horizon_end = rd + pd.DateOffset(months=horizon_months)
+            if horizon_end > label_as_of:
+                continue
             future = close.loc[(close.index > rd) & (close.index <= horizon_end)]
             if future.empty:
                 continue

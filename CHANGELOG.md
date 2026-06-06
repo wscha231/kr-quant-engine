@@ -6,6 +6,72 @@
 
 ## 2026-06-06
 
+### 16:00 KST - kr1000-forward-label-cache-guard-risk-observed
+
+**Scope**: Hardened forward-label enrichment against incomplete-horizon
+leakage and prevented missing risk targets from being treated as observed
+non-risk labels during P_MB risk-sleeve training.
+
+**What landed**:
+- Added `forward_label_as_of_date` and `forward_label_fetch_missing_prices`.
+- `kr_pipeline.add_forward_return_labels()` now skips rows whose full forward
+  horizon is not observable as of `forward_label_as_of_date`.
+- `tools/enrich_scored_panel_forward_labels.py` now preloads covering ticker
+  caches, defaults to cache-only, supports `--label-as-of`, and clears stale
+  labels for incomplete horizons.
+- `kr_multibagger_classifier.label_risk()` now emits `is_risk_observed`.
+- `kr_backtester_realistic.generate_oos_picks_purged_3sleeve()` trains the
+  `is_risk` model only on rows where `is_risk_observed == 1`.
+- `tools/build_pmb_oos_picks.py` excludes `is_risk_observed` from classifier
+  features.
+
+**Operational result**:
+- Current GDrive scored panel was enriched cache-only to `34,744` fully
+  observed label-ready rows across `2019-01` to `2024-12`.
+- Incomplete `2026-06` labels were cleared via `--label-as-of 2026-06-06`.
+- New full-panel forward-label P_MB diagnostics remain weak:
+  - raw 3-sleeve: CAGR `2.44%`, MDD `-31.99%`
+  - pre-entry only: CAGR `3.26%`, MDD `-32.39%`
+  - no-risk combo: CAGR `2.60%`, MDD `-30.82%`
+  - observed-mask 3-sleeve: CAGR `4.26%`, MDD `-28.38%`
+- The legacy P_MB defensive result remains the best known challenger:
+  CAGR `25.38%`, MDD `-24.00%`, but it is still not an 8y official pass and
+  remains below the active CAGR `>= 35%` goal.
+
+**symbols_added**:
+- kr_config.forward_label_as_of_date
+- kr_config.forward_label_fetch_missing_prices
+- kr_multibagger_classifier.label_risk output column `is_risk_observed`
+- tests/test_walkforward.py::test_forward_label_builder_skips_incomplete_horizon
+- tests/test_walkforward.py::test_forward_label_enrichment_clears_incomplete_labels
+- tests/test_walkforward.py::test_risk_label_missing_forward_target_unobserved
+
+**symbols_changed**:
+- kr_pipeline.add_forward_return_labels
+- tools/enrich_scored_panel_forward_labels.py
+- kr_multibagger_classifier.label_risk
+- kr_backtester_realistic.generate_oos_picks_purged_3sleeve
+- tools/build_pmb_oos_picks.select_pmb_feature_columns
+- docs/KR1000_GITHUB_OPERATIONS.md
+
+**config_fields_added**:
+- `forward_label_as_of_date`
+- `forward_label_fetch_missing_prices`
+
+**breaking_changes**:
+- Forward labels are no longer produced for rows whose forward horizon is not
+  fully observable as of `forward_label_as_of_date`.
+
+**Validation**:
+- `py -3 -m py_compile kr_multibagger_classifier.py kr_backtester_realistic.py tools\build_pmb_oos_picks.py tools\enrich_scored_panel_forward_labels.py kr_pipeline.py kr_config.py`
+  -> passed.
+- `py -3 tests\test_walkforward.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+
+---
+
 ### 14:42 KST - kr1000-handoff-pr-status-refresh
 
 **Scope**: Refreshed handoff status after pushing `b850775`, confirming GitHub

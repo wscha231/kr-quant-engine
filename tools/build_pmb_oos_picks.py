@@ -35,6 +35,7 @@ LABEL_COLS = {
 EXTRA_LEAKAGE_EXCLUDES = {
     "leader_rank",
     "leader_score",
+    "is_risk_observed",
     "rank_in_month",
     "p_pre_surge",
     "p_pre_entry",

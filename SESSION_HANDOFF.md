@@ -1,6 +1,6 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-06 14:42 KST
+## Current Status - 2026-06-06 16:00 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
@@ -9,6 +9,8 @@ Latest pushed commit: `b850775`.
 Latest GitHub Smoke on `b850775` succeeded:
 https://github.com/wscha231/kr-quant-engine/actions/runs/27053991700
 Draft PR body has been updated to the active `35%` target and bridge status.
+Current local follow-up hardens the bridge against incomplete-horizon leakage
+and risk-label missing-target false negatives; commit/push this follow-up next.
 
 The active user target is:
 
@@ -65,6 +67,10 @@ without a full feature rebuild:
   panel into the P_MB OOS builder.
 - `.github/workflows/quarterly_backtest.yml` enriches the copied feature-store
   panel before building purged P_MB OOS picks.
+- `forward_label_as_of_date` prevents labels where the forward horizon is not
+  fully observable.
+- `is_risk_observed` prevents missing forward-risk targets from being used as
+  observed non-risk labels during risk-model training.
 
 ## Data / Performance Facts
 
@@ -79,6 +85,15 @@ without a full feature rebuild:
   covers `2020-01-31` to `2024-12-30`, 60 months, 30 picks/month.
 - Full score 2019-2025 broker-ledger run remains poor:
   CAGR `-5.61%`, MDD `-50.01%`.
+- Cache-only forward-label bridge on the current GDrive panel produced
+  `34,744` fully observed label-ready rows across `2019-01` to `2024-12`.
+  Incomplete `2026-06` labels were cleared with `--label-as-of 2026-06-06`.
+- New full-panel P_MB diagnostics are weak and must not replace the legacy
+  P_MB challenger:
+  - raw 3-sleeve: CAGR `2.44%`, MDD `-31.99%`
+  - pre-entry only: CAGR `3.26%`, MDD `-32.39%`
+  - no-risk combo: CAGR `2.60%`, MDD `-30.82%`
+  - observed-mask 3-sleeve: CAGR `4.26%`, MDD `-28.38%`
 
 ## Latest Validation
 
@@ -102,6 +117,11 @@ Validation after current forward-label edits:
 - `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
 - `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
 - `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 -m py_compile kr_multibagger_classifier.py kr_backtester_realistic.py tools\build_pmb_oos_picks.py tools\enrich_scored_panel_forward_labels.py kr_pipeline.py kr_config.py`
+  -> passed.
+- `py -3 tests\test_walkforward.py` -> 15 passed, 0 failed after
+  `is_risk_observed` and incomplete-horizon guards.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
 - `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_cagr35_forward_labels`
   -> planned `build_pmb_oos_picks`, 12 broker backtests, target CAGR `0.35`,
   and all backtests include `--pmb-oos-picks`.
@@ -118,18 +138,31 @@ Validation after current forward-label edits:
 - Backtest/test output directories under `outputs/` are evidence only and are
   gitignored.
 
-No KR1000 implementation files are pending after `b850775`.
+Files pending in the current local follow-up:
+
+- `kr_config.py`
+- `kr_pipeline.py`
+- `kr_multibagger_classifier.py`
+- `kr_backtester_realistic.py`
+- `tools/build_pmb_oos_picks.py`
+- `tools/enrich_scored_panel_forward_labels.py`
+- `tests/test_walkforward.py`
+- `docs/KR1000_GITHUB_OPERATIONS.md`
+- `SESSION_HANDOFF.md`
+- `CHANGELOG.md`
 
 ## Next Step
 
-1. Run the bridge on the current GDrive scored panel if a full rebuild is too
-   slow:
-   `py -3 tools\enrich_scored_panel_forward_labels.py --out <feature_store\scored_panel_v0_forward_labels.parquet>`.
-2. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
+1. Commit/push the current leakage-guard/risk-observed follow-up and update
+   the draft PR body.
+2. Do not promote the new full-panel forward-label P_MB diagnostics; they are
+   far below the legacy P_MB defensive challenger.
+3. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
    `2016-01-01`.
-3. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
-4. Run official validation with `--component-ab --strategy-ab`.
-5. If CAGR remains below `35%`, improve signal quality in this order:
+4. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve,
+   but compare against the legacy P_MB result before promoting.
+5. Run official validation with `--component-ab --strategy-ab`.
+6. If CAGR remains below `35%`, improve signal quality in this order:
    hybrid `pmb+RS+flow+technical`, sector/theme RS exits, then macro regime
    sleeve scaling. Avoid exposure-only experiments until signal coverage
    improves.

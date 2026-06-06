@@ -49,8 +49,23 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--start", default=None, help="Only fill labels for rows on/after this rebalance_date.")
     p.add_argument("--end", default=None, help="Only fill labels for rows on/before this rebalance_date.")
+    p.add_argument(
+        "--label-as-of",
+        default=None,
+        help="Latest date with fully observable forward-label data. Default=today.",
+    )
     p.add_argument("--horizon-months", type=int, default=None, help="Forward horizon in months. Default=config.")
     p.add_argument("--refresh-days", type=int, default=None, help="Ticker history cache refresh days. Default=config.")
+    p.add_argument(
+        "--no-cache-preload",
+        action="store_true",
+        help="Do not preload covering ticker histories from cache_pykrx before labeling.",
+    )
+    p.add_argument(
+        "--fetch-missing-prices",
+        action="store_true",
+        help="Allow provider fetch for tickers missing from cache. Default is cache-only for this bridge.",
+    )
     p.add_argument(
         "--fail-if-no-fill",
         action="store_true",
@@ -110,6 +125,124 @@ def _label_ready(df: pd.DataFrame) -> pd.Series:
     return df[list(PHASE4_PMB_TARGET_COLUMNS)].notna().all(axis=1)
 
 
+def _label_as_of(cfg: dict[str, Any] | None = None) -> pd.Timestamp:
+    cfg = cfg or {}
+    raw = cfg.get("forward_label_as_of_date")
+    return pd.Timestamp(raw).normalize() if raw else pd.Timestamp.today().normalize()
+
+
+def _horizon_months(cfg: dict[str, Any] | None = None) -> int:
+    cfg = cfg or {}
+    return int(cfg.get("forward_label_horizon_months", 1) or 1)
+
+
+def _clear_incomplete_forward_labels(panel: pd.DataFrame, cfg: dict[str, Any] | None = None) -> int:
+    """Clear target labels whose full forward horizon is not observable."""
+    if "rebalance_date" not in panel.columns:
+        return 0
+    for col in PHASE4_PMB_TARGET_COLUMNS:
+        if col not in panel.columns:
+            panel[col] = np.nan
+    dates = pd.to_datetime(panel["rebalance_date"], errors="coerce").dt.normalize()
+    horizon_end = dates + pd.DateOffset(months=_horizon_months(cfg))
+    incomplete = dates.notna() & (horizon_end > _label_as_of(cfg))
+    if not incomplete.any():
+        return 0
+    had_labels = panel.loc[incomplete, list(PHASE4_PMB_TARGET_COLUMNS)].notna().any(axis=1)
+    cleared = int(had_labels.sum())
+    panel.loc[incomplete, list(PHASE4_PMB_TARGET_COLUMNS)] = np.nan
+    return cleared
+
+
+def _normalise_ticker(s: pd.Series) -> pd.Series:
+    return s.astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6)
+
+
+def _label_work(panel: pd.DataFrame, start: str | None, end: str | None) -> pd.DataFrame:
+    out = panel.copy()
+    for col in PHASE4_PMB_TARGET_COLUMNS:
+        if col not in out.columns:
+            out[col] = np.nan
+    if not {"rebalance_date", "ticker"}.issubset(out.columns):
+        return pd.DataFrame(columns=["rebalance_date", "ticker"])
+    out["rebalance_date"] = pd.to_datetime(out["rebalance_date"], errors="coerce").dt.normalize()
+    out["ticker"] = _normalise_ticker(out["ticker"])
+    mask = _mask_by_date(out, start, end)
+    missing = out[list(PHASE4_PMB_TARGET_COLUMNS)].isna().any(axis=1)
+    return out.loc[mask & missing & out["rebalance_date"].notna(), ["rebalance_date", "ticker"]].copy()
+
+
+def load_cached_price_panel_for_forward_labels(
+    panel: pd.DataFrame,
+    cfg: dict[str, Any] | None = None,
+    start: str | None = None,
+    end: str | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Load covering ticker caches for rows that still need forward labels."""
+    from tools.run_kr1000_backtest import (
+        _build_ticker_cache_index,
+        _cached_ticker_history_covering,
+    )
+
+    cfg = kr1000_leader_alpha_cfg(cfg or {})
+    work = _label_work(panel, start, end)
+    if work.empty:
+        return pd.DataFrame(columns=["date", "ticker", "close"]), {
+            "needed_tickers": 0,
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "rows": 0,
+        }
+    horizon_months = int(cfg.get("forward_label_horizon_months", 1) or 1)
+    label_as_of_raw = cfg.get("forward_label_as_of_date")
+    label_as_of = (
+        pd.Timestamp(label_as_of_raw).normalize()
+        if label_as_of_raw
+        else pd.Timestamp.today().normalize()
+    )
+    min_date = pd.Timestamp(work["rebalance_date"].min()).normalize()
+    max_date = pd.Timestamp(work["rebalance_date"].max()).normalize()
+    fetch_start_day = min_date - pd.Timedelta(days=10)
+    fetch_end_day = min(
+        max_date + pd.DateOffset(months=horizon_months) + pd.Timedelta(days=10),
+        label_as_of,
+    )
+    tickers = sorted(work["ticker"].dropna().astype(str).unique())
+    log(f"[forward-labels] indexing cache for {len(tickers)} label tickers")
+    cache_index = _build_ticker_cache_index()
+
+    frames: list[pd.DataFrame] = []
+    hits = 0
+    misses = 0
+    for i, ticker in enumerate(tickers, start=1):
+        if i == 1 or i % 100 == 0 or i == len(tickers):
+            log(f"[forward-labels] cached price preload {i}/{len(tickers)}")
+        hist = _cached_ticker_history_covering(ticker, fetch_start_day, fetch_end_day, cache_index)
+        if hist.empty:
+            misses += 1
+            continue
+        hits += 1
+        h = hist.copy()
+        h["ticker"] = ticker
+        h["date"] = pd.to_datetime(h["date"], errors="coerce").dt.normalize()
+        h["close"] = pd.to_numeric(h.get("close"), errors="coerce")
+        h = h.dropna(subset=["date", "ticker", "close"])
+        frames.append(h[["date", "ticker", "close"]])
+    if frames:
+        prices = pd.concat(frames, ignore_index=True).drop_duplicates(["date", "ticker"], keep="last")
+        prices = prices.sort_values(["ticker", "date"]).reset_index(drop=True)
+    else:
+        prices = pd.DataFrame(columns=["date", "ticker", "close"])
+    return prices, {
+        "needed_tickers": int(len(tickers)),
+        "cache_hits": int(hits),
+        "cache_misses": int(misses),
+        "rows": int(len(prices)),
+        "fetch_start": str(fetch_start_day.date()),
+        "fetch_end": str(fetch_end_day.date()),
+    }
+
+
 def _audit_labels(before: pd.DataFrame, after: pd.DataFrame, mask: pd.Series) -> dict[str, Any]:
     before_ready = _label_ready(before)
     after_ready = _label_ready(after)
@@ -160,15 +293,18 @@ def enrich_panel_with_forward_labels(
     for col in PHASE4_PMB_TARGET_COLUMNS:
         if col not in out.columns:
             out[col] = np.nan
-    mask = _mask_by_date(out, start, end)
     before = out.copy()
+    cleared = _clear_incomplete_forward_labels(out, cfg)
+    mask = _mask_by_date(out, start, end)
     if mask.any():
         subset = out.loc[mask].copy()
         enriched = add_forward_return_labels(subset, cfg=cfg, price_panel=price_panel)
         for col in PHASE4_PMB_TARGET_COLUMNS:
             if col in enriched.columns:
                 out.loc[enriched.index, col] = enriched[col]
-    return out, _audit_labels(before, out, mask)
+    audit = _audit_labels(before, out, mask)
+    audit["cleared_incomplete_horizon_rows"] = int(cleared)
+    return out, audit
 
 
 def main() -> int:
@@ -180,12 +316,25 @@ def main() -> int:
     cfg = kr1000_leader_alpha_cfg()
     if args.horizon_months is not None:
         cfg["forward_label_horizon_months"] = int(args.horizon_months)
+    cfg["forward_label_as_of_date"] = args.label_as_of or pd.Timestamp.today().strftime("%Y-%m-%d")
     if args.refresh_days is not None:
         cfg["forward_label_refresh_days"] = int(args.refresh_days)
+    cfg["forward_label_fetch_missing_prices"] = bool(args.fetch_missing_prices)
 
     log(f"[forward-labels] panel = {panel_path}")
     panel = _read_table(panel_path)
-    price_panel = _read_table(Path(args.price_panel)) if args.price_panel else None
+    cache_audit: dict[str, Any] | None = None
+    if args.price_panel:
+        price_panel = _read_table(Path(args.price_panel))
+    elif args.no_cache_preload:
+        price_panel = None
+    else:
+        price_panel, cache_audit = load_cached_price_panel_for_forward_labels(
+            panel,
+            cfg=cfg,
+            start=args.start,
+            end=args.end,
+        )
     enriched, audit = enrich_panel_with_forward_labels(
         panel,
         cfg=cfg,
@@ -201,7 +350,10 @@ def main() -> int:
         "price_panel": str(args.price_panel) if args.price_panel else None,
         "start": args.start,
         "end": args.end,
+        "label_as_of": cfg.get("forward_label_as_of_date"),
         "target_columns": list(PHASE4_PMB_TARGET_COLUMNS),
+        "cache_price_panel": cache_audit,
+        "fetch_missing_prices": bool(args.fetch_missing_prices),
         "audit": audit,
     }
     audit_path.parent.mkdir(parents=True, exist_ok=True)

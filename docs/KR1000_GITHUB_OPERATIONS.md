@@ -142,6 +142,11 @@ all features. `tools/run_kr1000_validation_gate.py --enrich-forward-labels`
 runs that bridge before P_MB OOS generation and passes the enriched scored
 panel into both the OOS builder and broker backtests.
 
+The enrichment bridge defaults to cache-only price loading. Use
+`--fetch-missing-prices` only when provider/network fetches are intended. Use
+`--label-as-of <date>` to prevent incomplete future horizons from being labeled;
+rows whose full forward horizon is not observable are cleared back to NaN.
+
 Official production pass/fail uses the locked `pmb_defensive_mdd_gate` strategy
 preset when `--strategy-ab` is run. The `full` score profile remains a baseline
 gate for diagnosis. P_MB and hybrid jobs cannot pass the official gate unless
@@ -209,7 +214,7 @@ python tools/run_kr1000_validation_gate.py --build-pmb-oos-picks --enrich-forwar
 Enrich an existing scored panel without a full feature rebuild:
 
 ```bash
-python tools/enrich_scored_panel_forward_labels.py --out feature_store/scored_panel_v0_forward_labels.parquet --audit-json outputs/scored_panel_forward_labels.json
+python tools/enrich_scored_panel_forward_labels.py --label-as-of <latest-observable-date> --out feature_store/scored_panel_v0_forward_labels.parquet --audit-json outputs/scored_panel_forward_labels.json
 ```
 
 Build purged P_MB OOS picks without overwriting the legacy research CSV:
@@ -291,6 +296,14 @@ As of the 2026-06-05 19:12 KST handoff:
   `forward_return_1m`. Existing full-feature panels can be bridged with
   `tools/enrich_scored_panel_forward_labels.py` so the purged 3-sleeve P_MB
   risk sleeve stops falling back to zero before a complete rebuild is ready.
+- The 2026-06-06 cache-only bridge enriched the current GDrive panel to
+  `34,744` fully observed label-ready rows across `2019-01` to `2024-12`.
+  Incomplete `2026-06` readiness rows were cleared by `--label-as-of
+  2026-06-06`.
+- The full-panel forward-label P_MB diagnostic is not a production challenger:
+  observed-mask defensive broker replay for `2020-2024` produced CAGR `4.26%`,
+  MDD `-28.38%`, Sharpe `0.38`, below the legacy P_MB defensive result
+  `25.38%` CAGR / `-24.00%` MDD.
 - The schema-union regression from `eligible_final=NaN` on historical rows is
   fixed and covered by `tests/test_kr1000_leader.py`.
 - Full score fails after proper NAV sizing (`CAGR -5.61%`, MDD `-50.01%` on

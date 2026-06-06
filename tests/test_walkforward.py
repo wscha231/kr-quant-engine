@@ -156,6 +156,23 @@ def test_risk_label_uses_forward_dd():
     assert out.loc[out["ticker"] == "B", "is_risk"].iloc[0] == 1   # exactly -21%
     assert out.loc[out["ticker"] == "C", "is_risk"].iloc[0] == 1
     assert out.loc[out["ticker"] == "D", "is_risk"].iloc[0] == 0
+    assert out["is_risk_observed"].sum() == 4
+
+
+@_test("risk_label_marks_missing_forward_target_unobserved")
+def test_risk_label_missing_forward_target_unobserved():
+    from kr_multibagger_classifier import label_risk
+    panel = pd.DataFrame({
+        "ticker": ["A", "B"],
+        "rebalance_date": [pd.Timestamp("2024-06-30")] * 2,
+        "forward_min_return_1m": [-0.25, np.nan],
+    })
+    out = label_risk(panel, horizon_months=1, drawdown_threshold=-0.20)
+    by_ticker = out.set_index("ticker")
+    assert by_ticker.loc["A", "is_risk"] == 1
+    assert by_ticker.loc["A", "is_risk_observed"] == 1
+    assert by_ticker.loc["B", "is_risk"] == 0
+    assert by_ticker.loc["B", "is_risk_observed"] == 0
 
 
 @_test("calibration_curve_within_tolerance")
@@ -225,12 +242,13 @@ def test_pmb_oos_feature_selector_excludes_leakage():
         "is_pre_entry": [0, 1, 0, 0, 1, 0],
         "is_continuation": [0, 0, 1, 0, 0, 1],
         "is_risk": [0, 0, 0, 1, 0, 0],
+        "is_risk_observed": [1, 1, 1, 1, 1, 1],
     })
     features = select_pmb_feature_columns(panel)
     assert "feat_value" in features
     for col in ("forward_return_1m", "target_next_month",
                 "p_pre_surge", "leader_rank", "is_pre_entry",
-                "is_continuation", "is_risk"):
+                "is_continuation", "is_risk", "is_risk_observed"):
         assert col not in features, f"leaky/generated column selected: {col}"
 
 
@@ -284,6 +302,55 @@ def test_forward_label_enrichment_helper():
     assert pd.isna(out.loc[1, "forward_return_1m"])
     assert audit["active_rows"] == 1
     assert audit["newly_label_ready_rows"] == 1
+
+
+@_test("forward label builder skips incomplete future horizon")
+def test_forward_label_builder_skips_incomplete_horizon():
+    from kr_pipeline import add_forward_return_labels
+
+    panel = pd.DataFrame({
+        "rebalance_date": [pd.Timestamp("2026-06-04")],
+        "ticker": ["000001"],
+    })
+    prices = pd.DataFrame({
+        "date": pd.to_datetime(["2026-06-04", "2026-06-30", "2026-07-03"]),
+        "ticker": ["000001", "000001", "000001"],
+        "close": [100.0, 120.0, 130.0],
+    })
+    out = add_forward_return_labels(
+        panel,
+        cfg={
+            "forward_label_horizon_months": 1,
+            "forward_label_as_of_date": "2026-06-06",
+        },
+        price_panel=prices,
+    )
+    assert pd.isna(out.loc[0, "forward_return_1m"])
+    assert pd.isna(out.loc[0, "forward_min_return_1m"])
+
+
+@_test("forward label enrichment clears stale incomplete labels")
+def test_forward_label_enrichment_clears_incomplete_labels():
+    from tools.enrich_scored_panel_forward_labels import enrich_panel_with_forward_labels
+
+    panel = pd.DataFrame({
+        "rebalance_date": [pd.Timestamp("2026-06-04")],
+        "ticker": ["000001"],
+        "forward_return_1m": [0.30],
+        "forward_min_return_1m": [-0.10],
+    })
+    out, audit = enrich_panel_with_forward_labels(
+        panel,
+        cfg={
+            "forward_label_horizon_months": 1,
+            "forward_label_as_of_date": "2026-06-06",
+            "forward_label_fetch_missing_prices": False,
+        },
+        price_panel=pd.DataFrame(columns=["date", "ticker", "close"]),
+    )
+    assert pd.isna(out.loc[0, "forward_return_1m"])
+    assert pd.isna(out.loc[0, "forward_min_return_1m"])
+    assert audit["cleared_incomplete_horizon_rows"] == 1
 
 
 @_test("train_entry_classifier exposes purged split controls")
