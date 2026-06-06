@@ -17,6 +17,7 @@ with install instructions. Cache reads still work without pykrx.
 from __future__ import annotations
 
 import time
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -46,6 +47,7 @@ except ImportError:
 
 CACHE_DIR = DATA_ROOT / "cache_pykrx"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_TICKER_HISTORY_CACHE_INDEX: dict[str, list[tuple[int, int, Path]]] | None = None
 
 
 def _require_pykrx() -> None:
@@ -90,6 +92,69 @@ def _save_cache(df: pd.DataFrame, path: Path) -> None:
         df.to_parquet(path, index=False)
     except Exception as e:
         log(f"[pykrx_client] cache write fail {path.name}: {e}", level="WARN")
+
+
+def _ticker_history_cache_index() -> dict[str, list[tuple[int, int, Path]]]:
+    """Index ticker history caches by ticker and covered date range."""
+    global _TICKER_HISTORY_CACHE_INDEX
+    if _TICKER_HISTORY_CACHE_INDEX is not None:
+        return _TICKER_HISTORY_CACHE_INDEX
+    pattern = re.compile(r"^ticker_(\d{6})_(\d{8})_(\d{8})\.parquet$")
+    index: dict[str, list[tuple[int, int, Path]]] = {}
+    for path in CACHE_DIR.glob("ticker_*.parquet"):
+        match = pattern.match(path.name)
+        if not match:
+            continue
+        try:
+            start_i = int(match.group(2))
+            end_i = int(match.group(3))
+        except ValueError:
+            continue
+        index.setdefault(match.group(1), []).append((start_i, end_i, path))
+    _TICKER_HISTORY_CACHE_INDEX = index
+    return index
+
+
+def _load_covering_ticker_history_cache(
+    ticker: str,
+    start: str,
+    end: str,
+) -> Optional[pd.DataFrame]:
+    """Load the narrowest existing ticker cache that covers start..end.
+
+    Historical feature rebuilds request many overlapping windows. Exact cache
+    keys make those rebuilds unnecessarily slow; broad cached histories are
+    immutable for already-observed dates and can be sliced PIT-safely.
+    """
+    wanted_start = int(_yyyymmdd(start))
+    wanted_end = int(_yyyymmdd(end))
+    best: tuple[int, Path] | None = None
+    for cache_start, cache_end, path in _ticker_history_cache_index().get(str(ticker).zfill(6), []):
+        if cache_start <= wanted_start and cache_end >= wanted_end:
+            span = cache_end - cache_start
+            if best is None or span < best[0]:
+                best = (span, path)
+    if best is None:
+        return None
+    try:
+        df = pd.read_parquet(best[1])
+    except Exception as e:
+        log(f"[pykrx_client] covering ticker cache read fail {best[1].name}: {e}", level="WARN")
+        return None
+    if df.empty or "date" not in df.columns:
+        return None
+    out = df.copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out = out.dropna(subset=["date"])
+    out = out[
+        (out["date"] >= pd.Timestamp(start))
+        & (out["date"] <= pd.Timestamp(end))
+    ].copy()
+    if out.empty:
+        return None
+    if "ticker" not in out.columns:
+        out["ticker"] = str(ticker).zfill(6)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +502,9 @@ def fetch_ticker_history(ticker: str, start: str, end: str, refresh_days: int = 
     cached = _load_cached(path, refresh_days)
     if cached is not None and not cached.empty:
         return cached
+    covering = _load_covering_ticker_history_cache(ticker, start, end)
+    if covering is not None and not covering.empty:
+        return covering
 
     df = pd.DataFrame()
     if PYKRX_AVAILABLE:

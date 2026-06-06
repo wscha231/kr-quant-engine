@@ -1,15 +1,16 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-06 18:35 KST
+## Current Status - 2026-06-06 21:25 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest pushed commit before this handoff: `c01b843`.
-Latest GitHub Smoke on `c01b843` succeeded:
-https://github.com/wscha231/kr-quant-engine/actions/runs/27057599166
+Latest pushed commit before this handoff: `3baac7e`.
+Latest GitHub Smoke on `3baac7e` succeeded:
+https://github.com/wscha231/kr-quant-engine/actions/runs/27058964711
 
-Draft PR body was last refreshed for `c01b843`.
+Draft PR body was last refreshed for `3baac7e` before the current uncommitted
+mcap leakage-audit changes.
 
 The active user target has been realigned to:
 
@@ -23,10 +24,39 @@ The active user target has been realigned to:
 Official metrics must be `broker_ledger_next_close` with next-close fills.
 CAGR `>= 35%` is now a stretch target only, not the official pass gate.
 
+Important current blocker:
+
+- The strengthened data audit now finds historical mcap cache leakage:
+  `mktcap_ALL` snapshots from `2016-01-29` through `2026-05-29` include a
+  54-snapshot identical fingerprint group without valid PIT provenance.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04`
+  now returns Critical `1`, High `0`, Medium `0`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --skip-backtests`
+  is blocked on `data_integrity_audit_has_critical`.
+- Do not record official 8y CAGR/MDD until those mcap caches are quarantined
+  or replaced with true PIT data.
+
 ## Current Local Change Set
 
-Latest data-gate-clear change set after `c01b843`:
+Latest uncommitted change set after `3baac7e`:
 
+- `tools/audit_data_integrity.py` now detects distant identical
+  `mktcap_ALL_YYYYMMDD.parquet` snapshots without explicit carry-forward
+  provenance and raises a Critical issue.
+- `kr_pykrx_client.fetch_ticker_history()` can reuse a broader covering ticker
+  history cache instead of refetching exact overlapping windows.
+- `kr_pipeline.find_incremental_scored_panel_cache()` now selects the best
+  overlapping PIT-safe scored panel, including later-start panels, while still
+  rejecting future-ended panels.
+- `kr_pipeline.build_scored_panel_v0()` now computes missing rebalance dates
+  rather than only dates after the prior panel max date.
+- `run_local.py` now supports `--panel-only` and `--no-forward-labels`.
+- `tools/run_kr1000_validation_gate.py --rebuild-scored-panel` now uses
+  `run_local.py --panel-only --no-forward-labels` by default; use
+  `--rebuild-forward-labels` or `--enrich-forward-labels` when target labels
+  are explicitly needed.
+- `tools/materialize_avg_value_proxy_caches.py --start 2016-01-01 --end 2018-12-31`
+  wrote `36` avg-value proxy caches, failed `0`.
 - `tools/materialize_mcap_carry_forward_caches.py` was added.
 - `tools/repair_scored_panel_fundamental_metadata.py` was added.
 - `tests/test_kr1000_data_repair_tools.py` was added.
@@ -57,10 +87,20 @@ Do not stage the unrelated dirty file:
 
 ## Data Gate Result
 
-Data-integrity blockers are cleared for the latest available local signal date:
+Data-integrity blockers are NOT cleared anymore. The newer audit found a root
+mcap/PIT data issue:
 
 - `py -3 tools\audit_data_integrity.py --as-of 2026-06-04`
-  -> Critical `0`, High `0`, Medium `0`.
+  -> Critical `1`, High `0`, Medium `0`.
+- Critical issue:
+  `mktcap cache has identical distant snapshots without carry-forward provenance`.
+- Duplicate group details from
+  `G:\내 드라이브\kr_quant_engine\outputs\data_integrity_audit_20260604.json`:
+  first date `2016-01-29`, last date `2026-05-29`, span `3773` days,
+  snapshot count `54`, rows `2772`.
+- The first examples include `2016-01-29`, `2016-02-29`, `2016-03-31`,
+  `2016-04-29`, `2016-05-31`, `2016-06-30` with no provenance, plus
+  carry-forward rows derived from those suspect sources.
 - `tools/materialize_mcap_carry_forward_caches.py --start 2016-01-01 --end 2026-06-04`
   wrote `28` PIT-safe mcap carry-forward proxy caches, skipped `97`, failed
   `0`, and rebuilt `historical_mcap.parquet` to `366,782` rows / `137`
@@ -86,11 +126,11 @@ Daily broker readiness is now correctly tied to actual holdings evidence:
   `current_holdings_raw.csv`, `current_holdings_raw.tsv`,
   `broker_holdings.csv`, `broker_holdings.tsv`, `holdings_export.csv`,
   `holdings_export.tsv`.
-- Data audit inside the daily check is clean: Critical `0`, High `0`,
-  Medium `0`.
+- After the mcap duplicate audit change, daily readiness should also be treated
+  as blocked by data integrity until the suspicious mcap snapshots are fixed.
 - The tool still writes an inspection trade plan, but it must not be treated as
   production-ready until `DATA_ROOT/state/current_holdings.csv` is present and
-  non-empty.
+  non-empty and the data audit has Critical `0`.
 
 Latest committed functional change set in `1c33aca`:
 
@@ -183,6 +223,27 @@ Completed on 2026-06-06 18:11 KST:
   holdings import automation change -> 7 passed, 0 failed.
 - `py -3 tests\test_kr1000_data_store.py` -> 7 passed, 0 failed.
 
+Completed on 2026-06-06 21:25 KST:
+
+- `py -3 -m py_compile tools\audit_data_integrity.py kr_pykrx_client.py run_local.py kr_pipeline.py tools\run_kr1000_validation_gate.py tests\test_kr1000_data_repair_tools.py tests\test_kr1000_data_store.py tests\test_kr1000_validation_gate.py`
+  -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 9 passed, 0 failed.
+- `py -3 tests\test_kr1000_data_store.py` -> 8 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 8 passed, 0 failed.
+- `py -3 tools\materialize_avg_value_proxy_caches.py --start 2016-01-01 --end 2018-12-31`
+  -> planned `36`, written `36`, skipped `0`, failed `0`.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04`
+  -> Critical `1`, High `0`, Medium `0`; detected distant identical mcap
+  snapshots without carry-forward provenance.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --skip-backtests --out-dir outputs\kr1000_validation_data_leak_audit_check`
+  -> blocked on `data_integrity_audit_has_critical`.
+- Attempted `run_local.py --quick --start-date 2018-01-01 --end-date 2026-06-04 --portfolio-size 20 --panel-only --no-collector --no-forward-labels`.
+  It timed out before producing a 2018-start scored panel; do not leave this
+  path running. The original bottleneck was per-ticker history fetching, so
+  `fetch_ticker_history()` was updated to reuse covering caches, but a
+  reliable full backfill still requires fixing/quarantining the suspect mcap
+  cache first.
+
 Backfill smoke:
 
 - `py -3 tools\materialize_avg_value_proxy_caches.py --start 2025-01-01 --end 2026-06-04 --dry-run`
@@ -208,17 +269,26 @@ Result: CAGR `28.15%`, MDD `-22.18%`, Sharpe `1.29`, KOSPI200 excess
 
 ## Next Production Steps
 
-1. If this change set has not yet been pushed, commit/push it and refresh the
-   draft PR body.
-2. Provide or sync actual `DATA_ROOT/state/current_holdings.csv`; rerun the
+1. Stage only the intended files from this session. Do not stage
+   `research/10_theme_lifecycle/leader_themes_per_quarter.csv`.
+2. Commit/push the mcap leakage audit / scoped backfill changes and refresh
+   the draft PR body.
+3. Quarantine or replace the suspicious `mktcap_ALL` cache group before
+   recording any official 8y CAGR/MDD. The flagged group spans `2016-01-29`
+   through `2026-05-29` and appears to contain current-list/FDR fallback data
+   written into historical dates.
+4. After mcap cache repair, rebuild `data_pit/historical_mcap.parquet` and
+   rerun `py -3 tools\audit_data_integrity.py --as-of 2026-06-04`; require
+   Critical `0`.
+5. Provide or sync actual `DATA_ROOT/state/current_holdings.csv`; rerun the
    daily broker check and require status `completed`. A raw broker export can
    be dropped into `DATA_ROOT/state/broker_holdings.csv` or one of the accepted
    raw filenames above and imported with `tools/import_current_holdings.py`.
-3. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
+6. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
    `2016-01-01`.
-4. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
-5. Run official validation with `--component-ab --strategy-ab`.
-6. If CAGR remains below `30%`, improve signal quality in this order:
+7. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
+8. Run official validation with `--component-ab --strategy-ab`.
+9. If CAGR remains below `30%`, improve signal quality in this order:
    `pmb + RS + flow + technical`, sector/theme RS exits, then macro regime
    sleeve scaling. Avoid exposure-only experiments until the 8y signal
    coverage problem is solved.

@@ -233,6 +233,9 @@ def test_validation_dry_run_widens_rebuild_start():
         cmd = rebuild["cmd"]
         assert "--start-date" in cmd
         assert cmd[cmd.index("--start-date") + 1] <= "2018-01-01"
+        assert "--incremental-max-new-months" not in cmd
+        assert "--panel-only" in cmd
+        assert "--no-forward-labels" in cmd
 
 
 if __name__ == "__main__":

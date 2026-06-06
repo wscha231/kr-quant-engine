@@ -120,10 +120,15 @@ def parse_args() -> argparse.Namespace:
                    ))
     p.add_argument("--full-rebuild", action="store_true",
                    help="Use run_local.py --full instead of --quick when --rebuild-scored-panel is set.")
-    p.add_argument("--rebuild-max-new-months", type=int, default=1,
+    p.add_argument("--rebuild-max-new-months", type=int, default=0,
                    help=(
                        "For cache-preserving quick rebuilds, compute only the latest N missing "
                        "rebalance dates. Use 0 to fill all missing months."
+                   ))
+    p.add_argument("--rebuild-forward-labels", action="store_true",
+                   help=(
+                       "Generate forward target labels during scored-panel rebuild. "
+                       "Default is off; use --enrich-forward-labels when P_MB risk labels are needed."
                    ))
     p.add_argument("--skip-collector", action="store_true",
                    help="Pass --no-collector to run_local.py rebuild.")
@@ -645,11 +650,14 @@ def main() -> int:
             "--start-date", rebuild_start,
             "--end-date", str(as_of.date()),
             "--portfolio-size", str(int(args.top_holdings)),
+            "--panel-only",
         ]
         if not args.full_rebuild and int(args.rebuild_max_new_months) > 0:
             cmd.extend(["--incremental-max-new-months", str(int(args.rebuild_max_new_months))])
         if args.skip_collector:
             cmd.append("--no-collector")
+        if not args.rebuild_forward_labels:
+            cmd.append("--no-forward-labels")
         commands.append({"step": "rebuild_scored_panel", "cmd": cmd})
 
     if args.build_latest_snapshot:

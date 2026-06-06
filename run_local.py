@@ -30,6 +30,8 @@ def parse_args() -> argparse.Namespace:
                    help="Full rebuild (no cache reuse).")
     p.add_argument("--verdict-only", action="store_true",
                    help="Skip run, print last verdict from outputs/.")
+    p.add_argument("--panel-only", action="store_true",
+                   help="Build/materialize scored_panel_v0 only; skip P0 selection/backtest/verdict.")
     p.add_argument("--no-collector", action="store_true",
                    help="Skip BOK macro collector step.")
     p.add_argument("--start-date", default=None,
@@ -40,6 +42,8 @@ def parse_args() -> argparse.Namespace:
                    help="Top-N. Default 30.")
     p.add_argument("--incremental-max-new-months", type=int, default=None,
                    help="When quick incremental rebuild is used, compute only the latest N missing rebalance dates.")
+    p.add_argument("--no-forward-labels", action="store_true",
+                   help="Skip forward target label generation during scored-panel rebuild.")
     p.add_argument("--phase0-momentum", default="auto",
                    help="'auto' | '0' | '1' - Phase 0 momentum toggle.")
     return p.parse_args()
@@ -62,6 +66,8 @@ def build_cfg(args: argparse.Namespace) -> dict:
         cfg["portfolio_size"] = args.portfolio_size
     if args.incremental_max_new_months is not None:
         cfg["scored_panel_incremental_max_new_months"] = int(args.incremental_max_new_months)
+    if args.no_forward_labels:
+        cfg["forward_label_enabled"] = False
     if args.full:
         cfg["reuse_existing_artifacts"] = False
     elif args.quick:
@@ -103,7 +109,16 @@ def main() -> int:
 
     log("[run_local] pipeline step")
     t0 = time.time()
-    from kr_pipeline import run_p0_baseline, run_verdict_only
+    from kr_pipeline import build_scored_panel_v0, run_p0_baseline, run_verdict_only
+    if args.panel_only:
+        panel = build_scored_panel_v0(
+            cfg.get("start_date", "2016-01-01"),
+            cfg.get("end_date"),
+            cfg=cfg,
+        )
+        log(f"[run_local] panel-only done in {(time.time()-t0)/60:.1f}min rows={len(panel)}")
+        return 0 if not panel.empty else 1
+
     result = run_p0_baseline(cfg)
     log(f"[run_local] pipeline done in {(time.time()-t0)/60:.1f}min")
 

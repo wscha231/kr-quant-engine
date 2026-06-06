@@ -121,6 +121,50 @@ def test_repair_scored_panel_fundamental_metadata():
     assert pd.Timestamp(repaired.loc[1, "fundamentals_period_end"]) == pd.Timestamp("2019-12-31")
 
 
+@_test("mcap duplicate audit flags distant non-provenanced snapshots")
+def test_mcap_duplicate_snapshot_audit_flags_leaky_current_fallback():
+    from tools.audit_data_integrity import _audit_mcap_duplicate_snapshots
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = pd.DataFrame({
+            "ticker": ["000001", "000002"],
+            "market_cap": [100.0, 200.0],
+            "listed_shares": [10.0, 20.0],
+            "volume": [1.0, 2.0],
+            "value": [1000.0, 2000.0],
+            "market": ["KOSPI", "KOSDAQ"],
+        })
+        base.to_parquet(root / "mktcap_ALL_20180131.parquet", index=False)
+        base.to_parquet(root / "mktcap_ALL_20250131.parquet", index=False)
+        audit = _audit_mcap_duplicate_snapshots(root, max_allowed_span_days=370)
+        assert audit["status"] == "failed"
+        assert audit["duplicate_groups"]
+        assert audit["duplicate_groups"][0]["span_days"] > 370
+
+
+@_test("mcap duplicate audit allows explicit carry-forward snapshots")
+def test_mcap_duplicate_snapshot_audit_allows_carry_forward():
+    from tools.audit_data_integrity import _audit_mcap_duplicate_snapshots
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        base = pd.DataFrame({
+            "ticker": ["000001", "000002"],
+            "market_cap": [100.0, 200.0],
+            "listed_shares": [10.0, 20.0],
+            "volume": [1.0, 2.0],
+            "value": [1000.0, 2000.0],
+            "market": ["KOSPI", "KOSDAQ"],
+            "mcap_snapshot_source": ["carry_forward", "carry_forward"],
+            "mcap_snapshot_true_source_date": [pd.Timestamp("2025-01-31"), pd.Timestamp("2025-01-31")],
+        })
+        base.to_parquet(root / "mktcap_ALL_20250131.parquet", index=False)
+        base.to_parquet(root / "mktcap_ALL_20260227.parquet", index=False)
+        audit = _audit_mcap_duplicate_snapshots(root, max_allowed_span_days=30)
+        assert audit["status"] == "passed"
+
+
 @_test("daily broker readiness blocks missing actual holdings evidence")
 def test_daily_broker_check_requires_holdings_file():
     from tools.run_kr1000_daily_broker_check import current_holdings_blockers

@@ -166,6 +166,7 @@ def build_scored_panel_v0(
     )
     prior_panel = pd.DataFrame()
     prior_max_date: Optional[pd.Timestamp] = None
+    prior_dates: set[pd.Timestamp] = set()
     if cfg.get("reuse_existing_artifacts", True) and cfg.get("scored_panel_incremental_rebuild", True):
         prior_path = find_incremental_scored_panel_cache(
             start_date,
@@ -179,23 +180,32 @@ def build_scored_panel_v0(
                     prior_panel["rebalance_date"] = pd.to_datetime(
                         prior_panel["rebalance_date"], errors="coerce"
                     ).dt.normalize()
+                    target_start = pd.Timestamp(start_date).normalize()
                     target_end = pd.Timestamp(end_date).normalize()
-                    prior_panel = prior_panel[prior_panel["rebalance_date"] <= target_end].copy()
+                    prior_panel = prior_panel[
+                        (prior_panel["rebalance_date"] >= target_start)
+                        & (prior_panel["rebalance_date"] <= target_end)
+                    ].copy()
                     prior_max_date = prior_panel["rebalance_date"].max()
+                    prior_dates = {
+                        pd.Timestamp(x).normalize()
+                        for x in prior_panel["rebalance_date"].dropna().unique()
+                    }
                     log(
                         f"[pipeline] incremental scored panel base {prior_path.name} "
-                        f"through {prior_max_date.strftime('%Y-%m-%d')}"
+                        f"covering {len(prior_dates)} month-ends through {prior_max_date.strftime('%Y-%m-%d')}"
                     )
             except Exception as e:
                 prior_panel = pd.DataFrame()
                 prior_max_date = None
+                prior_dates = set()
                 log(f"[pipeline] incremental scored panel read fail {prior_path.name}: {e}", level="WARN")
 
-    if prior_max_date is not None:
+    if prior_dates:
         build_month_ends = [
             pd.Timestamp(me).normalize()
             for me in month_ends
-            if pd.Timestamp(me).normalize() > prior_max_date
+            if pd.Timestamp(me).normalize() not in prior_dates
         ]
     else:
         build_month_ends = [pd.Timestamp(me).normalize() for me in month_ends]
@@ -299,39 +309,58 @@ def find_incremental_scored_panel_cache(
     feature_store: Optional[Path] = None,
     allow_prior_engine_versions: bool = False,
 ) -> Optional[Path]:
-    """Find the widest prior scored_panel cache with the same start date.
+    """Find the best prior scored_panel cache that overlaps the target window.
 
     Only panels whose filename end date is on or before the target end date are
     eligible. This prevents a future-dated panel from leaking into a historical
     rebuild while still allowing a weekly job to append only new month-ends.
+    The cache may start after the requested start date: the builder computes
+    missing leading months and reuses overlapping later rows.
     """
     root = Path(feature_store) if feature_store is not None else DATA_ROOT / "feature_store"
     if not root.exists():
         return None
     target_end = pd.Timestamp(end_date).normalize()
-    prefix = f"scored_panel_v0_{start_date}_"
-    candidates: list[tuple[pd.Timestamp, int, float, Path]] = []
-    for path in root.glob(f"{prefix}*.parquet"):
+    target_start = pd.Timestamp(start_date).normalize()
+    pattern = "scored_panel_v0_*.parquet"
+    candidates: list[tuple[int, int, pd.Timestamp, float, Path]] = []
+    for path in root.glob(pattern):
         name = path.name
-        if not name.startswith(prefix) or not name.endswith(".parquet"):
+        prefix = "scored_panel_v0_"
+        suffix = ".parquet"
+        if not name.startswith(prefix) or not name.endswith(suffix):
             continue
-        tail = name[len(prefix):-len(".parquet")]
-        raw_end, sep, engine_version = tail.partition("_")
-        if not sep:
+        tail = name[len(prefix):-len(suffix)]
+        parts = tail.split("_", 2)
+        if len(parts) != 3:
             continue
+        raw_start, raw_end, engine_version = parts
         engine_match = engine_version == KR_ENGINE_REUSE_VERSION
         if not engine_match and not allow_prior_engine_versions:
             continue
         try:
+            panel_start = pd.Timestamp(raw_start).normalize()
             panel_end = pd.Timestamp(raw_end).normalize()
         except Exception:
             continue
         if panel_end > target_end:
             continue
-        candidates.append((panel_end, 1 if engine_match else 0, path.stat().st_mtime, path))
+        overlap_start = max(panel_start, target_start)
+        overlap_end = min(panel_end, target_end)
+        if overlap_end < overlap_start:
+            continue
+        overlap_months = len(pd.period_range(overlap_start.to_period("M"), overlap_end.to_period("M"), freq="M"))
+        starts_at_or_before_target = 1 if panel_start <= target_start else 0
+        candidates.append((
+            overlap_months,
+            starts_at_or_before_target,
+            panel_end,
+            path.stat().st_mtime,
+            path,
+        ))
     if not candidates:
         return None
-    return max(candidates, key=lambda x: (x[0], x[1], x[2]))[3]
+    return max(candidates, key=lambda x: (x[0], x[1], x[2], x[3]))[4]
 
 
 # ---------------------------------------------------------------------------

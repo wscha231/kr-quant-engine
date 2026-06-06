@@ -135,6 +135,100 @@ def _scan_dated_cache(folder: Path, pattern: str) -> dict[str, Any]:
     }
 
 
+def _audit_mcap_duplicate_snapshots(
+    cache_dir: Path,
+    *,
+    max_allowed_span_days: int = 370,
+) -> dict[str, Any]:
+    """Detect suspicious identical mcap snapshots across distant dates.
+
+    A carried-forward cache can legitimately duplicate an earlier snapshot for
+    a bounded period and carries explicit provenance columns. An exact full
+    snapshot duplicate across years without carry-forward provenance is strong
+    evidence that a current-list fallback was written into historical cache.
+    """
+    out: dict[str, Any] = {
+        "status": "missing",
+        "files_checked": 0,
+        "duplicate_groups": [],
+        "max_allowed_span_days": int(max_allowed_span_days),
+    }
+    if not cache_dir.exists():
+        return out
+    pattern = re.compile(r"^mktcap_ALL_(\d{8})\.parquet$")
+    groups: dict[int, list[dict[str, Any]]] = {}
+    value_cols = ["ticker", "market_cap", "listed_shares", "volume", "value", "market"]
+    for path in sorted(cache_dir.glob("mktcap_ALL_*.parquet")):
+        match = pattern.match(path.name)
+        if not match:
+            continue
+        try:
+            snap_date = pd.Timestamp(match.group(1)).normalize()
+            df = pd.read_parquet(path)
+        except Exception:
+            continue
+        if df.empty or "ticker" not in df.columns:
+            continue
+        cols = [c for c in value_cols if c in df.columns]
+        if len(cols) < 3:
+            continue
+        work = df[cols].copy()
+        work["ticker"] = work["ticker"].astype(str).str.zfill(6)
+        work = work.sort_values("ticker").reset_index(drop=True)
+        fingerprint = int(pd.util.hash_pandas_object(work, index=False).sum())
+        source = ""
+        if "mcap_snapshot_source" in df.columns:
+            vals = df["mcap_snapshot_source"].dropna().astype(str)
+            source = vals.mode().iloc[0] if not vals.empty else ""
+        true_source_date = None
+        if "mcap_snapshot_true_source_date" in df.columns:
+            vals = pd.to_datetime(df["mcap_snapshot_true_source_date"], errors="coerce").dropna()
+            if not vals.empty:
+                true_source_date = str(vals.min().date())
+        groups.setdefault(fingerprint, []).append({
+            "date": snap_date,
+            "path": str(path),
+            "rows": int(len(df)),
+            "source": source,
+            "true_source_date": true_source_date,
+        })
+
+    flagged: list[dict[str, Any]] = []
+    for items in groups.values():
+        if len(items) < 2:
+            continue
+        dates = sorted(pd.Timestamp(x["date"]).normalize() for x in items)
+        span_days = int((dates[-1] - dates[0]).days)
+        if span_days <= int(max_allowed_span_days):
+            continue
+        all_carried = all(str(x.get("source") or "") == "carry_forward" for x in items)
+        if all_carried:
+            continue
+        flagged.append({
+            "first_date": str(dates[0].date()),
+            "last_date": str(dates[-1].date()),
+            "span_days": span_days,
+            "snapshot_count": int(len(items)),
+            "rows": int(max(int(x.get("rows", 0)) for x in items)),
+            "examples": [
+                {
+                    "date": str(pd.Timestamp(x["date"]).date()),
+                    "source": x.get("source") or "",
+                    "true_source_date": x.get("true_source_date"),
+                    "path": x.get("path"),
+                }
+                for x in sorted(items, key=lambda y: y["date"])[:8]
+            ],
+        })
+    out.update({
+        "status": "failed" if flagged else "passed",
+        "files_checked": int(sum(len(v) for v in groups.values())),
+        "duplicate_groups": flagged[:10],
+        "duplicate_groups_truncated": bool(len(flagged) > 10),
+    })
+    return out
+
+
 def _latest_scored_panel(feature_store: Path) -> Path | None:
     files = sorted(feature_store.glob("scored_panel_v0_*.parquet"),
                    key=lambda p: p.stat().st_mtime, reverse=True)
@@ -301,6 +395,7 @@ def build_audit(as_of: pd.Timestamp, stale_days: int) -> dict[str, Any]:
     scored_path = _latest_scored_panel(feature_store)
 
     mcap_cache = _scan_dated_cache(cache_pykrx, r"^mktcap_ALL_(\d{8})\.parquet$")
+    mcap_duplicate_audit = _audit_mcap_duplicate_snapshots(cache_pykrx)
     avg_cache = _scan_dated_cache(cache_misc, r"^avg_value_\d+d_(\d{8})\.parquet$")
 
     hist_info = _describe_parquet(historical_mcap)
@@ -324,6 +419,13 @@ def build_audit(as_of: pd.Timestamp, stale_days: int) -> dict[str, Any]:
 
     if mcap_cache["gaps_gt_45d"]:
         _add_issue(issues, "HIGH", "mktcap cache has month-level gaps >45 days", gaps=mcap_cache["gaps_gt_45d"][:10])
+    if mcap_duplicate_audit.get("status") == "failed":
+        _add_issue(
+            issues,
+            "CRITICAL",
+            "mktcap cache has identical distant snapshots without carry-forward provenance",
+            duplicate_groups=mcap_duplicate_audit.get("duplicate_groups", [])[:3],
+        )
     if avg_cache["gaps_gt_45d"]:
         _add_issue(issues, "HIGH", "avg_trading_value cache has gaps >45 days", gaps=avg_cache["gaps_gt_45d"][:10])
 
@@ -366,6 +468,7 @@ def build_audit(as_of: pd.Timestamp, stale_days: int) -> dict[str, Any]:
         },
         "cache_coverage": {
             "mktcap_ALL": mcap_cache,
+            "mktcap_duplicate_snapshot_audit": mcap_duplicate_audit,
             "avg_value": avg_cache,
         },
         "workflows": workflows,

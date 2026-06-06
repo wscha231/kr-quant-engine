@@ -6,6 +6,74 @@
 
 ## 2026-06-06
 
+### 21:25 KST - kr1000-mcap-leakage-audit-and-backfill-scope
+
+**Scope**: Tightened the KR1000 data gate after detecting historical mcap
+snapshots that are identical across distant dates without PIT provenance.
+
+**What landed**:
+- Added duplicate mcap snapshot detection to `tools/audit_data_integrity.py`.
+- The audit now flags distant identical `mktcap_ALL_YYYYMMDD.parquet` groups as
+  `CRITICAL` unless they are explicitly marked as carry-forward snapshots.
+- Added broad covering ticker-history cache reuse in
+  `kr_pykrx_client.fetch_ticker_history()` so historical feature rebuilds do
+  not refetch when a wider cached history already covers the requested window.
+- Updated `kr_pipeline.build_scored_panel_v0()` incremental rebuild logic to
+  reuse overlapping scored panels, including later-start panels, and compute
+  only missing rebalance dates.
+- Added `run_local.py --panel-only` and `run_local.py --no-forward-labels`.
+- `tools/run_kr1000_validation_gate.py --rebuild-scored-panel` now defaults to
+  panel-only rebuilds without forward labels; use `--rebuild-forward-labels`
+  or `--enrich-forward-labels` when target labels are explicitly needed.
+- Materialized 2016-2018 avg-value proxy caches from mcap snapshots:
+  `36` written, `0` failed.
+
+**Operational result**:
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` now reports
+  Critical `1`, High `0`, Medium `0`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --skip-backtests`
+  is blocked by `data_integrity_audit_has_critical`.
+- The flagged mcap group spans `2016-01-29` to `2026-05-29`, `54` snapshots,
+  `2772` rows, without valid PIT provenance on the original snapshots.
+- Official 8y broker-ledger performance must not be recorded until those
+  historical mcap caches are quarantined/replaced with true PIT data.
+
+**symbols_added**:
+- tools.audit_data_integrity._audit_mcap_duplicate_snapshots
+- tests/test_kr1000_data_repair_tools.py::test_mcap_duplicate_snapshot_audit_flags_leaky_current_fallback
+- tests/test_kr1000_data_repair_tools.py::test_mcap_duplicate_snapshot_audit_allows_carry_forward
+- tests/test_kr1000_data_store.py::test_ticker_history_covering_cache_reuse
+
+**symbols_changed**:
+- kr_pykrx_client.fetch_ticker_history
+- kr_pipeline.build_scored_panel_v0
+- kr_pipeline.find_incremental_scored_panel_cache
+- run_local.parse_args
+- run_local.build_cfg
+- tools.run_kr1000_validation_gate.parse_args
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Data integrity gate now fails on distant identical mcap snapshots without
+  carry-forward provenance.
+- Validation-gate scored-panel rebuilds skip forward target labels unless
+  explicitly requested.
+
+**Validation**:
+- `py -3 -m py_compile tools\audit_data_integrity.py kr_pykrx_client.py run_local.py kr_pipeline.py tools\run_kr1000_validation_gate.py tests\test_kr1000_data_repair_tools.py tests\test_kr1000_data_store.py tests\test_kr1000_validation_gate.py`
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 9 passed, 0 failed.
+- `py -3 tests\test_kr1000_data_store.py` -> 8 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 8 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `1`,
+  High `0`, Medium `0`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --skip-backtests --out-dir outputs\kr1000_validation_data_leak_audit_check`
+  -> blocked on `data_integrity_audit_has_critical`.
+
+---
+
 ### 18:35 KST - kr1000-broker-holdings-import-automation
 
 **Scope**: Added a broker-export import path so actual holdings can be fed

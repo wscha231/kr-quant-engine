@@ -90,7 +90,7 @@ def test_avg_value_prior_cache_selection():
         ) is None
 
 
-@_test("scored-panel incremental cache ignores future or different-start panels")
+@_test("scored-panel incremental cache selects best overlapping PIT-safe panel")
 def test_incremental_scored_panel_cache_selection():
     from kr_config import KR_ENGINE_REUSE_VERSION
     from kr_pipeline import find_incremental_scored_panel_cache
@@ -99,9 +99,9 @@ def test_incremental_scored_panel_cache_selection():
         root = Path(tmp)
         expected = root / f"scored_panel_v0_2016-01-01_2024-12-31_{KR_ENGINE_REUSE_VERSION}.parquet"
         future = root / f"scored_panel_v0_2016-01-01_2026-12-31_{KR_ENGINE_REUSE_VERSION}.parquet"
-        wrong_start = root / f"scored_panel_v0_2019-01-01_2026-06-04_{KR_ENGINE_REUSE_VERSION}.parquet"
+        later_start = root / f"scored_panel_v0_2019-01-01_2026-06-04_{KR_ENGINE_REUSE_VERSION}.parquet"
         older = root / f"scored_panel_v0_2016-01-01_2023-12-31_{KR_ENGINE_REUSE_VERSION}.parquet"
-        for path in (expected, future, wrong_start, older):
+        for path in (expected, future, later_start, older):
             path.touch()
 
         selected = find_incremental_scored_panel_cache(
@@ -110,6 +110,12 @@ def test_incremental_scored_panel_cache_selection():
             feature_store=root,
         )
         assert selected == expected
+        selected_late_start = find_incremental_scored_panel_cache(
+            "2018-01-01",
+            "2026-06-04",
+            feature_store=root,
+        )
+        assert selected_late_start == later_start
 
 
 @_test("mktcap value proxy fallback is PIT-safe and date limited")
@@ -172,6 +178,38 @@ def test_latest_snapshot_classifier_feature_carry_is_pit_safe():
     assert float(out.loc[0, "roe"]) == 0.20
     assert meta["carry_source_max_date"] == "2024-12-30"
     assert meta["carried_feature_count"] >= 1
+
+
+@_test("ticker history fetch can reuse broader covering cache")
+def test_ticker_history_covering_cache_reuse():
+    import kr_pykrx_client
+
+    old_cache_dir = kr_pykrx_client.CACHE_DIR
+    old_index = kr_pykrx_client._TICKER_HISTORY_CACHE_INDEX
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            kr_pykrx_client.CACHE_DIR = Path(tmp)
+            kr_pykrx_client._TICKER_HISTORY_CACHE_INDEX = None
+            pd.DataFrame({
+                "date": pd.to_datetime(["2020-01-01", "2020-01-31", "2020-02-28"]),
+                "close": [10.0, 11.0, 12.0],
+                "volume": [100, 100, 100],
+                "ticker": ["000001", "000001", "000001"],
+            }).to_parquet(
+                Path(tmp) / "ticker_000001_20200101_20200228.parquet",
+                index=False,
+            )
+            out = kr_pykrx_client._load_covering_ticker_history_cache(
+                "000001",
+                "20200115",
+                "20200215",
+            )
+            assert out is not None
+            assert len(out) == 1
+            assert float(out.iloc[0]["close"]) == 11.0
+        finally:
+            kr_pykrx_client.CACHE_DIR = old_cache_dir
+            kr_pykrx_client._TICKER_HISTORY_CACHE_INDEX = old_index
 
 
 @_test("GitHub workflows import and sync private current holdings state")

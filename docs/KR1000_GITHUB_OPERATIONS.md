@@ -157,10 +157,18 @@ caches before broker backtests. If the weekly run is too slow, first improve
 cache reuse and scoped backfill; do not substitute a liquidity-only latest
 snapshot for official CAGR/MDD evidence.
 
-Full scored-panel rebuilds add `forward_return_1m` and
-`forward_min_return_1m` target-label columns. These columns are used only for
-P_MB risk-sleeve labeling and are excluded from classifier features by the
-`forward_` prefix.
+`tools/audit_data_integrity.py` also checks whether distant
+`cache_pykrx/mktcap_ALL_YYYYMMDD.parquet` snapshots are byte-for-byte
+identical without explicit carry-forward provenance. Treat this as a critical
+PIT/data-leakage failure. Historical current-list or FDR fallback snapshots
+must be quarantined or replaced with a true PIT source before any 8y broker
+metric is recorded.
+
+Validation-gate scored-panel rebuilds run `run_local.py --panel-only
+--no-forward-labels` by default. This materializes the feature panel without
+the legacy P0 backtest or expensive forward target labels. Forward labels are
+used only for P_MB risk-sleeve labeling and are excluded from classifier
+features by the `forward_` prefix.
 
 When a usable full-feature scored panel already exists but lacks those target
 labels, use `tools/enrich_scored_panel_forward_labels.py` instead of rebuilding
