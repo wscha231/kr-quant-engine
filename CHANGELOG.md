@@ -6,6 +6,50 @@
 
 ## 2026-06-06
 
+### 17:26 KST - kr1000-avg-value-proxy-cache-backfill
+
+**Scope**: Materialized PIT-safe avg-value proxy caches to remove the
+2025-2026 `avg_trading_value` cache gap blocker.
+
+**What landed**:
+- Added `tools/materialize_avg_value_proxy_caches.py`.
+- The tool writes `avg_value_60d_YYYYMMDD.parquet` from the existing PIT-safe
+  `mktcap_ALL_YYYYMMDD.value` proxy and preserves `avg_value_source`.
+- Existing true avg-value caches are skipped unless `--overwrite` is supplied.
+
+**Operational result**:
+- Dry-run planned 15 proxy cache writes and skipped 2 existing true caches.
+- Materialized proxy caches for `2025-01-31` through `2026-03-31`.
+- `tools/audit_data_integrity.py --as-of 2026-06-04` improved from High `4`
+  to High `3`; the `avg_trading_value cache has gaps >45 days` issue is gone.
+- Remaining High items are mcap cache gaps and stale scored-panel fundamentals
+  metadata that requires a scored-panel rebuild.
+
+**symbols_added**:
+- tools/materialize_avg_value_proxy_caches.py
+
+**symbols_changed**:
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\materialize_avg_value_proxy_caches.py`
+- `py -3 tools\materialize_avg_value_proxy_caches.py --start 2025-01-01 --end 2026-06-04 --dry-run`
+  -> planned `15`, skipped `2`, failed `0`.
+- `py -3 tools\materialize_avg_value_proxy_caches.py --start 2025-01-01 --end 2026-06-04`
+  -> wrote `15`, skipped `2`, failed `0`.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`,
+  High `3`, Medium `0`.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_avg_proxy`
+  -> planned 14 broker backtests, target CAGR `0.30`.
+
+---
+
 ### 17:07 KST - kr1000-pit-cache-safety-audit-tightening
 
 **Scope**: Tightened PIT data safety around historical market-cap cache

@@ -229,6 +229,18 @@ This tool disables FDR current-list fallback. If pykrx returns empty for an
 old date, the date is left failed rather than saving current listings into a
 historical PIT cache.
 
+Materialize PIT-safe avg-value proxy caches:
+
+```bash
+python tools/materialize_avg_value_proxy_caches.py --start 2025-01-01 --end <latest-trading-date> --dry-run
+python tools/materialize_avg_value_proxy_caches.py --start 2025-01-01 --end <latest-trading-date>
+```
+
+This writes `avg_value_60d_YYYYMMDD.parquet` using the PIT mcap snapshot
+`value` column, not true 60-day OHLCV-derived average value. The output keeps
+`avg_value_source=mktcap_value_proxy:<YYYYMMDD>` so downstream diagnostics can
+separate true liquidity caches from proxy caches.
+
 Build purged P_MB OOS picks without overwriting the legacy research CSV:
 
 ```bash
@@ -331,8 +343,9 @@ As of the 2026-06-06 16:41 KST handoff:
   MDD `-28.38%`, Sharpe `0.38`, below the legacy P_MB defensive result
   `25.38%` CAGR / `-24.00%` MDD.
 - The workflow-audit false positive is fixed: full validation-gate workflows
-  count as broker-backtest automation. Current data audit is Critical `0`,
-  High `4`, Medium `0`.
+  count as broker-backtest automation.
+- PIT-safe avg-value proxy caches were materialized for `2025-01-31` through
+  `2026-03-31`; current data audit is Critical `0`, High `3`, Medium `0`.
 - Historical mcap gap backfill is now PIT-safe but currently source-blocked:
   a `--max-dates 1` smoke returned an empty pykrx result for `2016-07-29`;
   no FDR fallback or empty cache parquet was saved.
@@ -345,9 +358,8 @@ As of the 2026-06-06 16:41 KST handoff:
   lacks 8y OOS coverage.
 
 The next production step is to resolve the remaining High data-audit findings:
-historical mcap gaps, avg-value cache gaps, and stale scored-panel fundamentals
-metadata. Then run a full-feature 2018-current backfill, purged P_MB OOS
-regeneration, and component/strategy A/B toward CAGR `>= 30%` under the
-broker-ledger/MDD gate. CAGR `>= 35%` remains the stretch target after the
-official gate is cleared. Avoid more exposure-only experiments until the
-signal panel is richer.
+historical mcap gaps and stale scored-panel fundamentals metadata. Then run a
+full-feature 2018-current backfill, purged P_MB OOS regeneration, and
+component/strategy A/B toward CAGR `>= 30%` under the broker-ledger/MDD gate.
+CAGR `>= 35%` remains the stretch target after the official gate is cleared.
+Avoid more exposure-only experiments until the signal panel is richer.

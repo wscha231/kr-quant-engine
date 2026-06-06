@@ -5,11 +5,11 @@
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest pushed commit: `ca002b3`.
-Latest GitHub Smoke on `ca002b3` succeeded:
-https://github.com/wscha231/kr-quant-engine/actions/runs/27057166085
+Latest pushed commit: `24fbc9b`.
+Latest GitHub Smoke on `24fbc9b` succeeded:
+https://github.com/wscha231/kr-quant-engine/actions/runs/27057233429
 
-Draft PR body has been refreshed for `ca002b3`.
+Draft PR body has been refreshed for `24fbc9b`.
 
 The active user target has been realigned to:
 
@@ -25,7 +25,15 @@ CAGR `>= 35%` is now a stretch target only, not the official pass gate.
 
 ## Current Local Change Set
 
-The latest committed change set in `ca002b3`:
+There is a new local uncommitted change set after `24fbc9b`:
+
+- `tools/materialize_avg_value_proxy_caches.py` was added.
+- PIT-safe avg-value proxy caches were materialized for `2025-01-31` through
+  `2026-03-31`.
+- `tools/audit_data_integrity.py --as-of 2026-06-04` is now Critical `0`,
+  High `3`, Medium `0`; the avg-value cache gap issue is cleared.
+
+Prior committed change set in `ca002b3`:
 
 - `kr_features.sanitize_fundamental_period_metadata()` repairs stale cached
   DART rows where `period_end > rcept_dt` before PIT joins.
@@ -85,8 +93,7 @@ Completed on 2026-06-06 16:41 KST:
   -> planned 14 broker backtests, target CAGR `0.30`, including
   `pmb_mid_rank_7_23` and `pmb_mid_rank_no_leverage_mdd_gate`.
 - `py -3 tools\audit_data_integrity.py --as-of 2026-06-04`
-  -> Critical `0`, High `4`, Medium `0` after the local audit false-positive
-  fix.
+  -> Critical `0`, High `3`, Medium `0` after proxy avg-value materialization.
 - `py -3 tests\test_dart_pit.py` -> 17 passed, 0 failed.
 - `py -3 tests\test_kr1000_validation_gate.py` -> 8 passed, 0 failed.
 - `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
@@ -96,7 +103,6 @@ Completed on 2026-06-06 16:41 KST:
 Data-audit high findings still need follow-up before official 8y performance:
 
 - mcap cache has month-level gaps >45 days.
-- avg_trading_value cache has gaps >45 days.
 - 113 scored rows have `fundamentals_period_end` after `rebalance_date`.
 - 293 scored rows have `fundamentals_period_end` after `fundamentals_rcept_dt`;
   audit note says this is likely non-December fiscal-year metadata mapped as
@@ -104,6 +110,10 @@ Data-audit high findings still need follow-up before official 8y performance:
 
 Backfill smoke:
 
+- `py -3 tools\materialize_avg_value_proxy_caches.py --start 2025-01-01 --end 2026-06-04 --dry-run`
+  -> planned 15 proxy cache writes, skipped 2 existing true caches, failed 0.
+- `py -3 tools\materialize_avg_value_proxy_caches.py --start 2025-01-01 --end 2026-06-04`
+  -> wrote 15 proxy cache files, skipped 2 existing true caches, failed 0.
 - `py -3 tools\backfill_mcap_cache_gaps.py --start 2016-01-01 --end 2026-06-04 --dry-run`
   -> 28 missing business-month-end mcap cache dates.
 - `py -3 tools\backfill_mcap_cache_gaps.py --start 2016-01-01 --end 2026-06-04 --max-dates 1`
@@ -123,13 +133,14 @@ Result: CAGR `28.15%`, MDD `-22.18%`, Sharpe `1.29`, KOSPI200 excess
 
 ## Next Production Steps
 
-1. Resolve remaining data-audit High items: mcap cache gaps, avg-value cache
-   gaps, and stale scored-panel fundamentals metadata.
-2. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
+1. Commit/push the local avg-value proxy cache materialization tool/docs.
+2. Resolve remaining data-audit High items: mcap cache gaps and stale
+   scored-panel fundamentals metadata.
+3. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
    `2016-01-01`.
-3. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
-4. Run official validation with `--component-ab --strategy-ab`.
-5. If CAGR remains below `30%`, improve signal quality in this order:
+4. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
+5. Run official validation with `--component-ab --strategy-ab`.
+6. If CAGR remains below `30%`, improve signal quality in this order:
    `pmb + RS + flow + technical`, sector/theme RS exits, then macro regime
    sleeve scaling. Avoid exposure-only experiments until the 8y signal
    coverage problem is solved.
