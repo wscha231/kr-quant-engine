@@ -5,11 +5,11 @@
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest pushed commit: `3667a02`.
-Latest GitHub Smoke on `3667a02` succeeded:
-https://github.com/wscha231/kr-quant-engine/actions/runs/27056628049
+Latest pushed commit: `ca002b3`.
+Latest GitHub Smoke on `ca002b3` succeeded:
+https://github.com/wscha231/kr-quant-engine/actions/runs/27057166085
 
-Draft PR body has been refreshed for `3667a02`.
+Draft PR body has been refreshed for `ca002b3`.
 
 The active user target has been realigned to:
 
@@ -25,7 +25,7 @@ CAGR `>= 35%` is now a stretch target only, not the official pass gate.
 
 ## Current Local Change Set
 
-There is a new local uncommitted change set after `3667a02`:
+The latest committed change set in `ca002b3`:
 
 - `kr_features.sanitize_fundamental_period_metadata()` repairs stale cached
   DART rows where `period_end > rcept_dt` before PIT joins.
@@ -123,14 +123,13 @@ Result: CAGR `28.15%`, MDD `-22.18%`, Sharpe `1.29`, KOSPI200 excess
 
 ## Next Production Steps
 
-1. Commit/push the local PIT cache-safety and audit-tightening change set.
-2. Resolve remaining data-audit High items: mcap cache gaps, avg-value cache
+1. Resolve remaining data-audit High items: mcap cache gaps, avg-value cache
    gaps, and stale scored-panel fundamentals metadata.
-3. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
+2. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
    `2016-01-01`.
-4. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
-5. Run official validation with `--component-ab --strategy-ab`.
-6. If CAGR remains below `30%`, improve signal quality in this order:
+3. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
+4. Run official validation with `--component-ab --strategy-ab`.
+5. If CAGR remains below `30%`, improve signal quality in this order:
    `pmb + RS + flow + technical`, sector/theme RS exits, then macro regime
    sleeve scaling. Avoid exposure-only experiments until the 8y signal
    coverage problem is solved.
