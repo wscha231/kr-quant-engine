@@ -1,13 +1,14 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-06 14:36 KST
+## Current Status - 2026-06-06 14:42 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest checked pushed commit: `58230d4`.
-Latest GitHub Smoke on `58230d4` succeeded:
-https://github.com/wscha231/kr-quant-engine/actions/runs/27053746266
+Latest pushed commit: `b850775`.
+Latest GitHub Smoke on `b850775` succeeded:
+https://github.com/wscha231/kr-quant-engine/actions/runs/27053991700
+Draft PR body has been updated to the active `35%` target and bridge status.
 
 The active user target is:
 
@@ -117,28 +118,18 @@ Validation after current forward-label edits:
 - Backtest/test output directories under `outputs/` are evidence only and are
   gitignored.
 
-Files intended for the next commit:
-
-- `.github/workflows/quarterly_backtest.yml`
-- `tools/enrich_scored_panel_forward_labels.py`
-- `tools/run_kr1000_validation_gate.py`
-- `tests/test_walkforward.py`
-- `docs/KR1000_GITHUB_OPERATIONS.md`
-- `SESSION_HANDOFF.md`
-- `CHANGELOG.md`
+No KR1000 implementation files are pending after `b850775`.
 
 ## Next Step
 
-1. Commit/push the forward-label enrichment bridge and update the draft PR
-   body from the stale `30%` text to the active `35%` target.
-2. Run the bridge on the current GDrive scored panel if a full rebuild is too
+1. Run the bridge on the current GDrive scored panel if a full rebuild is too
    slow:
    `py -3 tools\enrich_scored_panel_forward_labels.py --out <feature_store\scored_panel_v0_forward_labels.parquet>`.
-3. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
+2. Rebuild full-feature scored panel from at least `2018-01-01`, preferably
    `2016-01-01`.
-4. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
-5. Run official validation with `--component-ab --strategy-ab`.
-6. If CAGR remains below `35%`, improve signal quality in this order:
+3. Generate purged P_MB OOS picks for `2018-current` with active risk sleeve.
+4. Run official validation with `--component-ab --strategy-ab`.
+5. If CAGR remains below `35%`, improve signal quality in this order:
    hybrid `pmb+RS+flow+technical`, sector/theme RS exits, then macro regime
    sleeve scaling. Avoid exposure-only experiments until signal coverage
    improves.
