@@ -6,6 +6,62 @@
 
 ## 2026-06-07
 
+### 08:50 KST - pmb-broad-realized-rerank-diagnostic
+
+**Scope**: Added a broader KR1000 realized-outcome reranker for PIT-safe P_MB
+OOS picks. Unlike the selected-only reranker, this trains return/loss models
+from the full scored KR1000 panel, then scores only the OOS P_MB candidate rows
+for each test month.
+
+**What landed**:
+- Added `tools/build_pmb_broad_realized_rerank_picks.py`.
+- Added `tests/test_pmb_broad_realized_rerank.py`.
+- Wired the new broad reranker test into GitHub Smoke.
+- Hardened broad scored-panel preparation so `in_kr1000` flags are parsed
+  safely from bool, numeric, or string cache formats.
+
+**Diagnostic result**:
+- Built `outputs/p_mb_oos_picks_broad_realized_rerank_2018_20260604.csv`
+  with `3,060` rows over `2018-01-31` to `2026-06-04`.
+- Coverage passed: `102/102` official months.
+- Broad model training saw `102,227/159,005` realized broad rows and used
+  `18/20` available feature columns.
+- Broker-ledger next-close 2018-01-02 to 2026-06-04 still failed:
+  - broad realized rerank top20: CAGR `2.86%`, MDD `-38.83%`,
+    excess CAGR `-15.71%`, Sharpe `0.248`.
+  - broad realized rerank top15: CAGR `-0.84%`, MDD `-41.34%`,
+    excess CAGR `-19.41%`, Sharpe `0.053`.
+  - broad realized rerank top20 + DD ladder: CAGR `-2.08%`, MDD `-29.03%`,
+    excess CAGR `-20.64%`, Sharpe `-0.146`.
+  - best tested broad variant, base plus loss: CAGR `3.32%`, MDD `-38.62%`,
+    excess CAGR `-15.25%`, Sharpe `0.270`.
+- Conclusion: a broad linear realized-return/loss reranker does not fix the
+  P_MB false-positive problem. The next improvement should rebuild the P_MB
+  label design and loss model, not tune exposure.
+
+**symbols_added**:
+- tools/build_pmb_broad_realized_rerank_picks.py
+- tools.build_pmb_broad_realized_rerank_picks.add_realized_next_rebalance_returns
+- tools.build_pmb_broad_realized_rerank_picks.build_broad_realized_rerank_picks
+- tests/test_pmb_broad_realized_rerank.py
+- tests/test_pmb_broad_realized_rerank.py::test_add_realized_next_rebalance_returns
+- tests/test_pmb_broad_realized_rerank.py::test_broad_reranker_uses_pre_embargo_broad_rows
+
+**symbols_changed**:
+- .github/workflows/smoke_test.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none. The broad reranker is a diagnostic sidecar and
+does not replace the official P_MB OOS file or production gate.
+
+**Validation**:
+- `py -3 -m py_compile tools\build_pmb_broad_realized_rerank_picks.py tests\test_pmb_broad_realized_rerank.py` -> passed.
+- `py -3 tests\test_pmb_broad_realized_rerank.py` -> 2 passed, 0 failed.
+- `py -3 tools\build_pmb_broad_realized_rerank_picks.py --scored-panel <GDrive scored panel> --price-panel <GDrive price panel> --pmb-oos-picks <GDrive P_MB OOS picks> --target-start 2018-01-01 --target-end 2026-06-04 --out outputs\p_mb_oos_picks_broad_realized_rerank_2018_20260604.csv --k-per-month 30 --embargo-months 3 --min-train-rows 5000 --pmb-weight 0.04 --return-weight 1.0 --risk-penalty 0.10 --fail-on-coverage-gap` -> passed.
+
 ### 08:30 KST - pmb-pre-entry-risk-rerank-challengers
 
 **Scope**: Preserved P_MB OOS risk/pre-entry columns in the broker path,

@@ -63,6 +63,17 @@ reranked top20 produced CAGR `2.30%`, MDD `-39.30%`. The current evidence says
 simple P_MB pre-entry filtering and linear realized-history reranking are not
 enough to reach the target.
 
+A broader realized-history reranker was then tested through
+`tools/build_pmb_broad_realized_rerank_picks.py`. It trains pre-embargo
+return/loss models from the full scored KR1000 panel, then scores only the
+PIT-safe P_MB OOS candidates for each month. Coverage passed for all `102/102`
+official months from 2018-01 through 2026-06, but broker-ledger next-close
+results still failed: top20 CAGR `2.86%`, MDD `-38.83%`; top15 CAGR `-0.84%`,
+MDD `-41.34%`; top20 with DD ladder CAGR `-2.08%`, MDD `-29.03%`; best tested
+broad variant `base_plus_loss` CAGR `3.32%`, MDD `-38.62%`. Do not repeat
+linear broad realized reranking as the next alpha path; rebuild P_MB label
+definitions and false-positive/risk modeling first.
+
 ## GitHub Workflows
 
 Production automation is split into three lanes:
@@ -454,6 +465,7 @@ python tests/test_kr1000_leader.py
 python tests/test_kr1000_validation_gate.py
 python tests/test_pmb_oos_quality.py
 python tests/test_pmb_realized_rerank.py
+python tests/test_pmb_broad_realized_rerank.py
 python tools/run_kr1000_validation_gate.py --component-ab --strategy-ab --dry-run
 ```
 
@@ -517,13 +529,18 @@ As of the 2026-06-07 08:05 KST handoff:
 - Pre-entry/risk filters improve drawdown but not return. The best MDD
   challenger from the 2026-06-07 pass, `pmb_pre_entry_blend_regime` top15,
   produced CAGR `1.64%`, MDD `-23.80%`, excess CAGR `-16.93%`.
-- PIT realized-history reranking did not fix the signal. The reranked top20
-  broker run produced CAGR `2.30%`, MDD `-39.30%`.
+- PIT realized-history reranking did not fix the signal. The selected-only
+  reranked top20 broker run produced CAGR `2.30%`, MDD `-39.30%`.
+- Broad KR1000 realized-history reranking also failed despite full official
+  coverage. The broad top20 run produced CAGR `2.86%`, MDD `-38.83%`; the
+  best tested broad variant, `base_plus_loss`, produced CAGR `3.32%`, MDD
+  `-38.62%`.
 
 The next production step is to provide/sync actual
 `DATA_ROOT/state/current_holdings.csv` for the daily broker readiness path, then
 rebuild the P_MB label design itself. In particular, inspect fold-level false
-positives and train a loss-aware model from a broader universe, not only from
-already selected P_MB rows. CAGR `>= 35%` remains the stretch target after the
+positives, add label definitions that separate pre-surge winners from ordinary
+high-volatility stocks, and prove loss probability has realized correlation
+before adding exposure. CAGR `>= 35%` remains the stretch target after the
 official `>= 30%` gate is cleared. Avoid more exposure-only experiments until
 the realized signal-quality audit improves.
