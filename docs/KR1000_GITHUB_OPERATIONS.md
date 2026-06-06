@@ -31,6 +31,7 @@ Production automation is split into three lanes:
 
 - Weekday light run after KRX close:
   - refresh latest market-cap/PIT snapshot and price-derived liquidity caches
+  - append a latest scored snapshot after refresh and before broker readiness
   - skip full `avg_value_60d`
   - run data-integrity and daily broker readiness gates
   - sync refreshed PIT/cache/output artifacts back to GDrive
@@ -53,6 +54,8 @@ change or suspected cache corruption requires a from-scratch rebuild.
 `Daily KR1000 Broker Check`
 
 - Lightweight daily operating bridge.
+- Syncs model metadata from GDrive, refreshes latest market/PIT data, appends a
+  latest scored snapshot, then evaluates current holdings.
 - Produces the latest current-holdings trade plan.
 - It may be `blocked` when the scored panel is stale or the data audit finds a
   critical issue. Fix data freshness/PIT leakage first; do not record official
@@ -107,7 +110,15 @@ without rebuilding every full feature:
 - `data_pit/historical_mcap.parquet`
 - `data_pit/listed_history.parquet`
 - `cache_misc/avg_value_60d_YYYYMMDD.parquet` when explicitly requested
+- `feature_store/scored_panel_v0_*_<latest>_*.parquet`
 - daily broker check JSON/Markdown/trade-plan outputs
+
+When `models/classifier_latest.cbm` and `classifier_latest_metrics.json` are
+available, the latest daily snapshot uses `--classifier-mode auto` to add
+live-only P_MB probabilities. Missing classifier features are filled from each
+ticker's prior full-feature scored-panel row with `rebalance_date < as_of`.
+This is PIT-safe for live readiness because it does not use same-day or future
+rows, but it is still not official backtest evidence.
 
 Weekly full automation is the path for official performance evidence. It runs
 the collector-backed rebuild path and can update price, DART, macro,
@@ -138,9 +149,17 @@ python tools/build_latest_kr1000_scored_snapshot.py --as-of <latest-trading-date
 python tools/run_kr1000_validation_gate.py --as-of <latest-trading-date> --skip-backtests
 ```
 
-This path is for daily broker readiness only. `--no-rs` creates
-`latest_fast_liquidity_only` rows; do not use those rows as official
-CAGR/MDD evidence.
+This path is for daily broker readiness only. With a classifier available,
+`--no-rs` creates `latest_fast_liquidity_only_live_pmb` rows and ranks the
+latest candidates by `score_profile=pmb_pre_surge`. Without a classifier it
+falls back to `latest_fast_liquidity_only` rows. Do not use either latest-only
+path as official CAGR/MDD evidence.
+
+Light validation with the same ordering GitHub uses:
+
+```bash
+python tools/run_kr1000_validation_gate.py --refresh-data --skip-avg-value-refresh --build-latest-snapshot --skip-backtests
+```
 
 Full rebuild and official validation:
 
@@ -176,6 +195,13 @@ target and is not an 8y official pass.
 Daily hard-exit disabled A/B on the same P_MB OOS window worsened to CAGR
 `21.64%`, MDD `-31.22%`, Sharpe `1.00`. Keep daily hard-exit enabled until a
 new signal component proves otherwise in the same broker harness.
+
+As of the 2026-06-06 live-PMB automation pass, the latest `2026-06-04`
+readiness snapshot can score 1000 KR1000 rows with `classifier_latest.cbm`,
+using `110/110` aligned features and `102` carry-forward features from prior
+full-feature rows. The daily broker check completed with
+`score_profile=pmb_pre_surge`, but this remains live readiness evidence, not an
+official 8y CAGR/MDD pass.
 
 ## How Other Agents Should Improve Performance
 

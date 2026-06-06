@@ -53,6 +53,7 @@ jobs:
           rclone copy gdrive:kr_quant_engine/cache_macro data/cache_macro -P || true
           rclone copy gdrive:kr_quant_engine/cache_dart data/cache_dart -P || true
           rclone copy gdrive:kr_quant_engine/feature_store data/feature_store -P || true
+          rclone copy gdrive:kr_quant_engine/models data/models -P || true
           rclone copy gdrive:kr_quant_engine/outputs data/outputs -P || true
           rclone copy gdrive:kr_quant_engine/state data/state -P || true
 
@@ -74,6 +75,14 @@ jobs:
             ARGS="$ARGS --as-of ${{ github.event.inputs.evaluation_date }}"
           fi
           python tools/refresh_kr1000_daily_data.py $ARGS
+
+      - name: Build latest KR1000 scored snapshot
+        run: |
+          ARGS="--no-rs"
+          if [ -n "${{ github.event.inputs.evaluation_date }}" ]; then
+            ARGS="$ARGS --as-of ${{ github.event.inputs.evaluation_date }}"
+          fi
+          python tools/build_latest_kr1000_scored_snapshot.py $ARGS
 
       - name: Run daily broker check
         id: broker
@@ -97,12 +106,14 @@ jobs:
           rclone copy data/data_pit gdrive:kr_quant_engine/data_pit -P || true
           rclone copy data/cache_misc gdrive:kr_quant_engine/cache_misc -P || true
           rclone copy data/cache_pykrx gdrive:kr_quant_engine/cache_pykrx -P || true
+          rclone copy data/feature_store gdrive:kr_quant_engine/feature_store -P || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: daily-kr1000-broker-check-${{ github.run_number }}
           path: |
+            data/outputs/kr1000_latest_scored_snapshot_*.json
             data/outputs/kr1000_daily_broker_check_*.json
             data/outputs/kr1000_daily_broker_check_*.md
             data/outputs/kr1000_daily_broker_trade_plan_*.csv

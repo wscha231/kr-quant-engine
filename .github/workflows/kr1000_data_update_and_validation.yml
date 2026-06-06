@@ -112,7 +112,7 @@ jobs:
 
           case "${{ steps.mode.outputs.mode }}" in
             light)
-              ARGS="$ARGS --refresh-data --skip-avg-value-refresh --skip-backtests"
+              ARGS="$ARGS --refresh-data --skip-avg-value-refresh --build-latest-snapshot --skip-backtests"
               ;;
             full)
               ARGS="$ARGS --refresh-data --rebuild-scored-panel"
@@ -162,6 +162,7 @@ jobs:
         with:
           name: kr1000-validation-${{ steps.mode.outputs.mode }}-${{ github.run_number }}
           path: |
+            data/outputs/kr1000_latest_scored_snapshot_*.json
             data/outputs/kr1000_validation_gate_*/**
             data/outputs/kr1000_daily_broker_check_*.json
             data/outputs/kr1000_daily_broker_check_*.md

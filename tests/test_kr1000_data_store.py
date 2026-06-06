@@ -144,6 +144,36 @@ def test_mktcap_value_proxy_fallback():
         ).empty
 
 
+@_test("latest snapshot carries classifier features from prior full rows only")
+def test_latest_snapshot_classifier_feature_carry_is_pit_safe():
+    from tools.build_latest_kr1000_scored_snapshot import _carry_forward_classifier_features
+
+    latest = pd.DataFrame({
+        "rebalance_date": [pd.Timestamp("2026-06-04")],
+        "ticker": ["000001"],
+        "market_cap": [123.0],
+    })
+    base = pd.DataFrame({
+        "rebalance_date": [
+            pd.Timestamp("2024-12-30"),
+            pd.Timestamp("2026-06-04"),
+        ],
+        "ticker": ["000001", "000001"],
+        "market_cap": [999.0, 9999.0],
+        "roe": [0.20, 0.99],
+    })
+    out, meta = _carry_forward_classifier_features(
+        latest,
+        base,
+        pd.Timestamp("2026-06-04"),
+        ["market_cap", "roe"],
+    )
+    assert float(out.loc[0, "market_cap"]) == 123.0
+    assert float(out.loc[0, "roe"]) == 0.20
+    assert meta["carry_source_max_date"] == "2024-12-30"
+    assert meta["carried_feature_count"] >= 1
+
+
 if __name__ == "__main__":
     print(f"kr1000 data-store tests: {PASSED} passed, {FAILED} failed")
     sys.exit(0 if FAILED == 0 else 1)

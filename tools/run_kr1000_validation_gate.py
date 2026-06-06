@@ -84,6 +84,8 @@ def parse_args() -> argparse.Namespace:
                    help="Pass --skip-avg-value to data refresh for a lighter PIT mcap update.")
     p.add_argument("--rebuild-scored-panel", action="store_true",
                    help="Run run_local.py to rebuild scored_panel_v0 through --as-of before auditing.")
+    p.add_argument("--build-latest-snapshot", action="store_true",
+                   help="Append a fast latest scored snapshot after data refresh and before daily broker readiness.")
     p.add_argument("--rebuild-start-date", default=None,
                    help=(
                        "Start date for scored-panel rebuild. Default: in quick mode, "
@@ -435,6 +437,17 @@ def main() -> int:
         if args.skip_collector:
             cmd.append("--no-collector")
         commands.append({"step": "rebuild_scored_panel", "cmd": cmd})
+
+    if args.build_latest_snapshot:
+        commands.append({
+            "step": "build_latest_snapshot",
+            "cmd": [
+                sys.executable,
+                _script("tools/build_latest_kr1000_scored_snapshot.py"),
+                "--as-of", str(as_of.date()),
+                "--no-rs",
+            ],
+        })
 
     if args.dry_run:
         backtest_jobs = _planned_backtests(args, as_of, out_dir)

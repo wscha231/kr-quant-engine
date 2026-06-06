@@ -4,6 +4,88 @@
 
 ---
 
+## 2026-06-06
+
+### 12:16 KST - kr1000-live-pmb-daily-automation
+
+**Scope**: Upgraded the daily KR1000 data-to-broker automation so the latest
+readiness snapshot can use the persisted P_MB classifier instead of ranking
+all latest rows with neutral scores.
+
+**What landed**:
+- `tools/build_latest_kr1000_scored_snapshot.py` can now infer the previous
+  KRX close when `--as-of` is omitted.
+- Added `--classifier-mode {auto,none,require}` to the latest snapshot builder.
+  In `auto` mode, it loads `models/classifier_latest.cbm` when available and
+  keeps neutral scoring when the model is absent.
+- Added PIT-safe classifier feature carry-forward from each ticker's prior
+  full-feature scored-panel row. Rows dated on or after the latest snapshot
+  date are excluded so repeated latest snapshots cannot feed themselves.
+- When live classifier scoring is applied, latest `--no-rs` snapshots use
+  `score_profile=pmb_pre_surge`; cached-RS snapshots use `hybrid_pmb_rs`.
+- `tools/run_kr1000_daily_broker_check.py` now respects an embedded
+  single-valued `score_profile` from the scored panel before recomputing ranks.
+- GitHub daily broker workflow now syncs `models`, builds the latest scored
+  snapshot before broker readiness, syncs `feature_store` back to GDrive, and
+  uploads the latest snapshot manifest.
+- GitHub light data/validation workflow now runs
+  `--build-latest-snapshot` inside `tools/run_kr1000_validation_gate.py` after
+  data refresh and before daily broker readiness.
+
+**Operational result**:
+- Local live-PMB latest snapshot test for `2026-06-04` scored 1000 KR1000 rows
+  with `classifier_latest.cbm`.
+- Feature alignment: `110/110` classifier features shared, `102` carried from
+  prior full-feature rows.
+- P_MB probability distribution: min `0.000012`, mean `0.2193`, max `0.9526`.
+- Daily broker check on the live-PMB snapshot completed with signal age `0`,
+  no blockers, `score_profile=pmb_pre_surge`, and a 22-row trade plan
+  (`BUY:20`, `SELL:2` using the example holdings file).
+- This improves daily stock-selection readiness. It is explicitly not official
+  CAGR/MDD evidence because carried features and latest live classifier scoring
+  are not a purged 8y broker-ledger backtest.
+
+**symbols_added**:
+- tools/build_latest_kr1000_scored_snapshot.previous_krx_close_date
+- tools/build_latest_kr1000_scored_snapshot._find_classifier
+- tools/build_latest_kr1000_scored_snapshot._load_classifier_feature_cols
+- tools/build_latest_kr1000_scored_snapshot._carry_forward_classifier_features
+- tools/build_latest_kr1000_scored_snapshot._score_live_classifier
+- tests/test_kr1000_data_store.py::test_latest_snapshot_classifier_feature_carry_is_pit_safe
+
+**symbols_changed**:
+- tools/build_latest_kr1000_scored_snapshot.parse_args
+- tools/build_latest_kr1000_scored_snapshot.build_latest_snapshot
+- tools/build_latest_kr1000_scored_snapshot.main
+- tools/run_kr1000_daily_broker_check.main
+- tools/run_kr1000_validation_gate.parse_args
+- tools/run_kr1000_validation_gate.main
+- .github/workflows/daily_kr1000_broker_check.yml
+- .github/workflows/kr1000_data_update_and_validation.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none. New behavior is CLI/workflow driven.
+
+**breaking_changes**: none. `--classifier-mode auto` degrades to the previous
+neutral latest snapshot behavior when the classifier or metadata is unavailable.
+
+**Validation**:
+- `py -3 tools\build_latest_kr1000_scored_snapshot.py --as-of 2026-06-04 --no-rs --classifier-mode require --out H:\kr_quant_engine\outputs\kr1000_latest_live_pmb_test.parquet --out-dir H:\kr_quant_engine\outputs\kr1000_latest_live_pmb_test`
+  -> 1000 latest rows, `latest_fast_liquidity_only_live_pmb`.
+- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04 --scored-panel H:\kr_quant_engine\outputs\kr1000_latest_live_pmb_test.parquet --current-holdings state\current_holdings.example.csv --out-dir H:\kr_quant_engine\outputs\kr1000_live_pmb_broker_check_test`
+  -> `completed`, signal age `0`, blockers `[]`, `score_profile=pmb_pre_surge`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --refresh-data --skip-avg-value-refresh --build-latest-snapshot --skip-backtests --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_live_snapshot`
+  -> planned commands `refresh_data`, then `build_latest_snapshot`.
+- `py -3 tests\test_kr1000_data_store.py` -> 6 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 4 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 11 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 -m py_compile tools\run_kr1000_daily_broker_check.py tools\build_latest_kr1000_scored_snapshot.py tools\run_kr1000_validation_gate.py`
+  -> passed.
+
+---
+
 ## 2026-06-05
 
 ### 19:12 KST - kr1000-schema-union-broker-ab

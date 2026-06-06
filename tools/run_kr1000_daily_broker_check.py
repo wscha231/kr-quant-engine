@@ -186,6 +186,15 @@ def main() -> int:
     signal_age = int((evaluation_date - signal_date).days)
 
     latest = raw[raw[date_col] == signal_date].copy()
+    embedded_profiles = []
+    if "score_profile" in latest.columns:
+        embedded_profiles = [
+            str(x).strip()
+            for x in latest["score_profile"].dropna().unique().tolist()
+            if str(x).strip()
+        ]
+    if len(embedded_profiles) == 1:
+        cfg["score_profile"] = embedded_profiles[0]
     latest = compute_leader_scores(latest, cfg)
     target = build_target_portfolio(latest, cfg, as_of_date=signal_date)
     holdings_raw = load_current_holdings(args.current_holdings)
@@ -219,6 +228,7 @@ def main() -> int:
         "current_holding_count": int(len(holdings)),
         "trade_plan_rows": int(len(plan)),
         "action_counts": {str(k): int(v) for k, v in action_counts.items()},
+        "score_profile": str(cfg.get("score_profile", "full")),
         "blockers": blockers,
         "price_status": price_status,
         "data_audit_summary": audit.get("summary", {}),
