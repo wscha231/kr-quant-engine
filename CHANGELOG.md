@@ -6,6 +6,76 @@
 
 ## 2026-06-07
 
+### 08:05 KST - pmb-oos-realized-return-diagnostics
+
+**Scope**: Extended the P_MB OOS quality audit to use broker-like realized
+next-rebalance holding returns from the daily price panel, added CI coverage
+for the diagnostic helpers, and recorded that the current P_MB ranking still
+does not meet the 8y broker-ledger gate.
+
+**What landed**:
+- Added optional `--price-panel` support to `tools/analyze_pmb_oos_quality.py`.
+- Added realized diagnostic columns:
+  `realized_entry_date`, `realized_exit_date`, `realized_entry_close`,
+  `realized_exit_close`, `realized_holding_return`, `realized_min_return`,
+  `realized_max_return`, and `realized_holding_days`.
+- Added `analysis_return`, `analysis_min_return`, and
+  `analysis_return_source` so summaries use realized next-rebalance returns
+  when available and fall back to sparse forward labels otherwise.
+- Added `tests/test_pmb_oos_quality.py` and wired it into GitHub Smoke.
+
+**Diagnostic result**:
+- `py -3 tools\analyze_pmb_oos_quality.py --start 2018-01-01 --end 2026-06-04 --out-dir outputs\pmb_oos_quality_realized_2018_20260604`
+  wrote realized-return diagnostics using
+  `analysis_return_source=realized_next_rebalance`.
+- P_MB OOS rows: `2,708` over `102` months.
+- Observed forward-label rows: `534`; observed realized rows: `2,438`.
+- Realized filter summary:
+  - all P_MB OOS: mean `0.758%`, median `-1.606%`, loss `< -10%` rate
+    `23.46%`.
+  - rank `7..23`: mean `1.336%`, median `-1.331%`.
+  - rank `7..23` and benchmark 3m positive: mean `1.799%`, median
+    `-0.942%`.
+  - `rs_3m_nonpos` has lower loss risk than `rs_3m_pos`; high RS is still
+    not a clean confirmation edge.
+- Realized factor correlations remain weak:
+  - `market_cap` correlation `+0.0399`.
+  - `p_pre_surge` correlation `+0.0346`.
+  - `rs_score` correlation `+0.0122`.
+  - `rs_3m` correlation `-0.0076`.
+- Rank-window broker grid still fails the official target:
+  - best tested variant `r7_23_antirs`, top15: CAGR `6.235%`,
+    MDD `-34.18%`, excess CAGR `-12.33%`, Sharpe `0.421`.
+
+**symbols_added**:
+- tools.analyze_pmb_oos_quality._add_realized_holding_returns
+- tools.analyze_pmb_oos_quality._choose_analysis_return_source
+- tests/test_pmb_oos_quality.py
+- tests/test_pmb_oos_quality.py::test_add_realized_holding_returns
+- tests/test_pmb_oos_quality.py::test_analysis_source_prefers_realized_returns
+- tests/test_pmb_oos_quality.py::test_analysis_source_falls_back_to_forward_labels
+
+**symbols_changed**:
+- tools.analyze_pmb_oos_quality.parse_args
+- tools.analyze_pmb_oos_quality.build_quality_report
+- tools.analyze_pmb_oos_quality.main
+- .github/workflows/smoke_test.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none. The diagnostic keeps forward-label fallback when a
+daily price panel is not supplied.
+
+**Validation**:
+- `py -3 -m py_compile tools\analyze_pmb_oos_quality.py tests\test_pmb_oos_quality.py` -> passed.
+- `py -3 tests\test_pmb_oos_quality.py` -> 3 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+
 ### 07:35 KST - pmb-oos-quality-audit-and-regime-challengers
 
 **Scope**: Added a repeatable P_MB OOS quality audit, introduced two

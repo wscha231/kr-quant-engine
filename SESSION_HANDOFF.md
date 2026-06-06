@@ -1,18 +1,18 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-07 07:35 KST
+## Current Status - 2026-06-07 08:05 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest pushed commit before this handoff: `c59e83d`.
-Latest known GitHub Smoke on `c59e83d` succeeded:
-https://github.com/wscha231/kr-quant-engine/actions/runs/27074801422
+Latest pushed commit before this handoff: `5ee59fa`.
+Latest known GitHub Smoke on `5ee59fa` succeeded:
+https://github.com/wscha231/kr-quant-engine/actions/runs/27075818477
 
 Active official target:
 
 - broker-ledger next-close backtest over 8y+
-- CAGR `>= 30%` official gate; active stretch objective still wants `35%`
+- CAGR `>= 30%` official gate; `>= 35%` remains stretch objective
 - MDD `>= -25%`
 - KOSPI200 excess CAGR `> 0`
 - Sharpe `> 1.0`
@@ -29,32 +29,44 @@ Do not stage or revert this unrelated dirty file:
 
 Intended files in this handoff:
 
-- `kr1000_leader.py`
+- `.github/workflows/smoke_test.yml`
 - `tools/analyze_pmb_oos_quality.py`
-- `tests/test_kr1000_leader.py`
-- `tests/test_kr1000_validation_gate.py`
+- `tests/test_pmb_oos_quality.py`
 - `CHANGELOG.md`
 - `SESSION_HANDOFF.md`
 - `docs/KR1000_GITHUB_OPERATIONS.md`
 
 ## What Changed
 
-Added two diagnostic P_MB regime profiles:
+`tools/analyze_pmb_oos_quality.py` now accepts an optional daily price panel
+through `--price-panel`. When available, the audit computes realized
+next-rebalance holding returns using broker-like timing:
 
-- `pmb_mid_rank_regime`: P_MB OOS ranks `7..23` only when benchmark 3m return
-  is positive.
-- `pmb_mid_tech_regime`: same, plus positive `technical_score`.
+1. signal after `rebalance_date` close
+2. entry at the next available close
+3. exit at the next available close after the next monthly signal date
 
-These profiles use `score_profile_eligible_flag`, now respected by
-`compute_leader_scores()`, so a profile can go to cash when there are no
-qualified names instead of buying zero-score filler rows.
+The report adds:
 
-Added `tools/analyze_pmb_oos_quality.py`, which rebuilds the official prepared
-panel, merges PIT-safe purged P_MB OOS picks, and exports by-year,
-rank-bucket, filter, and factor-correlation diagnostics.
+- `realized_entry_date`
+- `realized_exit_date`
+- `realized_entry_close`
+- `realized_exit_close`
+- `realized_holding_return`
+- `realized_min_return`
+- `realized_max_return`
+- `realized_holding_days`
+- `analysis_return`
+- `analysis_min_return`
+- `analysis_return_source`
 
-Existing `pmb_pre_surge` and `pmb_mid_rank_7_23` behavior is preserved. The
-cash-off behavior is only in the new challenger profiles.
+Summaries and correlations use `analysis_return`. That means realized returns
+are used when a price panel is present; sparse forward labels remain the
+fallback when no realized observations exist.
+
+`tests/test_pmb_oos_quality.py` covers realized-return timing and analysis
+source selection without depending on external price/cache data. GitHub Smoke
+now runs that test file.
 
 ## Current Data/Leakage State
 
@@ -72,12 +84,12 @@ evidence is missing. Required canonical path:
 
 - `DATA_ROOT/state/current_holdings.csv`
 
-## Latest P_MB OOS Quality Result
+## Latest Realized P_MB OOS Quality Result
 
 Command:
 
 ```bash
-py -3 tools\analyze_pmb_oos_quality.py --start 2018-01-01 --end 2026-06-04 --out-dir outputs\pmb_oos_quality_2018_20260604
+py -3 tools\analyze_pmb_oos_quality.py --start 2018-01-01 --end 2026-06-04 --out-dir outputs\pmb_oos_quality_realized_2018_20260604
 ```
 
 Output summary:
@@ -85,35 +97,57 @@ Output summary:
 - P_MB OOS rows: `2,708`
 - months: `102`
 - observed forward-label rows: `534`
-- all P_MB OOS mean 1m `0.66%`, median `-2.19%`
-- rank `7..23` mean 1m `1.32%`, median `-1.85%`
-- rank `7..23` + benchmark 3m positive mean 1m `2.61%`, median `-1.58%`
-- `trend_template_pass` mean 1m `-0.32%`, average min 1m drawdown worse than
-  all P_MB OOS
-- P_MB internal factor correlations are negative for recent momentum:
-  `rs_6m -0.118`, `rs_3m -0.101`, `rs_score -0.078`
+- observed realized rows: `2,438`
+- `analysis_return_source`: `realized_next_rebalance`
 
-Conclusion: positive RS/trend confirmation is not working for P_MB OOS in the
-observed label sample. The next signal work should investigate early reversal,
-liquidity/large-cap tilt, and risk labeling rather than adding positive RS.
+Realized filter summary:
+
+- all P_MB OOS: mean `0.758%`, median `-1.606%`, loss `< -10%` rate
+  `23.46%`
+- rank `7..23`: mean `1.336%`, median `-1.331%`
+- benchmark 3m positive: mean `1.493%`, median `-1.364%`
+- rank `7..23` + benchmark 3m positive: mean `1.799%`, median `-0.942%`
+- `rs_3m_nonpos`: mean `0.560%`, median `-0.810%`, lower loss risk than
+  `rs_3m_pos`
+- `trend_template_pass`: mean `0.640%`, median `-2.922%`, worse drawdown
+  profile
+- rank `7..23` + large-cap half: mean `1.551%`, median `-0.363%`
+
+Realized factor correlations are weak:
+
+- `market_cap`: `+0.0399`
+- `p_pre_surge`: `+0.0346`
+- `rs_1m`: `+0.0175`
+- `rs_score`: `+0.0122`
+- `technical_score`: `-0.0027`
+- `rs_3m`: `-0.0076`
+- `rs_6m`: `-0.0086`
+- `pmb_oos_rank`: `-0.0112`
+
+Risk diagnostic: high RS/momentum still worsens 10% loss risk. `p_pre_surge`
+and `market_cap` modestly reduce loss risk; `technical_score`,
+`trend_template_score`, `avg_trading_value_60d`, `rs_1m`, `rs_3m`, and
+`rs_score` increase loss risk in this sample.
 
 ## Latest Broker-Ledger Results
 
 Still failed:
 
-- `pmb_mid_rank_regime` top20: CAGR `1.92%`, MDD `-38.10%`
-- `pmb_mid_tech_regime` top20: CAGR `1.79%`, MDD `-36.89%`
-- compact `pmb_mid_rank_7_23` grid best: top15/gross `0.70` CAGR `9.49%`,
-  MDD `-38.64%`
-- ad-hoc anti-momentum grid best: mid-rank + large-cap tilt top15 CAGR
-  `5.52%`, MDD `-40.98%`
-- mid-rank + anti-RS top15: CAGR `5.03%`, MDD `-33.16%`
+- best rank-window grid variant `r7_23_antirs`, top15: CAGR `6.235%`,
+  MDD `-34.18%`, excess CAGR `-12.33%`, Sharpe `0.421`
+- `r7_23_large`, top20: CAGR `4.984%`, MDD `-35.01%`
+- `r13_23_antirs`, top10: CAGR `4.400%`, MDD `-37.74%`
+- earlier `pmb_mid_rank_regime` top20: CAGR `1.92%`, MDD `-38.10%`
+- earlier `pmb_mid_tech_regime` top20: CAGR `1.79%`, MDD `-36.89%`
 
-The target is not met. Current bottleneck is P_MB label/ranking quality.
+The target is not met. Current bottleneck is P_MB label/ranking quality plus
+drawdown-risk control, not the broker ledger harness.
 
 ## Tests Run In This Work
 
-- `py -3 -m py_compile kr1000_leader.py tools\analyze_pmb_oos_quality.py tests\test_kr1000_leader.py` -> passed.
+- `py -3 -m py_compile tools\analyze_pmb_oos_quality.py tests\test_pmb_oos_quality.py` -> passed.
+- `py -3 tools\analyze_pmb_oos_quality.py --start 2018-01-01 --end 2026-06-04 --out-dir outputs\pmb_oos_quality_realized_2018_20260604` -> passed.
+- `py -3 tests\test_pmb_oos_quality.py` -> 3 passed, 0 failed.
 - `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
 - `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
 - `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
@@ -121,12 +155,14 @@ The target is not met. Current bottleneck is P_MB label/ranking quality.
 
 ## Next Engineering Steps
 
-1. Inspect P_MB training labels and selected features by fold. The OOS picks
-   have weak positive mean but negative median, so ranking quality is the main
-   blocker.
-2. Audit why 2020, 2023, 2025, and 2026 ledger years work better while 2018,
-   2019, 2022, and 2024 drag down CAGR/MDD.
-3. Test early-reversal and liquidity/large-cap tilt as formal score profiles,
-   but only keep them if 2018-current broker-ledger improves both CAGR and MDD.
-4. Revisit risk sleeve labeling; `p_risk` is not yet cutting enough drawdown.
+1. Inspect P_MB training labels and selected features by fold. The realized
+   OOS picks have positive mean but negative median, so ranking quality is the
+   main blocker.
+2. Build a loss-aware P_MB risk sleeve that directly predicts next-rebalance
+   `realized_min_return` / `loss < -10%`, then test it in the same broker
+   harness.
+3. Rework confirmation logic away from naive positive RS/trend. Current data
+   says high RS raises loss risk in P_MB OOS.
+4. Test large-cap/liquidity capacity as a risk cap, not as a standalone alpha
+   source.
 5. Daily readiness still needs real `DATA_ROOT/state/current_holdings.csv`.

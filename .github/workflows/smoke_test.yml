@@ -39,6 +39,9 @@ jobs:
       - name: KR1000 validation gate tests
         run: python tests/test_kr1000_validation_gate.py
 
+      - name: P_MB OOS quality tests
+        run: python tests/test_pmb_oos_quality.py
+
       - name: PIT universe tests (Phase C1)
         run: |
           if [ -f data_pit/historical_mcap.parquet ] || ls cache_pykrx/mktcap_ALL_*.parquet >/dev/null 2>&1; then

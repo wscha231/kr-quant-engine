@@ -32,14 +32,20 @@ scaling only after positive excess CAGR appears.
 Latest P_MB OOS audit command:
 
 ```bash
-py -3 tools\analyze_pmb_oos_quality.py --start 2018-01-01 --end 2026-06-04 --out-dir outputs\pmb_oos_quality_2018_20260604
+py -3 tools\analyze_pmb_oos_quality.py --start 2018-01-01 --end 2026-06-04 --out-dir outputs\pmb_oos_quality_realized_2018_20260604
 ```
 
-Current finding: inside observed P_MB OOS rows, recent RS/momentum is negative
-confirmation rather than positive confirmation (`rs_6m`, `rs_3m`, and
-`rs_score` all have negative 1m forward-return correlations). The new
-`pmb_mid_rank_regime` and `pmb_mid_tech_regime` challengers are diagnostic
-profiles only; both still fail the official 8y broker-ledger gate.
+When the default daily price panel is available, this report uses realized
+next-rebalance holding returns with broker-like next-close timing instead of
+sparse forward labels. The 2026-06-07 realized audit found `2,438` realized
+rows out of `2,708` P_MB OOS rows over `102` months. The all-P_MB realized
+mean was only `0.758%` per holding period with median `-1.606%`, and the best
+tested rank-window broker grid still failed (`r7_23_antirs` top15: CAGR
+`6.235%`, MDD `-34.18%`). Recent RS/momentum remains weak confirmation:
+`rs_3m_nonpos` had lower loss risk than `rs_3m_pos`, while `rs_3m` realized
+return correlation was `-0.0076`. The new `pmb_mid_rank_regime` and
+`pmb_mid_tech_regime` challengers are diagnostic profiles only; both still
+fail the official 8y broker-ledger gate.
 
 ## GitHub Workflows
 
@@ -430,6 +436,7 @@ python tests/smoke_test.py --quick
 python tests/test_kr1000_data_store.py
 python tests/test_kr1000_leader.py
 python tests/test_kr1000_validation_gate.py
+python tests/test_pmb_oos_quality.py
 python tools/run_kr1000_validation_gate.py --component-ab --strategy-ab --dry-run
 ```
 
@@ -448,7 +455,7 @@ python tools/run_kr1000_validation_gate.py --component-ab --strategy-ab --dry-ru
 
 ## Current Known Blocker
 
-As of the 2026-06-06 18:21 KST handoff:
+As of the 2026-06-07 08:05 KST handoff:
 
 - The data-integrity blocker is cleared: `tools/audit_data_integrity.py --as-of
   2026-06-04` reports Critical `0`, High `0`, Medium `0`.
@@ -485,13 +492,15 @@ As of the 2026-06-06 18:21 KST handoff:
   fixed and covered by `tests/test_kr1000_leader.py`.
 - Full score fails after proper NAV sizing (`CAGR -5.61%`, MDD `-50.01%` on
   the available 2019-2024 window).
-- P_MB OOS plus `pmb_mid_rank_7_23` is the current best 2020-2024
-  broker-ledger challenger, but it is still below the official CAGR target and
-  lacks 8y OOS coverage.
+- P_MB OOS now has official 2018-current coverage, but realized
+  next-rebalance holding-return diagnostics show weak ranking quality:
+  `2,438/2,708` rows have realized observations, all-P_MB mean return is only
+  `0.758%`, median is `-1.606%`, and the best rank-window broker grid tested
+  so far (`r7_23_antirs`, top15) produced CAGR `6.235%` with MDD `-34.18%`.
 
 The next production step is to provide/sync actual
 `DATA_ROOT/state/current_holdings.csv` for the daily broker readiness path, then
-run a full-feature 2018-current backfill, purged P_MB OOS regeneration, and
-component/strategy A/B toward CAGR `>= 30%` under the broker-ledger/MDD gate.
-CAGR `>= 35%` remains the stretch target after the official gate is cleared.
-Avoid more exposure-only experiments until the signal panel is richer.
+improve the P_MB label/ranking and drawdown-risk model before another full
+broker-ledger optimization pass. CAGR `>= 35%` remains the stretch target after
+the official `>= 30%` gate is cleared. Avoid more exposure-only experiments
+until the realized signal-quality audit improves.
