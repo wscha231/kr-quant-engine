@@ -137,6 +137,8 @@ def test_planned_component_ab_jobs():
         "legacy_p1_blended",
         "pmb_pre_surge",
         "pmb_mid_rank_7_23",
+        "pmb_mid_rank_regime",
+        "pmb_mid_tech_regime",
         "hybrid_pmb_rs",
     }
     strategy_jobs = [j for j in official if j.get("strategy_preset") == "pmb_defensive_mdd_gate"]

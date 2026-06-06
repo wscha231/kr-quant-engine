@@ -53,6 +53,8 @@ KR1000_DIRECT_SCORE_PROFILES = (
     "legacy_p1_blended",
     "pmb_pre_surge",
     "pmb_mid_rank_7_23",
+    "pmb_mid_rank_regime",
+    "pmb_mid_tech_regime",
     "hybrid_pmb_rs",
 )
 
@@ -69,6 +71,8 @@ KR1000_AB_SCORE_PROFILES = (
     "legacy_p1_blended",
     "pmb_pre_surge",
     "pmb_mid_rank_7_23",
+    "pmb_mid_rank_regime",
+    "pmb_mid_tech_regime",
     "hybrid_pmb_rs",
 )
 CURRENT_HOLDINGS_COLUMNS = (
@@ -569,6 +573,23 @@ def apply_kr1000_score_profile(
         rank = _numeric(out, "pmb_oos_rank", np.nan)
         mid_rank = rank.between(7, 23, inclusive="both")
         out["leader_score"] = _sparse_positive_rank_score(pmb.where(mid_rank, 0.0))
+    elif profile == "pmb_mid_rank_regime":
+        pmb = _numeric(out, "p_pre_surge", 0.0).fillna(0.0)
+        rank = _numeric(out, "pmb_oos_rank", np.nan)
+        mid_rank = rank.between(7, 23, inclusive="both")
+        market_ok = _numeric(out, "bench_ret_3m", 0.0).fillna(0.0) > 0.0
+        mask = mid_rank & market_ok & (pmb > 0.0)
+        out["leader_score"] = _sparse_positive_rank_score(pmb.where(mask, 0.0))
+        out["score_profile_eligible_flag"] = mask
+    elif profile == "pmb_mid_tech_regime":
+        pmb = _numeric(out, "p_pre_surge", 0.0).fillna(0.0)
+        rank = _numeric(out, "pmb_oos_rank", np.nan)
+        mid_rank = rank.between(7, 23, inclusive="both")
+        market_ok = _numeric(out, "bench_ret_3m", 0.0).fillna(0.0) > 0.0
+        tech_ok = _numeric(out, "technical_score", 0.0).fillna(0.0) > 0.0
+        mask = mid_rank & market_ok & tech_ok & (pmb > 0.0)
+        out["leader_score"] = _sparse_positive_rank_score(pmb.where(mask, 0.0))
+        out["score_profile_eligible_flag"] = mask
     elif profile == "hybrid_pmb_rs":
         pmb = _sparse_positive_rank_score(_numeric(out, "p_pre_surge", 0.0))
         out["leader_score"] = (
@@ -589,7 +610,8 @@ def compute_leader_scores(candidates: pd.DataFrame, cfg: Optional[dict[str, Any]
     if "ticker" in out.columns:
         out["ticker"] = _normalise_ticker(out["ticker"])
 
-    eligible = _eligibility_series(out)
+    profile_eligible = _to_bool_series(out.get("score_profile_eligible_flag", True), out.index, True)
+    eligible = _eligibility_series(out) & profile_eligible
     liquidity_fail = _numeric(out, "avg_trading_value_60d", 1.0).fillna(0) <= 0
     governance_veto = _numeric(out, "governance_hard_veto_flag", 0.0).fillna(0.0) >= 0.5
     admin_veto = _to_bool_series(out.get("admin_issue_flag", False), out.index, False)

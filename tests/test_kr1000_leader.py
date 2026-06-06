@@ -120,6 +120,15 @@ def test_score_profiles():
     assert mid_rank.loc[0, "leader_score"] > 0
     assert mid_rank.loc[1, "leader_score"] == 0
 
+    regime = apply_kr1000_score_profile(
+        candidates.assign(bench_ret_3m=[0.05, -0.02]),
+        "pmb_mid_rank_regime",
+    )
+    assert regime.loc[0, "leader_score"] > 0
+    assert regime.loc[0, "score_profile_eligible_flag"] is True or bool(regime.loc[0, "score_profile_eligible_flag"])
+    assert regime.loc[1, "leader_score"] == 0
+    assert bool(regime.loc[1, "score_profile_eligible_flag"]) is False
+
     hybrid = apply_kr1000_score_profile(candidates, "hybrid_pmb_rs")
     assert hybrid["score_profile"].eq("hybrid_pmb_rs").all()
     assert not hybrid["leader_score"].isna().any()
@@ -172,6 +181,35 @@ def test_pmb_mid_rank_profile_window():
     assert by_ticker.loc["000004", "leader_score"] > by_ticker.loc["000003", "leader_score"]
 
 
+@_test("P_MB regime profiles make filtered-out rows ineligible")
+def test_pmb_regime_profile_eligibility():
+    from kr1000_leader import compute_leader_scores
+
+    candidates = pd.DataFrame({
+        "ticker": ["000001", "000002", "000003"],
+        "p_pre_surge": [0.80, 0.70, 0.60],
+        "pmb_oos_rank": [8, 9, 10],
+        "bench_ret_3m": [0.03, -0.02, 0.04],
+        "technical_score": [0.50, 0.50, -0.20],
+        "avg_trading_value_60d": [100.0, 90.0, 80.0],
+        "market_cap": [1000.0, 900.0, 800.0],
+        "in_kr1000": [True, True, True],
+        "eligible_final": [True, True, True],
+    })
+
+    regime = compute_leader_scores(candidates, {"score_profile": "pmb_mid_rank_regime"})
+    by_ticker = regime.set_index("ticker")
+    assert bool(by_ticker.loc["000001", "eligible_final"]) is True
+    assert bool(by_ticker.loc["000002", "eligible_final"]) is False
+    assert bool(by_ticker.loc["000003", "eligible_final"]) is True
+
+    tech_regime = compute_leader_scores(candidates, {"score_profile": "pmb_mid_tech_regime"})
+    by_ticker = tech_regime.set_index("ticker")
+    assert bool(by_ticker.loc["000001", "eligible_final"]) is True
+    assert bool(by_ticker.loc["000002", "eligible_final"]) is False
+    assert bool(by_ticker.loc["000003", "eligible_final"]) is False
+
+
 @_test("sparse P_MB OOS probabilities rank above zero non-picks")
 def test_sparse_pmb_oos_ranking():
     from kr1000_leader import compute_leader_scores
@@ -207,6 +245,7 @@ def test_nan_eligible_final_falls_back_to_in_kr1000():
     scored = compute_leader_scores(candidates, {"score_profile": "pmb_pre_surge"})
     assert scored["leader_rank"].notna().sum() == 2
     assert scored.loc[scored["ticker"] == "000001", "leader_rank"].iloc[0] == 1
+    assert bool(scored.loc[scored["ticker"] == "000001", "eligible_final"].iloc[0]) is True
 
 
 @_test("trade plan keeps every current holding with reason_code")

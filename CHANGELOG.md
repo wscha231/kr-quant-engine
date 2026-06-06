@@ -6,6 +6,83 @@
 
 ## 2026-06-07
 
+### 07:35 KST - pmb-oos-quality-audit-and-regime-challengers
+
+**Scope**: Added a repeatable P_MB OOS quality audit, introduced two
+cash-capable P_MB regime challenger profiles, and recorded that the latest
+2018-current broker-ledger experiments still fail the active performance gate.
+
+**What landed**:
+- Added `tools/analyze_pmb_oos_quality.py` to rebuild the official prepared
+  KR1000 panel, merge PIT-safe purged P_MB OOS picks, and export by-year,
+  rank-bucket, filter, and factor-correlation diagnostics.
+- Added `pmb_mid_rank_regime`, which only admits P_MB OOS ranks `7..23` when
+  KOSPI200 benchmark 3-month return is positive.
+- Added `pmb_mid_tech_regime`, which further requires positive
+  `technical_score`.
+- Added `score_profile_eligible_flag` handling in
+  `kr1000_leader.compute_leader_scores` so challenger profiles can move to
+  cash when no profile-qualified names exist instead of buying zero-score
+  filler rows.
+- Updated KR1000 validation-gate tests so component A/B plans include the new
+  challenger profiles.
+
+**Diagnostic result**:
+- `py -3 tools\analyze_pmb_oos_quality.py --start 2018-01-01 --end 2026-06-04`
+  wrote `outputs/pmb_oos_quality_2018_20260604/`.
+- P_MB OOS rows: `2,708` over `102` months; observed forward-label rows:
+  `534`.
+- Forward-label audit:
+  - all P_MB OOS: mean 1m `0.66%`, median `-2.19%`.
+  - rank `7..23`: mean 1m `1.32%`, median `-1.85%`.
+  - rank `7..23` and benchmark 3m positive: mean 1m `2.61%`, median
+    `-1.58%`.
+  - `trend_template_pass` had negative mean 1m `-0.32%` and worse average
+    forward drawdown.
+- Factor correlations inside observed P_MB OOS rows show positive recent
+  RS/momentum is not a confirmation edge in this sample:
+  - `rs_6m` correlation `-0.118`.
+  - `rs_3m` correlation `-0.101`.
+  - `rs_score` correlation `-0.078`.
+- Broker-ledger challengers still fail:
+  - `pmb_mid_rank_regime` top20: CAGR `1.92%`, MDD `-38.10%`.
+  - `pmb_mid_tech_regime` top20: CAGR `1.79%`, MDD `-36.89%`.
+  - compact P_MB mid-rank grid best: top15/gross `0.70` CAGR `9.49%`,
+    MDD `-38.64%`.
+  - ad-hoc anti-momentum grid best: mid-rank + large-cap tilt top15 CAGR
+    `5.52%`, MDD `-40.98%`; mid-rank + anti-RS top15 CAGR `5.03%`,
+    MDD `-33.16%`.
+
+**symbols_added**:
+- tools/analyze_pmb_oos_quality.py
+- tools.analyze_pmb_oos_quality.build_quality_report
+- kr1000_leader score profile `pmb_mid_rank_regime`
+- kr1000_leader score profile `pmb_mid_tech_regime`
+- tests/test_kr1000_leader.py::test_pmb_regime_profile_eligibility
+
+**symbols_changed**:
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES
+- kr1000_leader.KR1000_AB_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
+- kr1000_leader.compute_leader_scores
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none. Existing `pmb_pre_surge` and
+`pmb_mid_rank_7_23` profile behavior is preserved; cash-capable filters are
+new challenger profiles.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\analyze_pmb_oos_quality.py tests\test_kr1000_leader.py` -> passed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+
 ### 06:45 KST - kr1000-component-score-recompute-and-signal-diagnostic
 
 **Scope**: Fixed collapsed KR1000 component A/B scoring caused by stale

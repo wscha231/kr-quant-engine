@@ -29,6 +29,18 @@ broker-ledger results still fail. Treat further work as signal-quality research:
 improve P_MB OOS ranking, then add RS/flow/technical confirmation and regime
 scaling only after positive excess CAGR appears.
 
+Latest P_MB OOS audit command:
+
+```bash
+py -3 tools\analyze_pmb_oos_quality.py --start 2018-01-01 --end 2026-06-04 --out-dir outputs\pmb_oos_quality_2018_20260604
+```
+
+Current finding: inside observed P_MB OOS rows, recent RS/momentum is negative
+confirmation rather than positive confirmation (`rs_6m`, `rs_3m`, and
+`rs_score` all have negative 1m forward-return correlations). The new
+`pmb_mid_rank_regime` and `pmb_mid_tech_regime` challengers are diagnostic
+profiles only; both still fail the official 8y broker-ledger gate.
+
 ## GitHub Workflows
 
 Production automation is split into three lanes:
@@ -58,7 +70,8 @@ Production automation is split into three lanes:
   - run official 8y broker-ledger validation
   - run component/challenger A/B: `full`, `rs_only`, `rs_flow`,
     `rs_flow_technical`, `legacy_p1_blended`, `pmb_pre_surge`,
-    `pmb_mid_rank_7_23`, `hybrid_pmb_rs`
+    `pmb_mid_rank_7_23`, `pmb_mid_rank_regime`,
+    `pmb_mid_tech_regime`, `hybrid_pmb_rs`
 
 The default full GitHub run preserves caches and appends missing rebalance
 dates when a compatible prior `scored_panel_v0` exists, but it will widen the
