@@ -372,6 +372,37 @@ def test_daily_broker_check_requires_holdings_file():
     assert "current_holdings_no_positive_shares" in blockers
 
 
+@_test("daily broker check skips liquidity-only latest snapshots")
+def test_daily_broker_check_skips_non_actionable_latest_snapshot():
+    from tools.run_kr1000_daily_broker_check import (
+        non_actionable_snapshot_reasons,
+        select_actionable_signal_snapshot,
+    )
+
+    raw = pd.DataFrame({
+        "rebalance_date": pd.to_datetime(["2026-05-29", "2026-06-04"]),
+        "ticker": ["005930", "005930"],
+        "snapshot_build_mode": ["monthly_full_feature", "latest_fast_liquidity_only"],
+        "technical_score": [1.0, 0.0],
+    })
+    reasons = non_actionable_snapshot_reasons(raw[raw["rebalance_date"] == pd.Timestamp("2026-06-04")])
+    assert reasons == ["non_actionable_snapshot_build_mode:latest_fast_liquidity_only"]
+
+    signal_date, latest, skipped, visible_latest = select_actionable_signal_snapshot(
+        raw,
+        "rebalance_date",
+        pd.Timestamp("2026-06-04"),
+    )
+    assert signal_date == pd.Timestamp("2026-05-29")
+    assert visible_latest == pd.Timestamp("2026-06-04")
+    assert len(latest) == 1
+    assert latest["snapshot_build_mode"].iloc[0] == "monthly_full_feature"
+    assert skipped == [{
+        "signal_date": "2026-06-04",
+        "reasons": ["non_actionable_snapshot_build_mode:latest_fast_liquidity_only"],
+    }]
+
+
 @_test("current holdings resolver prefers DATA_ROOT state over project fallback")
 def test_current_holdings_resolver_prefers_data_root_state():
     from kr1000_leader import resolve_current_holdings_path

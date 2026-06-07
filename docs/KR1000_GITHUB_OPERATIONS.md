@@ -215,6 +215,11 @@ engine-version change or suspected cache corruption requires a from-scratch
 - Syncs model metadata from GDrive, refreshes latest market/PIT data, appends a
   latest scored snapshot, then evaluates current holdings.
 - Produces the latest current-holdings trade plan.
+- Fast `latest_fast_liquidity_only` snapshots are freshness artifacts, not
+  trading signals. The broker check records them as visible but skips them for
+  live action generation, falling back to the latest prior actionable scored
+  snapshot so incomplete features cannot create false `SELL_RANK_BREAK`
+  current-holding actions.
 - It may be `blocked` when the scored panel is stale or the data audit finds a
   critical issue. Fix data freshness/PIT leakage first; do not record official
   performance from a blocked run.

@@ -35,6 +35,10 @@ from kr1000_leader import (  # noqa: E402
 )
 from tools.audit_data_integrity import build_audit  # noqa: E402
 
+NON_ACTIONABLE_SNAPSHOT_MODES = {
+    "latest_fast_liquidity_only",
+}
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="KR1000 daily broker-rule check")
@@ -97,6 +101,57 @@ def current_holdings_blockers(
         if not (shares > 0).any():
             blockers.append("current_holdings_no_positive_shares")
     return blockers
+
+
+def non_actionable_snapshot_reasons(snapshot: pd.DataFrame) -> list[str]:
+    """Return reasons a visible snapshot must not drive live account actions."""
+    if snapshot.empty:
+        return ["empty_signal_snapshot"]
+    if "snapshot_build_mode" not in snapshot.columns:
+        return []
+    modes = {
+        str(x).strip()
+        for x in snapshot["snapshot_build_mode"].dropna().unique().tolist()
+        if str(x).strip()
+    }
+    if modes and modes.issubset(NON_ACTIONABLE_SNAPSHOT_MODES):
+        return [f"non_actionable_snapshot_build_mode:{','.join(sorted(modes))}"]
+    return []
+
+
+def select_actionable_signal_snapshot(
+    raw: pd.DataFrame,
+    date_col: str,
+    evaluation_date: pd.Timestamp,
+) -> tuple[pd.Timestamp, pd.DataFrame, list[dict[str, Any]], pd.Timestamp]:
+    """Select the newest visible signal snapshot that is safe for broker actions.
+
+    Fast liquidity-only snapshots are useful freshness artifacts, but they lack
+    the feature surface needed to classify actual holdings. Using them directly
+    can create false SELL_RANK_BREAK plans, so daily readiness falls back to the
+    latest prior actionable signal and records the skipped dates.
+    """
+    visible = raw[raw[date_col] <= evaluation_date].copy()
+    visible_dates = visible.loc[visible[date_col].notna(), date_col]
+    if visible_dates.empty:
+        raise RuntimeError(f"No scored rows visible as of {evaluation_date.date()}")
+    visible_latest = pd.Timestamp(visible_dates.max()).normalize()
+    skipped: list[dict[str, Any]] = []
+    for candidate_date in sorted(visible_dates.unique(), reverse=True):
+        signal_date = pd.Timestamp(candidate_date).normalize()
+        snapshot = visible[visible[date_col] == signal_date].copy()
+        reasons = non_actionable_snapshot_reasons(snapshot)
+        if reasons:
+            skipped.append({
+                "signal_date": str(signal_date.date()),
+                "reasons": reasons,
+            })
+            continue
+        return signal_date, snapshot, skipped, visible_latest
+    raise RuntimeError(
+        f"No actionable scored snapshot visible as of {evaluation_date.date()}; "
+        f"skipped={skipped}"
+    )
 
 
 def previous_krx_close_date(run_date: pd.Timestamp) -> pd.Timestamp:
@@ -165,6 +220,7 @@ def render_report(payload: dict[str, Any]) -> str:
         f"- Run date: `{payload.get('run_date')}`",
         f"- Evaluation close: `{payload.get('evaluation_date')}`",
         f"- Metric mode: `{payload.get('broker_rule', {}).get('metric_mode')}`",
+        f"- Visible latest signal date: `{payload.get('visible_latest_signal_date')}`",
         f"- Latest signal date: `{payload.get('latest_signal_date')}`",
         f"- Signal age days: `{payload.get('signal_age_days')}`",
         f"- Current holdings: `{payload.get('current_holding_count')}`",
@@ -205,13 +261,13 @@ def main() -> int:
     date_col = "rebalance_date" if "rebalance_date" in raw.columns else "date"
     raw[date_col] = pd.to_datetime(raw[date_col], errors="coerce").dt.normalize()
     raw = raw[raw[date_col].notna()].copy()
-    visible_dates = raw.loc[raw[date_col] <= evaluation_date, date_col]
-    if visible_dates.empty:
-        raise RuntimeError(f"No scored rows visible as of {evaluation_date.date()} in {scored_path}")
-    signal_date = pd.Timestamp(visible_dates.max()).normalize()
+    signal_date, latest, skipped_signals, visible_latest_signal_date = select_actionable_signal_snapshot(
+        raw,
+        date_col,
+        evaluation_date,
+    )
     signal_age = int((evaluation_date - signal_date).days)
 
-    latest = raw[raw[date_col] == signal_date].copy()
     embedded_profiles = []
     if "score_profile" in latest.columns:
         embedded_profiles = [
@@ -256,8 +312,10 @@ def main() -> int:
         "status": status,
         "run_date": str(run_date.date()),
         "evaluation_date": str(evaluation_date.date()),
+        "visible_latest_signal_date": str(visible_latest_signal_date.date()),
         "latest_signal_date": str(signal_date.date()),
         "signal_age_days": signal_age,
+        "skipped_signal_snapshots": skipped_signals,
         "scored_panel": str(scored_path),
         "current_holdings_path": str(holdings_path),
         "current_holdings_file_exists": holdings_path.exists(),

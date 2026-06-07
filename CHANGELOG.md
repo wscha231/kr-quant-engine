@@ -6,6 +6,53 @@
 
 ## 2026-06-07
 
+### 14:46 KST - kr1000-daily-actionable-signal-guard
+
+**Scope**: Hardened the daily broker-readiness path so a fast liquidity-only
+latest snapshot cannot drive live current-holdings actions.
+
+**What landed**:
+- Added explicit non-actionable snapshot detection for
+  `snapshot_build_mode=latest_fast_liquidity_only`.
+- Changed `tools/run_kr1000_daily_broker_check.py` to select the newest
+  actionable signal snapshot visible as of the evaluation close, while
+  recording the visible latest date and skipped snapshot reasons.
+- Added a regression test proving a 2026-06-04 liquidity-only snapshot falls
+  back to the 2026-05-29 full-feature signal instead of generating actions from
+  incomplete features.
+
+**Diagnostic result**:
+- `bench_ret_3m > 0 or bench_ret_1m > 0` recovery-filter A/B improved fast
+  ledger CAGR to roughly `25.68%`, but MDD worsened to `-25.38%`. Gross/stop/DD
+  ladder variants reduced CAGR before restoring the MDD gate, so this recovery
+  filter was not promoted.
+- The active production challenger remains the top10/cap10/no-ladder value
+  preset from the 14:13 KST entry: CAGR `25.46%`, MDD `-21.90%`, excess
+  `+6.89%`. The active goal is still incomplete.
+
+**symbols_added**:
+- tools.run_kr1000_daily_broker_check.NON_ACTIONABLE_SNAPSHOT_MODES
+- tools.run_kr1000_daily_broker_check.non_actionable_snapshot_reasons
+- tools.run_kr1000_daily_broker_check.select_actionable_signal_snapshot
+- tests.test_kr1000_data_repair_tools.test_daily_broker_check_skips_non_actionable_latest_snapshot
+
+**symbols_changed**:
+- tools.run_kr1000_daily_broker_check.render_report
+- tools.run_kr1000_daily_broker_check.main
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py` -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 14 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- Actual scored-panel selector check against
+  `outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604\leader_scored_panel.parquet`
+  selected signal `2026-05-29`, visible latest `2026-06-04`, skipped
+  `latest_fast_liquidity_only`.
+
 ### 14:13 KST - kr1000-value-top10-cap10-challenger
 
 **Scope**: Re-locked the KR1000 production challenger to the best currently
