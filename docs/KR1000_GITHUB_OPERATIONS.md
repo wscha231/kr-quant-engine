@@ -245,6 +245,24 @@ engine-version change or suspected cache corruption requires a from-scratch
   guard and `5bp` one-way cost produced CAGR `26.81%` but MDD `-33.38%`, while
   MDD-safe grid rows stayed near CAGR `26.3%`.
 
+`Weekly Price Overlay Diagnostic`
+
+- `tools/build_kr1000_weekly_price_overlay.py` is the research bridge toward a
+  proper KR1000-wide daily/weekly feature refresh.
+- It carries the latest prior monthly PIT scored-panel row into weekly signal
+  dates, then refreshes trailing cached price, RS, technical, volatility, and
+  liquidity features from ticker history caches only.
+- Use `--max-tickers`, `--max-dates`, and `--max-cache-files-per-ticker` for
+  cache-IO controlled smoke runs before scaling to the full KR1000 window.
+- Optional `--run-backtest` uses the same broker-ledger engine, but generated
+  metrics are research-only. The tool writes `research_only=true`,
+  `official_broker_ledger_metric=false`, and `valid_for_production_metric=false`.
+- The 2026-06-07 short-window smokes proved the harness works but did not prove
+  target completion. The 2025 `80` ticker / `8` date smoke produced CAGR
+  `32.17%`, MDD `-4.10%`, excess CAGR `-149.41%`; the 2026 `20` ticker /
+  `4` date smoke produced CAGR `34.39%`, MDD `-0.88%`, excess CAGR
+  `-529.75%`.
+
 `Quarterly Backtest`
 
 - Keeps the legacy quarterly report.

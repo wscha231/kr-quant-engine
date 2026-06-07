@@ -6,6 +6,66 @@
 
 ## 2026-06-07
 
+### 15:36 KST - kr1000-weekly-price-overlay-research
+
+**Scope**: Added a KR1000-wide weekly trailing price/RS/technical overlay
+research tool so the next signal-quality pass can test fresher price signals
+without waiting for a full daily feature-store rebuild.
+
+**What landed**:
+- Added `tools/build_kr1000_weekly_price_overlay.py`.
+- The tool carries the latest prior monthly PIT scored-panel row into weekly
+  signal dates, then refreshes trailing cached price, RS, technical, volatility,
+  and liquidity features from ticker history caches.
+- Added cache-loading controls for research scaling:
+  `--max-tickers`, `--max-dates`, and `--max-cache-files-per-ticker`.
+- Optional `--run-backtest` routes the overlay through the existing
+  broker-ledger engine, but the output is marked `research_only=true`,
+  `official_broker_ledger_metric=false`, and
+  `valid_for_production_metric=false`.
+- Added regression coverage proving the weekly overlay builds carried PIT rows
+  and dynamic scores.
+
+**Diagnostic result**:
+- Limited 2025 smoke, `80` tickers / `8` signal dates:
+  `outputs\kr1000_weekly_overlay_smoke_2025_80x8_v2`, loaded `77/80`
+  tickers, CAGR `32.17%`, MDD `-4.10%`, excess CAGR `-149.41%`.
+- Tiny 2026 smoke, `20` tickers / `4` signal dates:
+  `outputs\kr1000_weekly_overlay_smoke_2026_20x4`, loaded `19/20`
+  tickers, CAGR `34.39%`, MDD `-0.88%`, excess CAGR `-529.75%`.
+- These short-window research runs prove the harness works; they do not prove
+  official target completion. The locked official challenger remains CAGR
+  `25.46%`, MDD `-21.90%`, excess CAGR `+6.89%`.
+
+**symbols_added**:
+- tools.build_kr1000_weekly_price_overlay.parse_args
+- tools.build_kr1000_weekly_price_overlay.latest_scored_panel_path
+- tools.build_kr1000_weekly_price_overlay.load_cached_price_panel
+- tools.build_kr1000_weekly_price_overlay.add_trailing_price_features
+- tools.build_kr1000_weekly_price_overlay.build_weekly_overlay_panel
+- tools.build_kr1000_weekly_price_overlay.apply_weekly_overlay_score
+- tools.build_kr1000_weekly_price_overlay.main
+- tests.test_kr1000_data_repair_tools.test_weekly_price_overlay_builds_dynamic_scores
+
+**symbols_changed**:
+- tests/test_kr1000_data_repair_tools.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\build_kr1000_weekly_price_overlay.py tests\test_kr1000_data_repair_tools.py` -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 16 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 16 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 14 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2025-01-01 --end 2026-06-04 --max-dates 8 --max-tickers 80 --run-backtest --out-dir outputs\kr1000_weekly_overlay_smoke_2025_80x8_v2` -> completed, research-only.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2026-01-01 --end 2026-06-04 --max-dates 4 --max-tickers 20 --run-backtest --out-dir outputs\kr1000_weekly_overlay_smoke_2026_20x4` -> completed, research-only.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2026-05-01 --end 2026-06-04 --max-dates 1 --max-tickers 5 --run-backtest --out-dir outputs\kr1000_weekly_overlay_smoke_2026_5x1_flags` -> completed, metrics carry research-only flags.
+
 ### 15:07 KST - kr1000-cash-benchmark-sleeve-diagnostic
 
 **Scope**: Added a cost-aware KOSPI200 proxy sleeve diagnostic and made the

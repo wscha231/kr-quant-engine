@@ -1,11 +1,11 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-07 15:07 KST
+## Current Status - 2026-06-07 15:39 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest committed base before this pass: `4525ae3`.
+Latest committed base before this pass: `f910f03`.
 
 Active target:
 
@@ -68,53 +68,68 @@ This remains below the official CAGR `>=30%`, IR `>0.5`, and stretch CAGR
 
 Weekly price overlay research:
 
-- Built local research artifacts under
-  `outputs/kr1000_weekly_price_overlay_research/`.
-- Simple weekly price-only overlay was weak. Best saved row was approximately
-  CAGR `16.04%`, MDD `-37.38%`, excess `-2.53%`.
-- Do not pursue this simple price-only weekly overlay without a proper
-  universe-wide daily feature build.
+- Added `tools/build_kr1000_weekly_price_overlay.py`.
+- The tool carries the latest prior monthly PIT scored-panel row into weekly
+  signal dates, then refreshes trailing price/RS/technical/volatility/liquidity
+  features from cached ticker histories.
+- It is a research bridge toward a proper daily/weekly full-universe feature
+  refresh. It does not replace the official validation gate.
+- Optional broker-ledger outputs are marked `research_only=true`,
+  `official_broker_ledger_metric=false`, and `valid_for_production_metric=false`.
+- Added regression coverage in `tests/test_kr1000_data_repair_tools.py`.
 
-Cash benchmark sleeve research:
+Short-window actual-cache smokes:
 
-- Added `tools/analyze_kr1000_cash_benchmark_sleeve.py`.
-- It is diagnostic-only and marks `official_broker_ledger_metric=false`.
-- Cost-aware selected sleeve:
-  - fraction `0.75`
-  - 21d KOSPI200 guard `-3%`
-  - one-way cost `5bp`
-  - CAGR `26.81%`
-  - MDD `-33.38%`
-  - IR `0.378`
-- MDD-safe sleeve grid rows stayed near CAGR `26.3%`, still below the official
-  `30%` gate and well below the `35%` stretch target.
-- Conclusion: do not claim KOSPI200 cash sleeve solves the target gap until an
-  actual tradable KODEX200/benchmark sleeve is integrated into the broker
-  ledger with order/fill/cost accounting and clears the gates.
+- `outputs/kr1000_weekly_overlay_smoke_2025_80x8_v2`: 80 tickers / 8 signal
+  dates, loaded `77/80`, CAGR `32.17%`, MDD `-4.10%`, excess CAGR `-149.41%`.
+- `outputs/kr1000_weekly_overlay_smoke_2026_20x4`: 20 tickers / 4 signal
+  dates, loaded `19/20`, CAGR `34.39%`, MDD `-0.88%`, excess CAGR `-529.75%`.
+- `outputs/kr1000_weekly_overlay_smoke_2026_5x1_flags`: 5 tickers / 1 signal
+  date, verified research-only metric flags.
+
+These are harness and metadata checks only. Do not treat them as official target
+progress because the windows are too short and benchmark-relative results are
+poor.
+
+Prior cash benchmark sleeve research still stands:
+
+- `tools/analyze_kr1000_cash_benchmark_sleeve.py` is diagnostic-only.
+- Cost-aware selected sleeve: fraction `0.75`, 21d KOSPI200 guard `-3%`,
+  one-way cost `5bp`, CAGR `26.81%`, MDD `-33.38%`, IR `0.378`.
+- Do not claim KOSPI200 cash sleeve solves the target gap until an actual
+  tradable KODEX200/benchmark sleeve is integrated into the broker ledger and
+  clears the official gates.
 
 Daily broker usability:
 
-- Added `--skip-data-audit` to `tools/run_kr1000_daily_broker_check.py`.
-- This is local dry-run only; production validation must keep the data audit.
-- Verified skip-audit daily check completed for evaluation date `2026-06-04`,
-  selected actionable signal `2026-05-29`, and visible latest `2026-06-04`.
+- `--skip-data-audit` exists in `tools/run_kr1000_daily_broker_check.py` for
+  local dry-runs only.
+- Production daily readiness still needs actual
+  `DATA_ROOT/state/current_holdings.csv`.
 
 ## Tests Run
 
-- `py -3 -m py_compile tools\analyze_kr1000_cash_benchmark_sleeve.py tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py` -> passed.
-- `py -3 tests\test_kr1000_data_repair_tools.py` -> 15 passed, 0 failed.
-- `py -3 tools\analyze_kr1000_cash_benchmark_sleeve.py --daily-nav outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604\leader_backtest_daily_nav.csv --out-dir outputs\kr1000_cash_benchmark_sleeve_diag_2018_20260604 --selected-fraction 0.75 --selected-guard -0.03 --selected-cost-bp 5` -> selected CAGR `26.81%`, MDD `-33.38%`.
-- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04 --scored-panel outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604\leader_scored_panel.parquet --allow-empty-holdings --skip-data-audit --out-dir outputs\kr1000_daily_check_skip_audit_test` -> completed.
+- `py -3 -m py_compile tools\build_kr1000_weekly_price_overlay.py tests\test_kr1000_data_repair_tools.py` -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 16 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 16 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 14 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2025-01-01 --end 2026-06-04 --max-dates 8 --max-tickers 80 --run-backtest --out-dir outputs\kr1000_weekly_overlay_smoke_2025_80x8_v2` -> completed, research-only.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2026-01-01 --end 2026-06-04 --max-dates 4 --max-tickers 20 --run-backtest --out-dir outputs\kr1000_weekly_overlay_smoke_2026_20x4` -> completed, research-only.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2026-05-01 --end 2026-06-04 --max-dates 1 --max-tickers 5 --run-backtest --out-dir outputs\kr1000_weekly_overlay_smoke_2026_5x1_flags` -> completed, metrics carry research-only flags.
 
 ## Next Engineering Steps
 
 1. Keep the top10/cap10/no-ladder value preset as the active challenger; it is
    not a pass.
-2. Stop testing simple weekly price-only overlays and simple cash benchmark
-   sleeves as if they are likely to solve the gap; both failed after realistic
-   checks.
-3. The next credible performance path is a proper daily/weekly full-universe
-   feature refresh: KR1000-wide trailing price/RS/technical features, not just
-   ever-top20 price panel overlays.
+2. Scale the new weekly overlay carefully:
+   - first 2018-current with `--max-tickers 250`, then `500`, then full KR1000
+   - watch cache I/O and missing cache coverage
+   - compare benchmark-relative CAGR and IR before tuning weights
+3. If the overlay remains excess-negative, stop score-weight tinkering and build
+   the proper daily/weekly feature store with KR1000-wide trailing price,
+   sector/theme RS, and breadth/regime columns.
 4. Daily readiness still needs actual `DATA_ROOT/state/current_holdings.csv`.
    Without it, production daily broker readiness must remain blocked.

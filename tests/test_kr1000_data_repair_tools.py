@@ -431,6 +431,51 @@ def test_cash_benchmark_sleeve_diagnostic_metrics():
     assert metrics["avg_benchmark_sleeve_weight"] > 0
 
 
+@_test("weekly price overlay builds PIT carried dynamic scores")
+def test_weekly_price_overlay_builds_dynamic_scores():
+    from tools.build_kr1000_weekly_price_overlay import (
+        _signal_dates,
+        add_trailing_price_features,
+        apply_weekly_overlay_score,
+        build_weekly_overlay_panel,
+    )
+
+    monthly = pd.DataFrame({
+        "rebalance_date": pd.to_datetime(["2024-01-31"] * 3),
+        "ticker": ["000001", "000002", "000003"],
+        "market_cap": [300.0, 200.0, 100.0],
+        "avg_trading_value_60d": [300.0, 200.0, 100.0],
+        "valuation_score": [1.0, 0.5, 0.1],
+        "flow_score": [0.2, 0.1, 0.0],
+        "risk_veto_flag": [0, 0, 0],
+        "hard_exit_flag": [0, 0, 0],
+    })
+    dates = pd.date_range("2023-10-02", periods=100, freq="B")
+    prices = []
+    for ticker, base, step in [("000001", 100.0, 1.0), ("000002", 100.0, 0.6), ("000003", 100.0, -0.1)]:
+        for i, day in enumerate(dates):
+            close = base + i * step
+            prices.append({
+                "date": day,
+                "ticker": ticker,
+                "open": close,
+                "high": close,
+                "low": close,
+                "close": close,
+                "volume": 1000.0,
+                "value": close * 1000.0,
+            })
+    price_features = add_trailing_price_features(pd.DataFrame(prices))
+    signal_dates = _signal_dates(pd.Series(dates), pd.Timestamp("2024-02-01"), pd.Timestamp("2024-02-29"), "W-FRI", 2)
+    benchmark = pd.Series([100.0 + i * 0.2 for i in range(len(dates))], index=dates)
+    overlay = build_weekly_overlay_panel(monthly, price_features, signal_dates, benchmark)
+    scored = apply_weekly_overlay_score(overlay, max_weight=0.10)
+    assert set(scored["rebalance_date"].dt.normalize().unique()) == set(signal_dates)
+    assert "source_monthly_rebalance_date" in scored.columns
+    assert pd.to_numeric(scored["leader_rank"], errors="coerce").notna().any()
+    assert scored.loc[scored["ticker"] == "000001", "leader_score"].max() > 0
+
+
 @_test("current holdings resolver prefers DATA_ROOT state over project fallback")
 def test_current_holdings_resolver_prefers_data_root_state():
     from kr1000_leader import resolve_current_holdings_path
