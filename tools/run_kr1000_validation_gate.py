@@ -323,6 +323,8 @@ def _extend_cmd_with_strategy_preset(cmd: list[str], preset: dict[str, Any]) -> 
         cmd.extend(["--hold-rank-threshold", str(int(preset["hold_rank_threshold"]))])
     if preset.get("portfolio_dd_ladder"):
         cmd.append("--portfolio-dd-ladder")
+    if preset.get("sell_before_buy_same_day"):
+        cmd.append("--sell-before-buy-same-day")
     if preset.get("portfolio_dd_thresholds") is not None:
         cmd.extend([
             "--portfolio-dd-thresholds",

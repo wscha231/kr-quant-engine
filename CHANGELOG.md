@@ -6,6 +6,64 @@
 
 ## 2026-06-07
 
+### 18:04 KST - kr1000-broker-cash-reason-and-sequencing-ab
+
+**Scope**: Made broker cash constraints more observable and added an explicit
+sell-before-buy same-day execution A/B switch. The production default remains
+unchanged because the sell-before-buy buying-power assumption worsened the
+official 8y CAGR/MDD frontier.
+
+**What landed**:
+- Added `NO_TRADE_INSUFFICIENT_CASH` for buy orders that pass min-notional but
+  cannot be filled from available cash.
+- Added `metrics["insufficient_cash_orders"]` and
+  `metrics["sell_before_buy_same_day"]` to broker-ledger backtest outputs.
+- Added `--sell-before-buy-same-day` to `tools/run_kr1000_backtest.py`.
+- Added validation-gate plumbing for strategy presets that choose to pass
+  `sell_before_buy_same_day`.
+- Added regression tests for explicit cash-blocked buy reason codes and
+  optional same-day sell-before-buy sequencing.
+
+**Diagnostic result**:
+- Default production-style cash ledger was unchanged:
+  `outputs\kr1000_bt_technical_value_mcap_cash_reason_default_2018_20260604`
+  -> CAGR `25.46%`, MDD `-21.90%`, excess `+6.89%`, Sharpe `1.259`,
+  IR `0.251`, insufficient-cash orders `127`.
+- Explicit `--sell-before-buy-same-day` A/B:
+  `outputs\kr1000_bt_technical_value_mcap_sell_first_rank_order_2018_20260604`
+  -> CAGR `21.60%`, MDD `-27.98%`, excess `+3.04%`, Sharpe `0.97`.
+- The 2026-05 underperformance was not solved by simply allowing sell proceeds
+  to fund same-day buys. It increased exposure to weak top-rank names and broke
+  the MDD gate.
+- Offline index-leader/mcap/RS score experiments and DD-ladder variants did not
+  beat the locked production challenger on the official CAGR/MDD gate.
+
+**symbols_added**:
+- kr1000_leader._order_execution_priority
+- tools.run_kr1000_backtest.parse_args[`--sell-before-buy-same-day`]
+- tests.test_kr1000_leader.test_event_backtester_sells_before_buys_on_same_fill_date
+- tests.test_kr1000_leader.test_event_backtester_labels_insufficient_cash_buys
+
+**symbols_changed**:
+- kr1000_leader.run_event_driven_backtest
+- tools.run_kr1000_backtest.main
+- tools.run_kr1000_validation_gate._extend_cmd_with_strategy_preset
+- tests/test_kr1000_leader.py
+
+**config_fields_added**:
+- sell_before_buy_same_day
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_backtest.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 18 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 14 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_value_mcap_regime --price-panel outputs\kr1000_bt_technical_value_mcap_regime_top15_g90_ladder_2018_20260604\leader_price_panel.parquet --top-holdings 10 --max-rank-for-prices 20 --buy-rank-threshold 10 --hold-rank-threshold 20 --single-stock-max-weight 0.10 --gross-exposure 1.00 --hard-stop-loss-pct 0.15 --out-dir outputs\kr1000_bt_technical_value_mcap_cash_reason_default_2018_20260604 --save-scored-panel` -> completed.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_value_mcap_regime --price-panel outputs\kr1000_bt_technical_value_mcap_regime_top15_g90_ladder_2018_20260604\leader_price_panel.parquet --top-holdings 10 --max-rank-for-prices 20 --buy-rank-threshold 10 --hold-rank-threshold 20 --single-stock-max-weight 0.10 --gross-exposure 1.00 --hard-stop-loss-pct 0.15 --sell-before-buy-same-day --out-dir outputs\kr1000_bt_technical_value_mcap_sell_first_rank_order_2018_20260604 --save-scored-panel` -> completed, failed MDD gate.
+
 ### 16:57 KST - kr1000-broker-benchmark-sleeve-challenger
 
 **Scope**: Added an order/fill/cost-aware KOSPI200 proxy sleeve to the

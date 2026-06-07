@@ -647,6 +647,108 @@ def test_event_backtester_benchmark_sleeve_uses_idle_cash():
     assert (result.daily_nav["cash"] >= -1e-6).all()
 
 
+@_test("event-driven backtest executes sells before buys on same fill date")
+def test_event_backtester_sells_before_buys_on_same_fill_date():
+    from kr1000_leader import run_event_driven_backtest
+
+    dates = pd.bdate_range("2024-01-01", periods=4)
+    price = pd.concat([
+        pd.DataFrame({"date": dates, "ticker": "000001", "open": 100.0, "close": 100.0}),
+        pd.DataFrame({"date": dates, "ticker": "000002", "open": 100.0, "close": 100.0}),
+    ], ignore_index=True)
+    scored = pd.DataFrame({
+        "date": [dates[0], dates[0]],
+        "ticker": ["000001", "000002"],
+        "leader_score": [-1.0, 2.0],
+        "leader_rank": [99, 1],
+        "eligible_final": [True, True],
+        "risk_veto_flag": [0, 0],
+        "hard_exit_flag": [0, 0],
+        "max_weight": [1.0, 1.0],
+        "avg_trading_value_60d": [1e9, 1e9],
+        "market_cap": [1e12, 1e12],
+    })
+    holdings = pd.DataFrame({
+        "ticker": ["000001"],
+        "shares": [100],
+        "avg_cost": [100],
+        "last_price": [100],
+        "market_value": [10_000],
+    })
+    result = run_event_driven_backtest(
+        scored,
+        price,
+        cfg={
+            "top_holdings": 1,
+            "buy_rank_threshold": 1,
+            "hold_rank_threshold": 1,
+            "gross_exposure": 1.0,
+            "gross_exposure_min": 0.0,
+            "single_stock_max_weight": 1.0,
+            "min_notional_krw": 1,
+            "daily_hard_exit_enabled": False,
+            "sell_before_buy_same_day": True,
+        },
+        initial_cash=0,
+        initial_holdings=holdings,
+    )
+    assert "000002" in set(result.holdings_daily["ticker"])
+    assert result.trades[result.trades["ticker"].astype(str).str.zfill(6).eq("000002")]["side"].eq("BUY").any()
+    first_day_orders = result.orders[pd.to_datetime(result.orders["execution_date"]).eq(dates[1])]
+    sell_pos = first_day_orders["side"].tolist().index("SELL")
+    buy_pos = first_day_orders["side"].tolist().index("BUY")
+    assert sell_pos < buy_pos
+
+
+@_test("event-driven backtest labels cash-blocked buys explicitly")
+def test_event_backtester_labels_insufficient_cash_buys():
+    from kr1000_leader import run_event_driven_backtest
+
+    dates = pd.bdate_range("2024-01-01", periods=4)
+    price = pd.concat([
+        pd.DataFrame({"date": dates, "ticker": "000001", "open": 100.0, "close": 100.0}),
+        pd.DataFrame({"date": dates, "ticker": "000002", "open": 100.0, "close": 100.0}),
+    ], ignore_index=True)
+    scored = pd.DataFrame({
+        "date": [dates[0], dates[0]],
+        "ticker": ["000001", "000002"],
+        "leader_score": [-1.0, 2.0],
+        "leader_rank": [99, 1],
+        "eligible_final": [True, True],
+        "risk_veto_flag": [0, 0],
+        "hard_exit_flag": [0, 0],
+        "max_weight": [1.0, 1.0],
+        "avg_trading_value_60d": [1e9, 1e9],
+        "market_cap": [1e12, 1e12],
+    })
+    holdings = pd.DataFrame({
+        "ticker": ["000001"],
+        "shares": [100],
+        "avg_cost": [100],
+        "last_price": [100],
+        "market_value": [10_000],
+    })
+    result = run_event_driven_backtest(
+        scored,
+        price,
+        cfg={
+            "top_holdings": 1,
+            "buy_rank_threshold": 1,
+            "hold_rank_threshold": 1,
+            "gross_exposure": 1.0,
+            "gross_exposure_min": 0.0,
+            "single_stock_max_weight": 1.0,
+            "min_notional_krw": 1,
+            "daily_hard_exit_enabled": False,
+        },
+        initial_cash=0,
+        initial_holdings=holdings,
+    )
+    assert result.metrics["insufficient_cash_orders"] == 1
+    assert "NO_TRADE_INSUFFICIENT_CASH" in set(result.orders["reason_code"])
+    assert "000002" not in set(result.holdings_daily["ticker"])
+
+
 if __name__ == "__main__":
     print(f"kr1000 leader tests: {PASSED} passed, {FAILED} failed")
     sys.exit(0 if FAILED == 0 else 1)

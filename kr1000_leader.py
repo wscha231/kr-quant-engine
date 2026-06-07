@@ -1189,6 +1189,11 @@ def _append_benchmark_sleeve_rebalance_order(
     return sleeve_diag
 
 
+def _order_execution_priority(order: dict[str, Any]) -> int:
+    side = str(order.get("side", "")).upper()
+    return {"SELL": 0, "SELL_PARTIAL": 1, "BUY": 2}.get(side, 9)
+
+
 def _metrics_from_nav(nav: pd.DataFrame, benchmark_nav: Optional[pd.Series] = None) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame]:
     if nav.empty:
         return {}, pd.DataFrame(), pd.DataFrame()
@@ -1293,7 +1298,12 @@ def run_event_driven_backtest(
     for i, day in enumerate(days):
         # Execute orders generated after the previous signal day.
         still_pending: list[dict[str, Any]] = []
-        for od in pending_orders:
+        execution_orders = (
+            sorted(pending_orders, key=_order_execution_priority)
+            if bool(cfg.get("sell_before_buy_same_day", False))
+            else list(pending_orders)
+        )
+        for od in execution_orders:
             tk = od["ticker"]
             try:
                 row = px.loc[(day, tk)]
@@ -1327,7 +1337,7 @@ def run_event_driven_backtest(
                 qty = int(min(cash, trade_value) // (fill_px * (1 + buy_cost)))
                 if qty <= 0:
                     od["status"] = "NO_TRADE"
-                    od["reason_code"] = "NO_TRADE_MIN_NOTIONAL"
+                    od["reason_code"] = "NO_TRADE_INSUFFICIENT_CASH"
                     order_rows.append(od | {"execution_date": day})
                     continue
                 cost = qty * fill_px * (1 + buy_cost)
@@ -1604,6 +1614,10 @@ def run_event_driven_backtest(
     metrics["total_fees_krw"] = float(pd.to_numeric(trades.get("fee_krw", pd.Series(dtype=float)), errors="coerce").fillna(0.0).sum()) if not trades.empty else 0.0
     metrics["n_orders"] = int(len(orders))
     metrics["n_trades"] = int(len(trades))
+    metrics["sell_before_buy_same_day"] = bool(cfg.get("sell_before_buy_same_day", False))
+    metrics["insufficient_cash_orders"] = int(
+        (orders.get("reason_code", pd.Series(dtype=str)).astype(str) == "NO_TRADE_INSUFFICIENT_CASH").sum()
+    ) if not orders.empty else 0
     metrics["turnover_proxy"] = float(trades["trade_value"].abs().sum() / daily_nav["nav"].mean()) if not trades.empty and "trade_value" in trades.columns else 0.0
     return BacktestResult(metrics, daily_nav, holdings_daily, orders, trades, monthly, yearly)
 

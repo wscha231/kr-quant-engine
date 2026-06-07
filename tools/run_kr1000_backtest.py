@@ -83,6 +83,8 @@ def parse_args() -> argparse.Namespace:
                    help="Optional one-way slippage in basis points.")
     p.add_argument("--disable-daily-hard-exit", action="store_true",
                    help="Disable the daily hard-exit monitor for sensitivity tests.")
+    p.add_argument("--sell-before-buy-same-day", action="store_true",
+                   help="Execute sell/trim orders before buy orders that share the same fill date.")
     p.add_argument("--portfolio-dd-ladder", action="store_true",
                    help="Enable portfolio drawdown ladder gross-exposure scaling.")
     p.add_argument("--portfolio-dd-thresholds", default=None,
@@ -464,6 +466,8 @@ def main() -> int:
         cfg_overrides["slippage_bp"] = args.slippage_bp
     if args.disable_daily_hard_exit:
         cfg_overrides["daily_hard_exit_enabled"] = False
+    if args.sell_before_buy_same_day:
+        cfg_overrides["sell_before_buy_same_day"] = True
     if args.portfolio_dd_ladder:
         cfg_overrides["portfolio_drawdown_ladder_enabled"] = True
     dd_thresholds = _parse_float_list(args.portfolio_dd_thresholds)
