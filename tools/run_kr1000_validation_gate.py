@@ -487,7 +487,7 @@ def _planned_backtests(args: argparse.Namespace, as_of: pd.Timestamp, out_dir: P
 
 
 def _default_pmb_oos_picks_path() -> Path:
-    return PROJECT_ROOT / "research" / "06_walkforward_baselines" / "p_mb_v1_oos_picks.csv"
+    return DATA_ROOT / "outputs" / "p_mb_oos_picks_purged_3sleeve_latest.csv"
 
 
 def _latest_scored_panel_path() -> Path | None:
@@ -782,6 +782,8 @@ def main() -> int:
         ]
         if args.scored_panel:
             build_cmd.extend(["--panel", str(args.scored_panel)])
+        if args.require_pmb_oos_coverage:
+            build_cmd.append("--fail-on-coverage-gap")
         commands.append({
             "step": "build_pmb_oos_picks",
             "cmd": build_cmd,

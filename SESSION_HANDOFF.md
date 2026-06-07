@@ -1,11 +1,11 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-07 11:52 KST
+## Current Status - 2026-06-07 12:05 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest pushed commit entering this pass: `4fa224f`.
+Latest pushed commit before this pass: `9230f3a`.
 
 Active official target:
 
@@ -25,11 +25,10 @@ Do not stage or revert this unrelated dirty file:
 
 - `research/10_theme_lifecycle/leader_themes_per_quarter.csv`
 
-This pass changed:
+Committed changes in this pass:
 
-- `kr1000_leader.py`
+- `tools/run_kr1000_backtest.py`
 - `tools/run_kr1000_validation_gate.py`
-- `tests/test_kr1000_leader.py`
 - `tests/test_kr1000_validation_gate.py`
 - `CHANGELOG.md`
 - `docs/KR1000_GITHUB_OPERATIONS.md`
@@ -39,6 +38,20 @@ This pass also generated local diagnostic outputs under `outputs/`; they are
 not intended for git staging unless explicitly requested.
 
 ## What Changed
+
+Latest hardening pass:
+
+- `tools/run_kr1000_backtest.py` and
+  `tools/run_kr1000_validation_gate.py` now default P_MB OOS input to
+  `DATA_ROOT/outputs/p_mb_oos_picks_purged_3sleeve_latest.csv`.
+- The legacy `research/06_walkforward_baselines/p_mb_v1_oos_picks.csv` is no
+  longer a default official input.
+- `--build-pmb-oos-picks --require-pmb-oos-coverage` now passes
+  `--fail-on-coverage-gap` to `tools/build_pmb_oos_picks.py`.
+- Added tests that lock the purged latest default path and fail-fast build
+  command behavior.
+
+Previous pushed pass:
 
 Added `kr1000_technical_mcap_regime`.
 
@@ -76,9 +89,10 @@ py -3 tools\audit_data_integrity.py --as-of 2026-06-04
 Prior result: Critical `0`, High `0`, Medium `0`.
 
 Official P_MB OOS coverage remains `102/102` months from 2018-01 through
-2026-06 with full PIT sparse OOS picks. The new `kr1000_technical_mcap_regime`
-does not depend on P_MB probabilities, but it still uses the same PIT scored
-panel and broker-ledger path.
+2026-06 with full PIT sparse OOS picks, but from this pass forward the default
+official P_MB path is the purged latest OOS artifact. The new
+`kr1000_technical_mcap_regime` does not depend on P_MB probabilities, but it
+still uses the same PIT scored panel and broker-ledger path.
 
 ## Latest Broker-Ledger Results
 
@@ -136,9 +150,14 @@ still fails CAGR/excess/IR.
 ## Tests Run
 
 - `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 -m py_compile tools\run_kr1000_backtest.py tools\run_kr1000_validation_gate.py tests\test_kr1000_validation_gate.py` -> passed.
 - `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
-- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 12 passed, 0 failed.
 - `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 16 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --require-pmb-oos-coverage --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_pmb_oos_default_hardened` -> planned `25` broker backtests.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`, High `0`, Medium `0`.
 - `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_technical_mcap_profile` -> planned `25` broker backtests.
 - `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_mcap_regime --price-panel outputs\kr1000_bt_sparse_bench_pos_mcap_liq_technical_top20_2018_20260604\leader_price_panel.parquet --top-holdings 15 --max-rank-for-prices 40 --buy-rank-threshold 15 --hold-rank-threshold 30 --portfolio-dd-ladder --portfolio-dd-thresholds -0.08,-0.15,-0.25 --portfolio-dd-scales 0.85,0.65,0.40 --out-dir outputs\kr1000_bt_technical_mcap_regime_top15_ladder_2018_20260604 --save-scored-panel` -> CAGR `16.44%`, MDD `-24.17%`.
 

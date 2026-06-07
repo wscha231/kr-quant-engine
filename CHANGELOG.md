@@ -6,6 +6,48 @@
 
 ## 2026-06-07
 
+### 12:05 KST - pmb-oos-default-path-hardening
+
+**Scope**: Hardened the official P_MB OOS input defaults so official
+broker-ledger runs cannot silently fall back to the legacy research picks CSV.
+
+**What landed**:
+- Changed `tools.run_kr1000_backtest._default_pmb_oos_picks_path()` to
+  `DATA_ROOT/outputs/p_mb_oos_picks_purged_3sleeve_latest.csv`.
+- Changed `tools.run_kr1000_validation_gate._default_pmb_oos_picks_path()` to
+  the same purged 3-sleeve latest artifact.
+- Updated the `--pmb-oos-picks` help text to remove the legacy
+  `research/06_walkforward_baselines/p_mb_v1_oos_picks.csv` default.
+- When `--build-pmb-oos-picks` is combined with
+  `--require-pmb-oos-coverage`, the validation gate now passes
+  `--fail-on-coverage-gap` to `tools/build_pmb_oos_picks.py`.
+
+**symbols_added**: none.
+
+**symbols_changed**:
+- tools.run_kr1000_backtest._default_pmb_oos_picks_path
+- tools.run_kr1000_validation_gate._default_pmb_oos_picks_path
+- tools.run_kr1000_validation_gate.main
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Official P_MB defaults no longer use
+  `research/06_walkforward_baselines/p_mb_v1_oos_picks.csv`. If the purged
+  latest OOS artifact is missing, official P_MB coverage must fail instead of
+  producing a legacy-backed metric.
+
+**Validation**:
+- `py -3 -m py_compile tools\run_kr1000_backtest.py tools\run_kr1000_validation_gate.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 12 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 16 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --require-pmb-oos-coverage --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_pmb_oos_default_hardened` -> planned `25` broker backtests.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`, High `0`, Medium `0`.
+
 ### 11:20 KST - kr1000-technical-mcap-regime-profile
 
 **Scope**: Added a non-P_MB KR1000 technical/mcap/liquidity regime challenger.

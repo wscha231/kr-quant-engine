@@ -18,6 +18,22 @@ Do not treat vectorized or next-open runs as production metrics. The active
 objective remains CAGR `>= 30%` with MDD no worse than `-25%`. CAGR `>= 35%`
 is a stretch target, not the official pass gate.
 
+## Official P_MB OOS Input
+
+Official P_MB broker-ledger diagnostics must use the purged 3-sleeve OOS
+artifact:
+
+```text
+DATA_ROOT/outputs/p_mb_oos_picks_purged_3sleeve_latest.csv
+```
+
+The legacy research file
+`research/06_walkforward_baselines/p_mb_v1_oos_picks.csv` is no longer a
+default official input. If the purged latest file is missing or lacks 8y
+coverage, the P_MB coverage gate should fail. When running the full validation
+gate, combine `--build-pmb-oos-picks` with `--require-pmb-oos-coverage`; the
+gate will pass `--fail-on-coverage-gap` to the builder.
+
 ## Current Signal Diagnosis
 
 The data and broker-ledger harness are usable, but the strategy has not passed

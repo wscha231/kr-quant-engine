@@ -89,6 +89,18 @@ def test_pmb_job_requires_oos_coverage():
     assert passed["all_pass"] is True
 
 
+@_test("P_MB defaults use purged 3-sleeve latest artifact")
+def test_pmb_default_oos_path_is_purged_latest():
+    from kr_config import DATA_ROOT
+    from tools.run_kr1000_backtest import _default_pmb_oos_picks_path as bt_default
+    from tools.run_kr1000_validation_gate import _default_pmb_oos_picks_path as gate_default
+
+    expected = DATA_ROOT / "outputs" / "p_mb_oos_picks_purged_3sleeve_latest.csv"
+    assert bt_default() == expected
+    assert gate_default() == expected
+    assert "research" not in str(bt_default()).replace("\\", "/")
+
+
 @_test("data gate blocks PIT mcap and avg-value coverage gaps")
 def test_data_gate_blocks_official_cache_gaps():
     from tools.run_kr1000_validation_gate import _data_gate_blockers
@@ -314,6 +326,33 @@ def test_validation_dry_run_widens_rebuild_start():
         assert "--incremental-max-new-months" not in cmd
         assert "--panel-only" in cmd
         assert "--no-forward-labels" in cmd
+
+
+@_test("P_MB OOS build command fails fast when coverage is required")
+def test_pmb_oos_build_command_uses_fail_on_coverage_gap():
+    from tools.run_kr1000_validation_gate import main as gate_main
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = Path(tmp)
+        old_argv = sys.argv[:]
+        try:
+            sys.argv = [
+                "run_kr1000_validation_gate.py",
+                "--as-of", "2026-06-04",
+                "--build-pmb-oos-picks",
+                "--require-pmb-oos-coverage",
+                "--dry-run",
+                "--out-dir", str(out_dir),
+            ]
+            rc = gate_main()
+        finally:
+            sys.argv = old_argv
+        assert rc == 0
+        import json
+
+        payload = json.loads((out_dir / "kr1000_validation_gate.json").read_text(encoding="utf-8"))
+        build = [c for c in payload["planned_commands"] if c["step"] == "build_pmb_oos_picks"][0]
+        assert "--fail-on-coverage-gap" in build["cmd"]
 
 
 if __name__ == "__main__":

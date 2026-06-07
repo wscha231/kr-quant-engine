@@ -88,9 +88,9 @@ def parse_args() -> argparse.Namespace:
                    help="Comma-separated gross scales, e.g. 0.85,0.65,0.40.")
     p.add_argument("--pmb-oos-picks", default=None,
                    help=(
-                       "Optional PIT-safe P_MB OOS picks CSV with p_pre_surge. "
-                       "Defaults to research/06_walkforward_baselines/p_mb_v1_oos_picks.csv when present."
-                   ))
+                        "Optional PIT-safe P_MB OOS picks CSV with p_pre_surge. "
+                        "Defaults to DATA_ROOT/outputs/p_mb_oos_picks_purged_3sleeve_latest.csv."
+                    ))
     return p.parse_args()
 
 
@@ -119,7 +119,7 @@ def _parse_float_list(raw: str | None) -> list[float] | None:
 
 
 def _default_pmb_oos_picks_path() -> Path:
-    return PROJECT_ROOT / "research" / "06_walkforward_baselines" / "p_mb_v1_oos_picks.csv"
+    return DATA_ROOT / "outputs" / "p_mb_oos_picks_purged_3sleeve_latest.csv"
 
 
 PMB_OOS_NUMERIC_COLUMNS = (
