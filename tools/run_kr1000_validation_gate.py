@@ -85,14 +85,13 @@ KR1000_STRATEGY_AB_PRESETS = {
     },
     "kr1000_technical_value_mcap_mdd_gate": {
         "score_profile": "kr1000_technical_value_mcap_regime",
-        "top_holdings": 12,
-        "buy_rank_threshold": 12,
-        "hold_rank_threshold": 24,
-        "gross_exposure": 0.90,
+        "top_holdings": 10,
+        "buy_rank_threshold": 10,
+        "hold_rank_threshold": 20,
+        "single_stock_max_weight": 0.10,
+        "gross_exposure": 1.00,
         "hard_stop_loss_pct": 0.15,
-        "portfolio_dd_ladder": True,
-        "portfolio_dd_thresholds": [-0.10, -0.18, -0.24],
-        "portfolio_dd_scales": [0.95, 0.75, 0.50],
+        "portfolio_dd_ladder": False,
     },
 }
 
@@ -298,6 +297,8 @@ def _infer_scored_panel_start_date(
 def _extend_cmd_with_strategy_preset(cmd: list[str], preset: dict[str, Any]) -> None:
     if preset.get("gross_exposure") is not None:
         cmd.extend(["--gross-exposure", str(float(preset["gross_exposure"]))])
+    if preset.get("single_stock_max_weight") is not None:
+        cmd.extend(["--single-stock-max-weight", str(float(preset["single_stock_max_weight"]))])
     if preset.get("hard_stop_loss_pct") is not None:
         cmd.extend(["--hard-stop-loss-pct", str(float(preset["hard_stop_loss_pct"]))])
     if preset.get("buy_rank_threshold") is not None:

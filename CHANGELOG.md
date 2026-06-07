@@ -6,6 +6,64 @@
 
 ## 2026-06-07
 
+### 14:13 KST - kr1000-value-top10-cap10-challenger
+
+**Scope**: Re-locked the KR1000 production challenger to the best currently
+verified broker-ledger runner result: technical/value score, top10, cap10%,
+gross `1.00`, no portfolio DD ladder.
+
+**What landed**:
+- Added `--single-stock-max-weight` to `tools/run_kr1000_backtest.py` so
+  broker backtests can reproduce concentrated cap sensitivities through the
+  official runner instead of ad-hoc scored-panel edits.
+- Added diagnostic score profile `kr1000_technical_value06_mcap_regime`; it is
+  retained for A/B research but is not the locked production challenger.
+- Updated `KR1000_STRATEGY_AB_PRESETS["kr1000_technical_value_mcap_mdd_gate"]`
+  to use `kr1000_technical_value_mcap_regime` with top10, buy `<=10`, hold
+  `<=20`, `single_stock_max_weight=0.10`, gross `1.00`, hard stop `15%`, and
+  no portfolio drawdown ladder.
+- Kept `PRODUCTION_GATE_STRATEGY_PRESET` pointed at
+  `kr1000_technical_value_mcap_mdd_gate`.
+
+**Diagnostic result**:
+- Official runner result:
+  `outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604`.
+- Result: CAGR `25.46%`, KOSPI200 CAGR `18.57%`, excess CAGR `+6.89%`,
+  MDD `-21.90%`, Sharpe `1.259`, IR `0.251`, trades `583`, years `8.34`.
+- This improves the prior locked top12 value preset (`21.86%` CAGR,
+  `-22.94%` MDD, `+3.30%` excess, IR `0.093`) but still fails CAGR `>=30%`
+  and IR `>0.5`. Do not call the active goal complete.
+
+**symbols_added**:
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES[`kr1000_technical_value06_mcap_regime`]
+- tools.run_kr1000_backtest.parse_args[`--single-stock-max-weight`]
+
+**symbols_changed**:
+- kr1000_leader.KR1000_AB_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
+- tools.run_kr1000_backtest.main
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS
+- tools.run_kr1000_validation_gate._extend_cmd_with_strategy_preset
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- The validation gate's locked production challenger now uses top10/cap10/no
+  ladder. The prior top12/gross0.90/DD-ladder result remains historical
+  evidence, not the active production preset.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_backtest.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 14 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 16 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_value_top10_cap10_production` -> planned `29` broker backtests and emitted top10/cap10/no-ladder production command.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_value_mcap_regime --price-panel outputs\kr1000_bt_technical_value_mcap_regime_top15_g90_ladder_2018_20260604\leader_price_panel.parquet --top-holdings 10 --max-rank-for-prices 20 --buy-rank-threshold 10 --hold-rank-threshold 20 --single-stock-max-weight 0.10 --gross-exposure 1.00 --hard-stop-loss-pct 0.15 --out-dir outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604 --save-scored-panel` -> CAGR `25.46%`, MDD `-21.90%`, excess `+6.89%`.
+
 ### 13:03 KST - kr1000-technical-value-production-challenger
 
 **Scope**: Promoted the new KR1000 technical+valuation concentration profile

@@ -64,6 +64,7 @@ KR1000_DIRECT_SCORE_PROFILES = (
     "kr1000_technical_mcap_regime",
     "kr1000_technical_rs3_mcap_regime",
     "kr1000_technical_value_mcap_regime",
+    "kr1000_technical_value06_mcap_regime",
     "hybrid_pmb_rs",
 )
 
@@ -91,6 +92,7 @@ KR1000_AB_SCORE_PROFILES = (
     "kr1000_technical_mcap_regime",
     "kr1000_technical_rs3_mcap_regime",
     "kr1000_technical_value_mcap_regime",
+    "kr1000_technical_value06_mcap_regime",
     "hybrid_pmb_rs",
 )
 CURRENT_HOLDINGS_COLUMNS = (
@@ -664,6 +666,7 @@ def apply_kr1000_score_profile(
         "kr1000_technical_mcap_regime",
         "kr1000_technical_rs3_mcap_regime",
         "kr1000_technical_value_mcap_regime",
+        "kr1000_technical_value06_mcap_regime",
     }:
         bench_3m = _numeric(out, "bench_ret_3m", 0.0).fillna(0.0)
         tech = _numeric(out, "technical_score", 0.0).fillna(0.0)
@@ -683,7 +686,12 @@ def apply_kr1000_score_profile(
             mask = mask & (_numeric(out, "rs_3m", 0.0).fillna(0.0) > 0.0)
         elif profile == "kr1000_technical_value_mcap_regime":
             score_source = _score_series(tech) + 0.40 * _score_series(_numeric(out, "valuation_score", 0.0))
-        out["leader_score"] = _sparse_positive_rank_score(score_source.where(mask, 0.0))
+        elif profile == "kr1000_technical_value06_mcap_regime":
+            score_source = _score_series(tech) + 0.60 * _score_series(_numeric(out, "valuation_score", 0.0))
+        if profile == "kr1000_technical_value06_mcap_regime":
+            out["leader_score"] = score_source.where(mask, -9999.0).fillna(-9999.0)
+        else:
+            out["leader_score"] = _sparse_positive_rank_score(score_source.where(mask, 0.0))
         out["score_profile_eligible_flag"] = mask
     elif profile == "hybrid_pmb_rs":
         pmb = _sparse_positive_rank_score(_numeric(out, "p_pre_surge", 0.0))

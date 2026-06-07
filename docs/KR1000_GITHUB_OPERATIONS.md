@@ -152,13 +152,13 @@ The current locked production challenger is now
 `kr1000_technical_value_mcap_regime`, which keeps the same KOSPI200-positive,
 technical-positive, top-40%-market-cap, top-40%-liquidity eligibility mask, but
 ranks eligible names by technical score plus a 40% valuation-score overlay.
-The locked broker preset is top12, buy `<=12`, hold `<=24`, gross `0.90`, hard
-stop `15%`, and the same drawdown ladder `-0.10,-0.18,-0.24` ->
-`0.95,0.75,0.50`. The official-condition 2018-current broker-ledger result is
-CAGR `21.86%`, MDD `-22.94%`, excess CAGR `+3.30%`, Sharpe `1.190`, IR
-`0.093`, and trades `748`. This is the first current 8y challenger clearing
-MDD, KOSPI200 excess, and Sharpe together, but it is still not production-pass
-because CAGR `>=30%` and IR `>0.5` fail.
+The locked broker preset is now top10, buy `<=10`, hold `<=20`, per-name cap
+`10%`, gross `1.00`, hard stop `15%`, and no portfolio drawdown ladder. The
+official-condition 2018-current broker-ledger result is CAGR `25.46%`, MDD
+`-21.90%`, excess CAGR `+6.89%`, Sharpe `1.259`, IR `0.251`, and trades `583`.
+This improves the prior top12 value preset (`21.86%` CAGR, `-22.94%` MDD,
+`+3.30%` excess, IR `0.093`), but it is still not production-pass because CAGR
+`>=30%` and IR `>0.5` fail.
 
 ## GitHub Workflows
 
@@ -199,7 +199,8 @@ Production automation is split into three lanes:
 Strategy A/B presets automatically widen `--max-rank-for-prices` to at least
 the preset hold threshold. This prevents production broker runs from missing
 prices for held names inside the hold band, such as ranks `21-24` in the
-current `kr1000_technical_value_mcap_mdd_gate` preset.
+older top12 `kr1000_technical_value_mcap_mdd_gate` sensitivities. The active
+top10/hold20 preset currently emits `--max-rank-for-prices 20`.
 
 The default full GitHub run preserves caches and appends missing rebalance
 dates when a compatible prior `scored_panel_v0` exists, but it will widen the
@@ -647,8 +648,8 @@ As of the 2026-06-07 08:05 KST handoff:
 The next production step is to provide/sync actual
 `DATA_ROOT/state/current_holdings.csv` for the daily broker readiness path, then
 improve the current `kr1000_technical_value_mcap_mdd_gate` challenger. Start by
-auditing months where the top12 value profile loses to KOSPI200, then test
-sector/theme RS confirmation, theme break exits, and breadth/regime gates
+auditing months where the top10 value profile still loses to KOSPI200, then
+test sector/theme RS confirmation, theme break exits, and breadth/regime gates
 against that profile. Rebuild the P_MB label design separately; P_MB-only
 profiles are still too defensive for the official 8y gate. CAGR `>= 35%`
 remains the stretch target after the official `>= 30%` gate is cleared. Avoid

@@ -68,6 +68,8 @@ def parse_args() -> argparse.Namespace:
                    help="Component A/B profile. Official production profile is full.")
     p.add_argument("--gross-exposure", type=float, default=None,
                    help="Optional fixed gross exposure override, e.g. 0.60 for defensive runs.")
+    p.add_argument("--single-stock-max-weight", type=float, default=None,
+                   help="Optional per-name max target weight override, e.g. 0.10 for 10%%.")
     p.add_argument("--hard-stop-loss-pct", type=float, default=None,
                    help="Optional daily hard-stop threshold as a decimal, e.g. 0.10.")
     p.add_argument("--buy-rank-threshold", type=int, default=None,
@@ -435,6 +437,8 @@ def main() -> int:
             "gross_exposure_min": 0.0,
             "gross_exposure_max": 1.0,
         })
+    if args.single_stock_max_weight is not None:
+        cfg_overrides["single_stock_max_weight"] = args.single_stock_max_weight
     if args.hard_stop_loss_pct is not None:
         cfg_overrides["hard_stop_loss_pct"] = args.hard_stop_loss_pct
     if args.hold_rank_threshold is not None:

@@ -160,6 +160,7 @@ def test_planned_component_ab_jobs():
         "kr1000_technical_mcap_regime",
         "kr1000_technical_rs3_mcap_regime",
         "kr1000_technical_value_mcap_regime",
+        "kr1000_technical_value06_mcap_regime",
         "hybrid_pmb_rs",
     }
     strategy_jobs = [j for j in official if j.get("strategy_preset") == "pmb_defensive_mdd_gate"]
@@ -195,16 +196,18 @@ def test_planned_component_ab_jobs():
     assert len(kr_value_jobs) == 1
     assert kr_value_jobs[0]["profile"] == "kr1000_technical_value_mcap_regime"
     assert "--top-holdings" in kr_value_jobs[0]["cmd"]
-    assert "12" in kr_value_jobs[0]["cmd"]
+    assert "10" in kr_value_jobs[0]["cmd"]
     assert "--max-rank-for-prices" in kr_value_jobs[0]["cmd"]
     value_cmd = kr_value_jobs[0]["cmd"]
-    assert value_cmd[value_cmd.index("--max-rank-for-prices") + 1] == "24"
+    assert value_cmd[value_cmd.index("--max-rank-for-prices") + 1] == "20"
     assert "--buy-rank-threshold" in kr_value_jobs[0]["cmd"]
-    assert "12" in kr_value_jobs[0]["cmd"]
+    assert "10" in kr_value_jobs[0]["cmd"]
     assert "--hold-rank-threshold" in kr_value_jobs[0]["cmd"]
-    assert "24" in kr_value_jobs[0]["cmd"]
-    assert "--portfolio-dd-scales" in kr_value_jobs[0]["cmd"]
-    assert "0.95,0.75,0.5" in kr_value_jobs[0]["cmd"]
+    assert "20" in kr_value_jobs[0]["cmd"]
+    assert "--single-stock-max-weight" in kr_value_jobs[0]["cmd"]
+    assert value_cmd[value_cmd.index("--single-stock-max-weight") + 1] == "0.1"
+    assert "--portfolio-dd-ladder" not in kr_value_jobs[0]["cmd"]
+    assert "--portfolio-dd-scales" not in kr_value_jobs[0]["cmd"]
     assert {j["profile"] for j in stress} == {"full"}
     assert all("--score-profile" in j["cmd"] for j in jobs)
     assert all("--pmb-oos-picks" in j["cmd"] for j in jobs)
@@ -221,12 +224,12 @@ def test_production_gate_tracks_technical_value_preset():
     assert PRODUCTION_GATE_STRATEGY_PRESET == "kr1000_technical_value_mcap_mdd_gate"
     preset = KR1000_STRATEGY_AB_PRESETS[PRODUCTION_GATE_STRATEGY_PRESET]
     assert preset["score_profile"] == "kr1000_technical_value_mcap_regime"
-    assert preset["top_holdings"] == 12
-    assert preset["buy_rank_threshold"] == 12
-    assert preset["hold_rank_threshold"] == 24
-    assert preset["gross_exposure"] == 0.90
-    assert preset["portfolio_dd_thresholds"] == [-0.10, -0.18, -0.24]
-    assert preset["portfolio_dd_scales"] == [0.95, 0.75, 0.50]
+    assert preset["top_holdings"] == 10
+    assert preset["buy_rank_threshold"] == 10
+    assert preset["hold_rank_threshold"] == 20
+    assert preset["single_stock_max_weight"] == 0.10
+    assert preset["gross_exposure"] == 1.00
+    assert preset["portfolio_dd_ladder"] is False
 
 
 @_test("non-PMB production preset does not require P_MB OOS coverage")
