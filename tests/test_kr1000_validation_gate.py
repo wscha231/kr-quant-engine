@@ -166,8 +166,12 @@ def test_planned_component_ab_jobs():
     kr_technical_jobs = [j for j in official if j.get("strategy_preset") == "kr1000_technical_mcap_mdd_gate"]
     assert len(kr_technical_jobs) == 1
     assert kr_technical_jobs[0]["profile"] == "kr1000_technical_mcap_regime"
+    assert "--top-holdings" in kr_technical_jobs[0]["cmd"]
+    assert "15" in kr_technical_jobs[0]["cmd"]
     assert "--portfolio-dd-thresholds" in kr_technical_jobs[0]["cmd"]
-    assert "-0.06,-0.12,-0.2" in kr_technical_jobs[0]["cmd"]
+    assert "-0.08,-0.15,-0.25" in kr_technical_jobs[0]["cmd"]
+    assert "--portfolio-dd-scales" in kr_technical_jobs[0]["cmd"]
+    assert "0.85,0.65,0.4" in kr_technical_jobs[0]["cmd"]
     assert {j["profile"] for j in stress} == {"full"}
     assert all("--score-profile" in j["cmd"] for j in jobs)
     assert all("--pmb-oos-picks" in j["cmd"] for j in jobs)

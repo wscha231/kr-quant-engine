@@ -26,14 +26,21 @@ MDD-safe candidate into a real score profile.
   thresholds `-0.06,-0.12,-0.20`, scales `0.85,0.65,0.35`.
 
 **Diagnostic result**:
-- Official-window top20 with drawdown ladder:
+- Official-window top15 with tuned drawdown ladder:
+  `outputs\kr1000_bt_technical_mcap_regime_top15_ladder_2018_20260604`.
+- Result: CAGR `16.44%`, KOSPI200 CAGR `18.57%`, excess CAGR `-2.12%`,
+  MDD `-24.17%`, Sharpe `1.007`, trades `975`.
+- Top20 with the original drawdown ladder:
   `outputs\kr1000_bt_technical_mcap_regime_top20_ladder_2018_20260604`.
 - Result: CAGR `13.66%`, KOSPI200 CAGR `18.57%`, excess CAGR `-4.90%`,
-  MDD `-22.04%`, Sharpe `0.918`, IR `-0.320`, trades `1,275`,
-  average cash weight `63.81%`, average effective gross exposure `85.25%`.
+  MDD `-22.04%`, Sharpe `0.918`, IR `-0.320`, trades `1,275`.
+- Top15 without the ladder produced higher CAGR `16.79%` and MDD `-24.36%`
+  but Sharpe was weaker at `0.98`, so the strategy preset keeps the laddered
+  top15 configuration.
 - Interpretation: this is now the best current MDD-safe broker-ledger
-  challenger, improving the previous P_MB best CAGR `9.94%` / MDD `-19.27%`.
-  It still fails the official CAGR, KOSPI200 excess, Sharpe, and IR gates.
+  challenger, improving the previous P_MB best CAGR `9.94%` / MDD `-19.27%`
+  and the initial top20 technical/mcap profile. It still fails the official
+  CAGR, KOSPI200 excess, and IR gates.
 
 **symbols_added**:
 - kr1000_leader.KR1000_DIRECT_SCORE_PROFILES value
@@ -58,6 +65,7 @@ MDD-safe candidate into a real score profile.
 - `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
 - `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_technical_mcap_profile` -> planned `25` broker backtests.
 - `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_mcap_regime --price-panel outputs\kr1000_bt_sparse_bench_pos_mcap_liq_technical_top20_2018_20260604\leader_price_panel.parquet --top-holdings 20 --max-rank-for-prices 40 --buy-rank-threshold 20 --hold-rank-threshold 40 --portfolio-dd-ladder --portfolio-dd-thresholds -0.06,-0.12,-0.20 --portfolio-dd-scales 0.85,0.65,0.35 --out-dir outputs\kr1000_bt_technical_mcap_regime_top20_ladder_2018_20260604 --save-scored-panel` -> CAGR `13.66%`, MDD `-22.04%`.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_mcap_regime --price-panel outputs\kr1000_bt_sparse_bench_pos_mcap_liq_technical_top20_2018_20260604\leader_price_panel.parquet --top-holdings 15 --max-rank-for-prices 40 --buy-rank-threshold 15 --hold-rank-threshold 30 --portfolio-dd-ladder --portfolio-dd-thresholds -0.08,-0.15,-0.25 --portfolio-dd-scales 0.85,0.65,0.40 --out-dir outputs\kr1000_bt_technical_mcap_regime_top15_ladder_2018_20260604 --save-scored-panel` -> CAGR `16.44%`, MDD `-24.17%`.
 
 ### 10:23 KST - pmb-recovery-trend-value-profile
 

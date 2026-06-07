@@ -120,10 +120,20 @@ KOSPI200 3-month return is positive and the stock is in the top 40% of KR1000
 by both market cap and 60-day trading value. With the tested drawdown ladder
 (`-0.06,-0.12,-0.20` -> `0.85,0.65,0.35`), the 2018-current broker-ledger
 top20 result improved to CAGR `13.66%`, MDD `-22.04%`, excess CAGR `-4.90%`,
-Sharpe `0.918`, IR `-0.320`, and average cash weight `63.81%`. This is better
-than the P_MB-only profiles but still fails the official CAGR, excess, Sharpe,
-and IR gates. Treat it as the new MDD-safe challenger baseline, not as a
-production-pass strategy.
+Sharpe `0.918`, IR `-0.320`, and average cash weight `63.81%`. This was better
+than the P_MB-only profiles but still failed the official CAGR, excess, Sharpe,
+and IR gates.
+
+The follow-up concentration/ladder pass found a stronger operating preset for
+the same profile. Top15 with buy `<=15`, hold `<=30`, and drawdown ladder
+`-0.08,-0.15,-0.25` -> `0.85,0.65,0.40` produced CAGR `16.44%`, MDD `-24.17%`,
+excess CAGR `-2.12%`, and Sharpe `1.007`. Top15 without the ladder produced
+CAGR `16.79%` and MDD `-24.36%`, but Sharpe fell below `1.0`, so
+`kr1000_technical_mcap_mdd_gate` uses the laddered top15 setup. KOSPI-only,
+KOSDAQ-only, and exchange-balanced sparse sleeve checks did not improve the
+result; KOSDAQ-only was materially worse. The laddered top15 setup is the new
+MDD-safe challenger baseline, not a production-pass strategy, because CAGR,
+KOSPI200 excess, and IR still fail.
 
 ## GitHub Workflows
 

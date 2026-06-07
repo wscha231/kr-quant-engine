@@ -74,14 +74,14 @@ KR1000_STRATEGY_AB_PRESETS = {
     },
     "kr1000_technical_mcap_mdd_gate": {
         "score_profile": "kr1000_technical_mcap_regime",
-        "top_holdings": 20,
-        "buy_rank_threshold": 20,
-        "hold_rank_threshold": 40,
+        "top_holdings": 15,
+        "buy_rank_threshold": 15,
+        "hold_rank_threshold": 30,
         "gross_exposure": 1.00,
         "hard_stop_loss_pct": 0.15,
         "portfolio_dd_ladder": True,
-        "portfolio_dd_thresholds": [-0.06, -0.12, -0.20],
-        "portfolio_dd_scales": [0.85, 0.65, 0.35],
+        "portfolio_dd_thresholds": [-0.08, -0.15, -0.25],
+        "portfolio_dd_scales": [0.85, 0.65, 0.40],
     },
 }
 
