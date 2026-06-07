@@ -114,6 +114,17 @@ MDD gate: top20 CAGR `9.76%`, MDD `-19.06%`, excess CAGR `-8.81%`, Sharpe
 `0.763`; top15 CAGR `9.81%`, MDD `-18.08%`. It is still not production-pass
 because CAGR and KOSPI200 excess are too low.
 
+The next non-P_MB pass promoted `kr1000_technical_mcap_regime` as the current
+best MDD-safe KR1000-wide challenger. It buys technical leaders only when
+KOSPI200 3-month return is positive and the stock is in the top 40% of KR1000
+by both market cap and 60-day trading value. With the tested drawdown ladder
+(`-0.06,-0.12,-0.20` -> `0.85,0.65,0.35`), the 2018-current broker-ledger
+top20 result improved to CAGR `13.66%`, MDD `-22.04%`, excess CAGR `-4.90%`,
+Sharpe `0.918`, IR `-0.320`, and average cash weight `63.81%`. This is better
+than the P_MB-only profiles but still fails the official CAGR, excess, Sharpe,
+and IR gates. Treat it as the new MDD-safe challenger baseline, not as a
+production-pass strategy.
+
 ## GitHub Workflows
 
 Production automation is split into three lanes:
@@ -143,8 +154,11 @@ Production automation is split into three lanes:
   - run official 8y broker-ledger validation
   - run component/challenger A/B: `full`, `rs_only`, `rs_flow`,
     `rs_flow_technical`, `legacy_p1_blended`, `pmb_pre_surge`,
-    `pmb_mid_rank_7_23`, `pmb_mid_rank_regime`,
-    `pmb_mid_tech_regime`, `hybrid_pmb_rs`
+    `pmb_pre_entry`, `pmb_pre_entry_defensive`, `pmb_pre_entry_blend`,
+    `pmb_pre_entry_blend_regime`, `pmb_pullback_recovery_regime`,
+    `pmb_recovery_trend_value_regime`, `pmb_mid_rank_7_23`,
+    `pmb_mid_rank_regime`, `pmb_mid_tech_regime`,
+    `kr1000_technical_mcap_regime`, `hybrid_pmb_rs`
 
 The default full GitHub run preserves caches and appends missing rebalance
 dates when a compatible prior `scored_panel_v0` exists, but it will widen the

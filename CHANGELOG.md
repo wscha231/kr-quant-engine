@@ -6,6 +6,59 @@
 
 ## 2026-06-07
 
+### 11:20 KST - kr1000-technical-mcap-regime-profile
+
+**Scope**: Added a non-P_MB KR1000 technical/mcap/liquidity regime challenger.
+The prior P_MB profiles controlled drawdown but were capped near `10%` CAGR.
+This pass tested KR1000-wide sparse leader sleeves and promoted the best
+MDD-safe candidate into a real score profile.
+
+**What landed**:
+- Added `kr1000_technical_mcap_regime` to the official KR1000 score profile
+  registry and component A/B set.
+- The profile is eligible only when:
+  - KOSPI200 3-month return is positive,
+  - `technical_score > 0`,
+  - `market_cap` is at or above the monthly KR1000 60th percentile, and
+  - `avg_trading_value_60d` is at or above the monthly KR1000 60th percentile.
+- Added `kr1000_technical_mcap_mdd_gate` strategy A/B preset with the tested
+  portfolio drawdown ladder:
+  thresholds `-0.06,-0.12,-0.20`, scales `0.85,0.65,0.35`.
+
+**Diagnostic result**:
+- Official-window top20 with drawdown ladder:
+  `outputs\kr1000_bt_technical_mcap_regime_top20_ladder_2018_20260604`.
+- Result: CAGR `13.66%`, KOSPI200 CAGR `18.57%`, excess CAGR `-4.90%`,
+  MDD `-22.04%`, Sharpe `0.918`, IR `-0.320`, trades `1,275`,
+  average cash weight `63.81%`, average effective gross exposure `85.25%`.
+- Interpretation: this is now the best current MDD-safe broker-ledger
+  challenger, improving the previous P_MB best CAGR `9.94%` / MDD `-19.27%`.
+  It still fails the official CAGR, KOSPI200 excess, Sharpe, and IR gates.
+
+**symbols_added**:
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES value
+  `kr1000_technical_mcap_regime`
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS value
+  `kr1000_technical_mcap_mdd_gate`
+
+**symbols_changed**:
+- kr1000_leader.apply_kr1000_score_profile
+- kr1000_leader.KR1000_AB_SCORE_PROFILES
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_technical_mcap_profile` -> planned `25` broker backtests.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_mcap_regime --price-panel outputs\kr1000_bt_sparse_bench_pos_mcap_liq_technical_top20_2018_20260604\leader_price_panel.parquet --top-holdings 20 --max-rank-for-prices 40 --buy-rank-threshold 20 --hold-rank-threshold 40 --portfolio-dd-ladder --portfolio-dd-thresholds -0.06,-0.12,-0.20 --portfolio-dd-scales 0.85,0.65,0.35 --out-dir outputs\kr1000_bt_technical_mcap_regime_top20_ladder_2018_20260604 --save-scored-panel` -> CAGR `13.66%`, MDD `-22.04%`.
+
 ### 10:23 KST - pmb-recovery-trend-value-profile
 
 **Scope**: Added a higher-exposure P_MB recovery/trend/value regime profile.

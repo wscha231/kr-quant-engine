@@ -61,6 +61,7 @@ KR1000_DIRECT_SCORE_PROFILES = (
     "pmb_mid_rank_7_23",
     "pmb_mid_rank_regime",
     "pmb_mid_tech_regime",
+    "kr1000_technical_mcap_regime",
     "hybrid_pmb_rs",
 )
 
@@ -85,6 +86,7 @@ KR1000_AB_SCORE_PROFILES = (
     "pmb_mid_rank_7_23",
     "pmb_mid_rank_regime",
     "pmb_mid_tech_regime",
+    "kr1000_technical_mcap_regime",
     "hybrid_pmb_rs",
 )
 CURRENT_HOLDINGS_COLUMNS = (
@@ -653,6 +655,22 @@ def apply_kr1000_score_profile(
         tech_ok = _numeric(out, "technical_score", 0.0).fillna(0.0) > 0.0
         mask = mid_rank & market_ok & tech_ok & (pmb > 0.0)
         out["leader_score"] = _sparse_positive_rank_score(pmb.where(mask, 0.0))
+        out["score_profile_eligible_flag"] = mask
+    elif profile == "kr1000_technical_mcap_regime":
+        bench_3m = _numeric(out, "bench_ret_3m", 0.0).fillna(0.0)
+        tech = _numeric(out, "technical_score", 0.0).fillna(0.0)
+        mcap = _numeric(out, "market_cap", np.nan)
+        liquidity = _numeric(out, "avg_trading_value_60d", np.nan)
+        mcap_cut = mcap.quantile(0.60)
+        liquidity_cut = liquidity.quantile(0.60)
+        mcap_ok = mcap >= mcap_cut if np.isfinite(mcap_cut) else pd.Series(False, index=out.index)
+        liquidity_ok = (
+            liquidity >= liquidity_cut
+            if np.isfinite(liquidity_cut)
+            else pd.Series(False, index=out.index)
+        )
+        mask = (bench_3m > 0.0) & (tech > 0.0) & mcap_ok.fillna(False) & liquidity_ok.fillna(False)
+        out["leader_score"] = _sparse_positive_rank_score(tech.where(mask, 0.0))
         out["score_profile_eligible_flag"] = mask
     elif profile == "hybrid_pmb_rs":
         pmb = _sparse_positive_rank_score(_numeric(out, "p_pre_surge", 0.0))

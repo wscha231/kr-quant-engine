@@ -1,11 +1,11 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-07 10:23 KST
+## Current Status - 2026-06-07 11:20 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest pushed commit entering this pass: `bf77a64`.
+Latest pushed commit entering this pass: `4fa224f`.
 
 Active official target:
 
@@ -35,21 +35,35 @@ This pass changed:
 - `docs/KR1000_GITHUB_OPERATIONS.md`
 - `SESSION_HANDOFF.md`
 
+This pass also generated local diagnostic outputs under `outputs/`; they are
+not intended for git staging unless explicitly requested.
+
 ## What Changed
 
-Added `pmb_recovery_trend_value_regime`.
+Added `kr1000_technical_mcap_regime`.
 
 Rules:
 
-- It keeps the `pmb_pullback_recovery_regime` sleeve:
-  `bench_ret_1m <= -0.01 and bench_ret_3m >= 0.0`.
-- It adds a value-filtered trend sleeve:
-  `bench_ret_3m >= 0.0387` and `valuation_score` above the P_MB-selected
-  monthly median.
-- It ranks with direct probabilities:
-  `0.60 * p_pre_surge + 0.40 * p_pre_entry - 0.20 * p_risk`.
-- It preserves full P_MB OOS file coverage; outside the regime,
-  `score_profile_eligible_flag = False`, so the broker ledger goes to cash.
+- It is a KR1000-wide profile, not a P_MB OOS profile.
+- Eligible only when:
+  - `bench_ret_3m > 0.0`,
+  - `technical_score > 0.0`,
+  - `market_cap >= monthly KR1000 60th percentile`, and
+  - `avg_trading_value_60d >= monthly KR1000 60th percentile`.
+- It ranks eligible names by `technical_score`.
+- It sets `score_profile_eligible_flag = False` outside that regime so the
+  broker ledger holds cash instead of buying arbitrary zero-score names.
+
+Also added `kr1000_technical_mcap_mdd_gate` to strategy A/B:
+
+- profile: `kr1000_technical_mcap_regime`
+- top holdings: `20`
+- buy threshold: `20`
+- hold threshold: `40`
+- gross exposure: `1.00`
+- hard stop: `15%`
+- portfolio drawdown ladder thresholds `-0.06,-0.12,-0.20`
+- portfolio drawdown ladder scales `0.85,0.65,0.35`
 
 ## Data/Leakage State
 
@@ -62,46 +76,50 @@ py -3 tools\audit_data_integrity.py --as-of 2026-06-04
 Prior result: Critical `0`, High `0`, Medium `0`.
 
 Official P_MB OOS coverage remains `102/102` months from 2018-01 through
-2026-06 with full PIT sparse OOS picks.
+2026-06 with full PIT sparse OOS picks. The new `kr1000_technical_mcap_regime`
+does not depend on P_MB probabilities, but it still uses the same PIT scored
+panel and broker-ledger path.
 
 ## Latest Broker-Ledger Results
 
-Best current return/MDD balance:
+New best current MDD-safe challenger:
 
 ```bash
-py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile pmb_recovery_trend_value_regime --pmb-oos-picks "G:\내 드라이브\kr_quant_engine\outputs\p_mb_oos_picks_purged_3sleeve_2018_20260604_latest.csv" --price-panel "G:\내 드라이브\kr_quant_engine\outputs\kr1000_bt_2018_20260604_component_ab_top20_price_panel_after_component_fix.parquet" --top-holdings 20 --max-rank-for-prices 20 --buy-rank-threshold 20 --hold-rank-threshold 40 --out-dir outputs\kr1000_bt_pmb_recovery_trend_value_profile_top20_2018_20260604 --save-scored-panel
+py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_mcap_regime --price-panel outputs\kr1000_bt_sparse_bench_pos_mcap_liq_technical_top20_2018_20260604\leader_price_panel.parquet --top-holdings 20 --max-rank-for-prices 40 --buy-rank-threshold 20 --hold-rank-threshold 40 --portfolio-dd-ladder --portfolio-dd-thresholds -0.06,-0.12,-0.20 --portfolio-dd-scales 0.85,0.65,0.35 --out-dir outputs\kr1000_bt_technical_mcap_regime_top20_ladder_2018_20260604 --save-scored-panel
 ```
 
-Top20 result:
+Result:
 
-- years `8.42`
-- CAGR `9.76%`
+- years `8.34`
+- CAGR `13.66%`
 - KOSPI200 CAGR `18.57%`
-- excess CAGR `-8.81%`
-- MDD `-19.06%`
-- Sharpe `0.763`
-- Information Ratio `-0.452`
-- trades `965`
-- average cash weight `71.49%`
+- excess CAGR `-4.90%`
+- MDD `-22.04%`
+- Sharpe `0.918`
+- Information Ratio `-0.320`
+- trades `1,275`
+- average cash weight `63.81%`
+- average effective gross exposure `85.25%`
 - metric mode `broker_ledger_next_close`, fill mode `next_close`
 
-Top15 sensitivity:
+Previous best P_MB-only MDD-safe challenger:
 
-- CAGR `9.81%`
-- MDD `-18.08%`
-- excess CAGR `-8.75%`
-- Sharpe `0.742`
-- trades `784`
-- average cash weight `71.09%`
+- `pmb_recovery_trend_value_regime` top20: CAGR `9.76%`, MDD `-19.06%`,
+  excess CAGR `-8.81%`, Sharpe `0.763`, average cash weight `71.49%`.
 
-Defensive-only baseline:
+Best KR1000 sparse diagnostics from this pass:
 
-- `pmb_pullback_recovery_regime` top20: CAGR `6.57%`, MDD `-17.82%`,
-  excess CAGR `-12.00%`, Sharpe `0.846`, average cash weight `88.32%`.
+- `kr1000_not_bear_mcap_liq_rs_value` top20 without ladder:
+  CAGR `14.77%`, MDD `-34.28%`, excess `-3.80%`.
+- `kr1000_bench_pos_mcap_liq_technical` top20 without ladder:
+  CAGR `12.80%`, MDD `-25.57%`, excess `-5.77%`.
+- `kr1000_bench_pos_mcap_liq_technical` top20 with ladder:
+  CAGR `13.66%`, MDD `-22.04%`, excess `-4.90%`.
+- combined P_MB value-recovery + KR1000 technical balanced sleeve with ladder:
+  CAGR `10.74%`, MDD `-20.36%`, excess `-7.83%`.
 
-The target is not met. `pmb_recovery_trend_value_regime` is the best current
-full-window P_MB broker-ledger challenger under the MDD gate, but it still
-fails CAGR/excess/Sharpe/IR.
+The target is not met. The new KR1000 technical/mcap profile improves CAGR
+materially while preserving the MDD gate, but it still fails CAGR/excess/Sharpe/IR.
 
 ## Tests Run
 
@@ -109,18 +127,18 @@ fails CAGR/excess/Sharpe/IR.
 - `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
 - `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
 - `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
-- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
-- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_recovery_trend_value_profile` -> planned `23` broker backtests.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_technical_mcap_profile` -> planned `25` broker backtests.
 
 ## Next Engineering Steps
 
-1. Use `pmb_recovery_trend_value_regime` as the current best MDD-safe P_MB
-   challenger, but do not call it production-pass because CAGR/excess fail.
-2. Add another positive-excess return sleeve or improve labels; simply
-   loosening the regime guard will likely reintroduce MDD.
-3. Rebuild P_MB labels so ordinary high-volatility stocks, true pre-entry
-   winners, and post-surge continuation names are separated more cleanly.
-4. Add loss/false-positive labels only if OOS diagnostic AUC and realized
-   return spread improve materially; current `p_bad_oos` AUC was only `0.538`.
-5. Inspect 2018, 2022, and 2024 false-positive clusters at the fold level.
-6. Daily readiness still needs actual `DATA_ROOT/state/current_holdings.csv`.
+1. Treat `kr1000_technical_mcap_regime` as the current best MDD-safe challenger,
+   but do not call it production-pass because CAGR/excess fail.
+2. Use this profile as the new base for alpha improvement:
+   add sector/theme RS exits, improve KOSDAQ/KOSPI sleeve allocation, and test
+   macro exposure control without reducing already weak CAGR.
+3. Investigate why the best `rs_value` sleeve reaches CAGR `14.77%` but MDD
+   breaks at `-34.28%`; the next useful work is a drawdown-aware exit or
+   crash-regime veto, not another P_MB probability tweak.
+4. Rebuild P_MB labels separately; P_MB-only profiles remain too defensive and
+   underperform KOSPI200.
+5. Daily readiness still needs actual `DATA_ROOT/state/current_holdings.csv`.

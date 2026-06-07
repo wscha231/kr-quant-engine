@@ -145,6 +145,7 @@ def test_planned_component_ab_jobs():
         "pmb_mid_rank_7_23",
         "pmb_mid_rank_regime",
         "pmb_mid_tech_regime",
+        "kr1000_technical_mcap_regime",
         "hybrid_pmb_rs",
     }
     strategy_jobs = [j for j in official if j.get("strategy_preset") == "pmb_defensive_mdd_gate"]
@@ -162,6 +163,11 @@ def test_planned_component_ab_jobs():
     assert pre_entry_jobs[0]["profile"] == "pmb_pre_entry_defensive"
     assert "--top-holdings" in pre_entry_jobs[0]["cmd"]
     assert "15" in pre_entry_jobs[0]["cmd"]
+    kr_technical_jobs = [j for j in official if j.get("strategy_preset") == "kr1000_technical_mcap_mdd_gate"]
+    assert len(kr_technical_jobs) == 1
+    assert kr_technical_jobs[0]["profile"] == "kr1000_technical_mcap_regime"
+    assert "--portfolio-dd-thresholds" in kr_technical_jobs[0]["cmd"]
+    assert "-0.06,-0.12,-0.2" in kr_technical_jobs[0]["cmd"]
     assert {j["profile"] for j in stress} == {"full"}
     assert all("--score-profile" in j["cmd"] for j in jobs)
     assert all("--pmb-oos-picks" in j["cmd"] for j in jobs)
