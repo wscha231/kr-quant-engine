@@ -6,6 +6,65 @@
 
 ## 2026-06-07
 
+### 09:17 KST - pmb-false-positive-leakage-safe-audit
+
+**Scope**: Added a leakage-safe false-positive audit for P_MB OOS candidates
+and rejected two sparse filter broker experiments that worsened drawdown. This
+does not improve the official CAGR/MDD gate yet; it prevents the next P_MB
+risk model from being built on hidden target leakage.
+
+**What landed**:
+- Added `tools/analyze_pmb_false_positives.py`.
+- Added `tests/test_pmb_false_positive_audit.py`.
+- Wired the new false-positive audit test into GitHub Smoke.
+- The feature selector explicitly excludes realized/analysis/forward/future
+  labels, generated trade labels, `year`, and `pmb_oos_fold_id`.
+
+**Diagnostic result**:
+- Ran `tools/analyze_pmb_false_positives.py` on
+  `outputs/pmb_oos_quality_realized_preentry_2018_20260604/pmb_rows.parquet`.
+- Observed rows: `2,438`; months: `100`; good-trade rate `20.18%`;
+  bad-trade rate `30.80%`.
+- Leakage-safe OOS model scores are weak:
+  - `p_good_oos` vs good trade: AUC `0.510`.
+  - `p_bad_oos` vs bad trade: AUC `0.538`.
+  - existing `p_risk` vs bad trade: AUC `0.492`.
+- Feature-gap table shows higher short/intermediate momentum often aligns
+  with bad trades, not cleaner winners; `bench_ret_1m`, `ret_3m`, `rs_3m`,
+  and `rs_score` have negative good-minus-bad gaps in the P_MB candidate set.
+- Two sparse filter broker-ledger tests failed badly:
+  - `filter_def_hi_bench_pos` top20: CAGR `3.15%`, MDD `-60.29%`,
+    excess CAGR `-15.42%`.
+  - `filter_def_hi_no_trend_bench_pos` top20: CAGR `3.54%`, MDD `-61.39%`,
+    excess CAGR `-15.03%`.
+- Conclusion: current P_MB features do not support a reliable false-positive
+  gate. Rebuild label definitions before more broker exposure/ranking tuning.
+
+**symbols_added**:
+- tools/analyze_pmb_false_positives.py
+- tools.analyze_pmb_false_positives.add_trade_outcome_labels
+- tools.analyze_pmb_false_positives.select_false_positive_features
+- tools.analyze_pmb_false_positives.walk_forward_false_positive_scores
+- tools.analyze_pmb_false_positives.build_false_positive_audit
+- tests/test_pmb_false_positive_audit.py
+- tests/test_pmb_false_positive_audit.py::test_feature_selector_excludes_leakage
+- tests/test_pmb_false_positive_audit.py::test_false_positive_walk_forward_embargo
+
+**symbols_changed**:
+- .github/workflows/smoke_test.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none. The false-positive audit is diagnostic-only and
+does not alter production rankings or official validation gates.
+
+**Validation**:
+- `py -3 -m py_compile tools\analyze_pmb_false_positives.py tests\test_pmb_false_positive_audit.py` -> passed.
+- `py -3 tests\test_pmb_false_positive_audit.py` -> 2 passed, 0 failed.
+- `py -3 tools\analyze_pmb_false_positives.py --pmb-rows outputs\pmb_oos_quality_realized_preentry_2018_20260604\pmb_rows.parquet --target-start 2018-01-01 --target-end 2026-06-04 --out-dir outputs\pmb_false_positive_audit_2018_20260604` -> completed.
+
 ### 08:50 KST - pmb-broad-realized-rerank-diagnostic
 
 **Scope**: Added a broader KR1000 realized-outcome reranker for PIT-safe P_MB

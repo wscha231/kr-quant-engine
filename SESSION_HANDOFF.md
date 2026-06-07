@@ -1,13 +1,13 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-07 08:50 KST
+## Current Status - 2026-06-07 09:17 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest pushed commit before this handoff: `6456375`.
-Latest known GitHub Smoke on `6456375` succeeded:
-https://github.com/wscha231/kr-quant-engine/actions/runs/27076953261
+Latest pushed commit entering this pass: `e54e761`.
+Latest known GitHub Smoke on `e54e761` succeeded:
+https://github.com/wscha231/kr-quant-engine/actions/runs/27077373525
 
 Active official target:
 
@@ -27,34 +27,31 @@ Do not stage or revert this unrelated dirty file:
 
 - `research/10_theme_lifecycle/leader_themes_per_quarter.csv`
 
-Intended files in this handoff:
+Intended files in this pass:
 
 - `.github/workflows/smoke_test.yml`
-- `tools/build_pmb_broad_realized_rerank_picks.py`
-- `tests/test_pmb_broad_realized_rerank.py`
+- `tools/analyze_pmb_false_positives.py`
+- `tests/test_pmb_false_positive_audit.py`
 - `CHANGELOG.md`
 - `SESSION_HANDOFF.md`
 - `docs/KR1000_GITHUB_OPERATIONS.md`
 
 ## What Changed
 
-Added a broad KR1000 realized-history P_MB reranker:
+Added a leakage-safe false-positive audit:
 
-- `tools/build_pmb_broad_realized_rerank_picks.py`
-- trains realized return/loss models on the full scored KR1000 panel
-- scores only PIT-safe P_MB OOS candidates for each test month
-- uses pre-embargo rows only: `rebalance_date <= test_day - embargo_months`
-- writes sparse P_MB picks compatible with `tools/run_kr1000_backtest.py`
-- does not overwrite legacy or official P_MB OOS picks
+- `tools/analyze_pmb_false_positives.py`
+- consumes `outputs/pmb_oos_quality_realized_preentry_2018_20260604/pmb_rows.parquet`
+- adds realized `good_trade` / `bad_trade` labels for diagnostics only
+- selects numeric features while excluding `forward_`, `future_`, `target_`,
+  `realized_`, `analysis_`, generated trade labels, `year`, and
+  `pmb_oos_fold_id`
+- runs pre-embargo walk-forward ExtraTrees models for `p_good_oos` and
+  `p_bad_oos`
+- writes `summary.json`, `model_metrics.csv`, `feature_gaps.csv`,
+  `folds.csv`, and `oos_scores.parquet`
 
-The broad reranker uses broker-like realized next-rebalance labels:
-
-- signal date: monthly `rebalance_date`
-- entry: next available close after signal date
-- exit: next available close after the next signal date
-- labels: `analysis_return`, `analysis_min_return`, `analysis_holding_days`
-
-Added `tests/test_pmb_broad_realized_rerank.py` and wired it into GitHub Smoke.
+Added `tests/test_pmb_false_positive_audit.py` and wired it into GitHub Smoke.
 
 ## Current Data/Leakage State
 
@@ -72,22 +69,30 @@ evidence is missing. Required canonical path:
 
 - `DATA_ROOT/state/current_holdings.csv`
 
-## Latest Broad Realized Reranker Output
+## Latest False-Positive Audit
 
-Command pattern:
+Command:
 
 ```bash
-py -3 tools\build_pmb_broad_realized_rerank_picks.py --scored-panel <GDrive scored panel> --price-panel <GDrive price panel> --pmb-oos-picks <GDrive P_MB OOS picks> --target-start 2018-01-01 --target-end 2026-06-04 --out outputs\p_mb_oos_picks_broad_realized_rerank_2018_20260604.csv --k-per-month 30 --embargo-months 3 --min-train-rows 5000 --pmb-weight 0.04 --return-weight 1.0 --risk-penalty 0.10 --fail-on-coverage-gap
+py -3 tools\analyze_pmb_false_positives.py --pmb-rows outputs\pmb_oos_quality_realized_preentry_2018_20260604\pmb_rows.parquet --target-start 2018-01-01 --target-end 2026-06-04 --out-dir outputs\pmb_false_positive_audit_2018_20260604
 ```
 
 Output:
 
-- `outputs/p_mb_oos_picks_broad_realized_rerank_2018_20260604.csv`
-- rows: `3,060`
-- window: `2018-01-31` to `2026-06-04`
-- coverage: `102/102` official months passed
-- broad observed labels: `102,227/159,005`
-- features used: `18/20`
+- rows: `2,438`
+- months: `100`
+- feature count: `112`
+- OOS scored rows: `1,812`
+- OOS scored months: `74`
+- good-trade rate: `20.18%`
+- bad-trade rate: `30.80%`
+- `p_good_oos` vs good trade: AUC `0.510`
+- `p_bad_oos` vs bad trade: AUC `0.538`
+- existing `p_risk` vs bad trade: AUC `0.492`
+
+Interpretation: current features do not support a reliable P_MB false-positive
+gate. The risk model must be redesigned from better labels/features before it
+is used in the broker ledger.
 
 ## Latest Broker-Ledger Results
 
@@ -95,52 +100,44 @@ Still failed:
 
 - `pmb_pre_surge` strict OOS top20: CAGR `3.99%`, MDD `-35.87%`,
   excess CAGR `-14.57%`, Sharpe `0.302`
-- `pmb_pre_entry` top20: CAGR `3.37%`, MDD `-29.00%`, excess CAGR `-15.20%`
-- `pmb_pre_entry_defensive` top15 + DD ladder: CAGR `3.38%`, MDD `-26.29%`,
-  excess CAGR `-15.19%`
 - `pmb_pre_entry_blend_regime` top15: CAGR `1.64%`, MDD `-23.80%`,
   excess CAGR `-16.93%`
-- selected-only realized-history rerank top20: CAGR `2.30%`, MDD `-39.30%`
 - broad realized-history rerank top20: CAGR `2.86%`, MDD `-38.83%`,
   excess CAGR `-15.71%`, Sharpe `0.248`
-- broad realized-history rerank top15: CAGR `-0.84%`, MDD `-41.34%`,
-  excess CAGR `-19.41%`, Sharpe `0.053`
-- broad realized-history rerank top20 + DD ladder: CAGR `-2.08%`,
-  MDD `-29.03%`, excess CAGR `-20.64%`, Sharpe `-0.146`
 - broad `base_plus_loss` top20: CAGR `3.32%`, MDD `-38.62%`,
   excess CAGR `-15.25%`, Sharpe `0.270`
+- sparse `filter_def_hi_bench_pos` top20: CAGR `3.15%`, MDD `-60.29%`,
+  excess CAGR `-15.42%`
+- sparse `filter_def_hi_no_trend_bench_pos` top20: CAGR `3.54%`,
+  MDD `-61.39%`, excess CAGR `-15.03%`
 
-The target is not met. Current bottleneck is not the broker ledger and not a
-simple pre-entry/risk rerank. It is also not fixed by linear broad-universe
-realized return/loss reranking. The P_MB label design and false-positive model
-need to be rebuilt.
+The target is not met. Current bottleneck is P_MB label design and
+false-positive control, not the broker ledger or PIT coverage.
 
 ## Tests Run In This Work
 
-- `py -3 -m py_compile tools\build_pmb_broad_realized_rerank_picks.py tests\test_pmb_broad_realized_rerank.py` -> passed.
-- `py -3 tests\test_pmb_broad_realized_rerank.py` -> 2 passed, 0 failed.
-- `py -3 tools\build_pmb_broad_realized_rerank_picks.py ... --fail-on-coverage-gap` -> passed.
+- `py -3 -m py_compile tools\analyze_pmb_false_positives.py tests\test_pmb_false_positive_audit.py` -> passed.
+- `py -3 tests\test_pmb_false_positive_audit.py` -> 2 passed, 0 failed.
+- `py -3 tools\analyze_pmb_false_positives.py ...` -> completed.
 
 Run before commit:
 
 ```bash
 py -3 tests\smoke_test.py --quick
 py -3 tests\smoke_test.py
-py -3 tests\test_kr1000_leader.py
-py -3 tests\test_kr1000_validation_gate.py
-py -3 tests\test_pmb_realized_rerank.py
+py -3 tests\test_pmb_false_positive_audit.py
 py -3 tests\test_pmb_broad_realized_rerank.py
+py -3 tests\test_kr1000_validation_gate.py
 ```
 
 ## Next Engineering Steps
 
-1. Inspect P_MB false positives by fold and year. Focus on names selected by
-   `p_pre_surge` that realized `analysis_return <= -10%` or
-   `analysis_min_return <= -15%`.
-2. Rebuild P_MB labels so pre-surge winners are separated from ordinary
-   high-volatility stocks and post-surge continuation names.
-3. Prove the loss/risk label has realized correlation before using it in the
-   broker ledger.
-4. Add regime features that explain 2018/2022/2024 failures before trying more
-   exposure changes.
+1. Rebuild P_MB label definitions. Separate ordinary high-volatility stocks,
+   pre-entry winners, and post-surge continuation names more strictly.
+2. Add new loss labels that have observed OOS correlation before using them in
+   the broker ledger.
+3. Focus on 2018/2022/2024 false-positive clusters; current momentum/RS
+   strength often corresponds to worse bad-trade risk inside P_MB candidates.
+4. Add regime features only after the label audit improves; do not continue
+   exposure-only or sparse-filter experiments.
 5. Daily readiness still needs real `DATA_ROOT/state/current_holdings.csv`.

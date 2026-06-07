@@ -48,6 +48,9 @@ jobs:
       - name: P_MB broad realized rerank tests
         run: python tests/test_pmb_broad_realized_rerank.py
 
+      - name: P_MB false-positive audit tests
+        run: python tests/test_pmb_false_positive_audit.py
+
       - name: PIT universe tests (Phase C1)
         run: |
           if [ -f data_pit/historical_mcap.parquet ] || ls cache_pykrx/mktcap_ALL_*.parquet >/dev/null 2>&1; then

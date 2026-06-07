@@ -74,6 +74,17 @@ broad variant `base_plus_loss` CAGR `3.32%`, MDD `-38.62%`. Do not repeat
 linear broad realized reranking as the next alpha path; rebuild P_MB label
 definitions and false-positive/risk modeling first.
 
+The next leakage-safe false-positive audit (`tools/analyze_pmb_false_positives.py`)
+confirmed that the current feature set is not yet strong enough for a P_MB risk
+gate. On `2,438` realized P_MB OOS rows, the OOS `p_good_oos` model reached
+only AUC `0.510` against good trades and `p_bad_oos` reached only AUC `0.538`
+against bad trades; existing `p_risk` was worse at AUC `0.492`. Sparse filter
+variants also failed in the broker ledger: `filter_def_hi_bench_pos` top20
+produced CAGR `3.15%`, MDD `-60.29%`; `filter_def_hi_no_trend_bench_pos` top20
+produced CAGR `3.54%`, MDD `-61.39%`. Treat this as evidence that the P_MB
+label definitions need to be rebuilt, not that another exposure filter is
+needed.
+
 ## GitHub Workflows
 
 Production automation is split into three lanes:
@@ -466,6 +477,7 @@ python tests/test_kr1000_validation_gate.py
 python tests/test_pmb_oos_quality.py
 python tests/test_pmb_realized_rerank.py
 python tests/test_pmb_broad_realized_rerank.py
+python tests/test_pmb_false_positive_audit.py
 python tools/run_kr1000_validation_gate.py --component-ab --strategy-ab --dry-run
 ```
 
@@ -535,6 +547,9 @@ As of the 2026-06-07 08:05 KST handoff:
   coverage. The broad top20 run produced CAGR `2.86%`, MDD `-38.83%`; the
   best tested broad variant, `base_plus_loss`, produced CAGR `3.32%`, MDD
   `-38.62%`.
+- Leakage-safe false-positive modeling is currently too weak for production:
+  `p_good_oos` AUC `0.510`, `p_bad_oos` AUC `0.538`, existing `p_risk` AUC
+  `0.492`. Sparse filter replays worsened drawdown, with MDD around `-60%`.
 
 The next production step is to provide/sync actual
 `DATA_ROOT/state/current_holdings.csv` for the daily broker readiness path, then
