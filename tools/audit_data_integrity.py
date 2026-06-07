@@ -43,6 +43,10 @@ def parse_args() -> argparse.Namespace:
                    help="Output directory. Default DATA_ROOT/outputs.")
     p.add_argument("--stale-days", type=int, default=45,
                    help="Warn when core data is older than this many days.")
+    p.add_argument("--skip-source-panels", action="store_true",
+                   help="Skip expensive feature_store source-panel scan for fast gate checks.")
+    p.add_argument("--index-cache-only", action="store_true",
+                   help="Audit only KOSPI/KOSPI200 index caches and exit.")
     return p.parse_args()
 
 
@@ -73,6 +77,11 @@ def _date_stats(df: pd.DataFrame, candidates: list[str]) -> dict[str, Any]:
                 "nunique": int(s.nunique()),
             }
     return out
+
+
+def _max_abs_or_zero(series: pd.Series) -> float:
+    value = pd.to_numeric(series, errors="coerce").abs().max(skipna=True)
+    return float(value) if pd.notna(value) else 0.0
 
 
 def _safe_read_parquet(path: Path) -> pd.DataFrame:
@@ -229,6 +238,149 @@ def _audit_mcap_duplicate_snapshots(
     return out
 
 
+def _audit_index_cache_sanity(
+    cache_dir: Path,
+    *,
+    ticker: str,
+    name: str,
+    as_of: pd.Timestamp | None = None,
+    lookback_days: int = 370,
+    max_files: int = 4,
+    max_abs_daily_return: float = 0.20,
+    max_abs_252d_return: float = 5.00,
+) -> dict[str, Any]:
+    """Detect broad-index cache corruption before benchmark metrics are trusted.
+
+    KOSPI/KOSPI200 can move violently in stress windows, and this project may
+    run against future/current provider data. This audit therefore blocks only
+    extreme broad-index anomalies that are more likely to be cache corruption
+    than market action.
+    """
+    out: dict[str, Any] = {
+        "ticker": str(ticker),
+        "name": str(name),
+        "status": "missing",
+        "files_checked": 0,
+        "files_available": 0,
+        "rows": 0,
+        "issues": [],
+        "as_of": str(pd.Timestamp(as_of).date()) if as_of is not None else None,
+        "lookback_days": int(lookback_days),
+        "thresholds": {
+            "max_abs_daily_return": float(max_abs_daily_return),
+            "max_abs_252d_return": float(max_abs_252d_return),
+        },
+    }
+    if not cache_dir.exists():
+        return out
+    pattern = re.compile(rf"^index_{re.escape(str(ticker))}_(\d{{8}})_(\d{{8}})\.parquet$")
+    candidates: list[tuple[int, int, Path]] = []
+    for path in cache_dir.glob(f"index_{ticker}_*.parquet"):
+        match = pattern.match(path.name)
+        if not match:
+            continue
+        try:
+            candidates.append((int(match.group(1)), int(match.group(2)), path))
+        except ValueError:
+            continue
+    out["files_available"] = int(len(candidates))
+    if not candidates:
+        return out
+
+    if as_of is None:
+        end_i = max(end_i for _, end_i, _ in candidates)
+        as_of_ts = pd.to_datetime(str(end_i), format="%Y%m%d").normalize()
+    else:
+        as_of_ts = pd.Timestamp(as_of).normalize()
+    wanted_start = int((as_of_ts - pd.Timedelta(days=int(lookback_days))).strftime("%Y%m%d"))
+    wanted_end = int(as_of_ts.strftime("%Y%m%d"))
+
+    ranked: list[tuple[int, int, Path]] = []
+    for start_i, end_i, path in candidates:
+        if end_i < wanted_start or start_i > wanted_end:
+            continue
+        overlap_start = max(start_i, wanted_start)
+        overlap_end = min(end_i, wanted_end)
+        overlap = max(0, overlap_end - overlap_start)
+        span = max(1, end_i - start_i)
+        covers = int(start_i <= wanted_start and end_i >= wanted_end)
+        score = covers * 10_000_000_000 + overlap * 10_000 - span
+        ranked.append((score, span, path))
+    paths = [p for _, _, p in sorted(ranked, key=lambda x: (x[0], -x[1]), reverse=True)[: max(1, int(max_files))]]
+    out["files_checked"] = int(len(paths))
+    frames: list[pd.DataFrame] = []
+    for path in paths:
+        df = _safe_read_parquet(path)
+        if df.empty or not {"date", "close"}.issubset(df.columns):
+            continue
+        work = df[["date", "close"]].copy()
+        work["date"] = pd.to_datetime(work["date"], errors="coerce").dt.normalize()
+        work["close"] = pd.to_numeric(work["close"], errors="coerce")
+        work = work.dropna(subset=["date", "close"])
+        if not work.empty:
+            work["source_file"] = path.name
+            frames.append(work)
+    if not frames:
+        return out
+
+    panel = pd.concat(frames, ignore_index=True, sort=False)
+    panel = panel.sort_values(["date", "source_file"]).drop_duplicates("date", keep="last")
+    panel = panel.sort_values("date").reset_index(drop=True)
+    wanted_start_ts = pd.to_datetime(str(wanted_start), format="%Y%m%d").normalize()
+    panel = panel[(panel["date"] >= wanted_start_ts) & (panel["date"] <= as_of_ts)].copy()
+    if panel.empty:
+        return out
+    panel["daily_return"] = panel["close"].pct_change()
+    panel["return_252d"] = panel["close"] / panel["close"].shift(252) - 1.0
+    out.update({
+        "status": "passed",
+        "rows": int(len(panel)),
+        "min_date": str(panel["date"].min().date()),
+        "max_date": str(panel["date"].max().date()),
+        "latest_close": float(panel["close"].iloc[-1]),
+        "max_abs_daily_return": _max_abs_or_zero(panel["daily_return"]),
+        "max_abs_252d_return": _max_abs_or_zero(panel["return_252d"]),
+    })
+
+    daily_breaches = panel[panel["daily_return"].abs() > float(max_abs_daily_return)]
+    if not daily_breaches.empty:
+        out["issues"].append({
+            "severity": "CRITICAL",
+            "message": f"{name} index cache has implausible daily returns",
+            "threshold": float(max_abs_daily_return),
+            "breach_count": int(len(daily_breaches)),
+            "examples": [
+                {
+                    "date": str(r["date"].date()),
+                    "close": float(r["close"]),
+                    "daily_return": float(r["daily_return"]),
+                }
+                for _, r in daily_breaches.reindex(daily_breaches["daily_return"].abs().sort_values(ascending=False).index).head(5).iterrows()
+            ],
+        })
+
+    rolling_breaches = panel[panel["return_252d"].abs() > float(max_abs_252d_return)]
+    if not rolling_breaches.empty:
+        out["issues"].append({
+            "severity": "CRITICAL",
+            "message": f"{name} index cache has implausible 252-trading-day returns",
+            "threshold": float(max_abs_252d_return),
+            "breach_count": int(len(rolling_breaches)),
+            "examples": [
+                {
+                    "date": str(r["date"].date()),
+                    "close": float(r["close"]),
+                    "return_252d": float(r["return_252d"]),
+                }
+                for _, r in rolling_breaches.reindex(rolling_breaches["return_252d"].abs().sort_values(ascending=False).index).head(5).iterrows()
+            ],
+        })
+
+    if out["issues"]:
+        out["status"] = "failed"
+    return out
+
+
 def _latest_scored_panel(feature_store: Path) -> Path | None:
     files = sorted(feature_store.glob("scored_panel_v0_*.parquet"),
                    key=lambda p: p.stat().st_mtime, reverse=True)
@@ -382,7 +534,44 @@ def _add_issue(issues: list[dict[str, Any]], severity: str, message: str, **extr
     issues.append(item)
 
 
-def build_audit(as_of: pd.Timestamp, stale_days: int) -> dict[str, Any]:
+def build_index_cache_audit(as_of: pd.Timestamp) -> dict[str, Any]:
+    cache_pykrx = DATA_ROOT / "cache_pykrx"
+    index_cache_audit = {
+        "KOSPI": _audit_index_cache_sanity(cache_pykrx, ticker="1001", name="KOSPI", as_of=as_of),
+        "KOSPI200": _audit_index_cache_sanity(cache_pykrx, ticker="1028", name="KOSPI200", as_of=as_of),
+    }
+    issues: list[dict[str, Any]] = []
+    for label, idx_audit in index_cache_audit.items():
+        if idx_audit.get("status") == "missing":
+            _add_issue(issues, "HIGH", f"{label} index cache is missing; benchmark-relative gates cannot be verified offline")
+        for idx_issue in idx_audit.get("issues", []):
+            _add_issue(
+                issues,
+                str(idx_issue.get("severity", "HIGH")),
+                str(idx_issue.get("message", f"{label} index cache sanity failed")),
+                ticker=idx_audit.get("ticker"),
+                examples=idx_issue.get("examples", []),
+                threshold=idx_issue.get("threshold"),
+                breach_count=idx_issue.get("breach_count"),
+            )
+    return {
+        "audit_as_of": str(as_of.date()),
+        "project_root": str(CONFIG_PROJECT_ROOT),
+        "data_root": str(DATA_ROOT),
+        "cache_coverage": {
+            "index_cache_sanity": index_cache_audit,
+        },
+        "issues": issues,
+        "summary": {
+            "critical": sum(1 for x in issues if x["severity"] == "CRITICAL"),
+            "high": sum(1 for x in issues if x["severity"] == "HIGH"),
+            "medium": sum(1 for x in issues if x["severity"] == "MEDIUM"),
+            "low": sum(1 for x in issues if x["severity"] == "LOW"),
+        },
+    }
+
+
+def build_audit(as_of: pd.Timestamp, stale_days: int, include_source_panels: bool = True) -> dict[str, Any]:
     data_root = DATA_ROOT
     feature_store = data_root / "feature_store"
     data_pit = data_root / "data_pit"
@@ -396,6 +585,10 @@ def build_audit(as_of: pd.Timestamp, stale_days: int) -> dict[str, Any]:
 
     mcap_cache = _scan_dated_cache(cache_pykrx, r"^mktcap_ALL_(\d{8})\.parquet$")
     mcap_duplicate_audit = _audit_mcap_duplicate_snapshots(cache_pykrx)
+    index_cache_audit = {
+        "KOSPI": _audit_index_cache_sanity(cache_pykrx, ticker="1001", name="KOSPI", as_of=as_of),
+        "KOSPI200": _audit_index_cache_sanity(cache_pykrx, ticker="1028", name="KOSPI200", as_of=as_of),
+    }
     avg_cache = _scan_dated_cache(cache_misc, r"^avg_value_\d+d_(\d{8})\.parquet$")
 
     hist_info = _describe_parquet(historical_mcap)
@@ -426,6 +619,19 @@ def build_audit(as_of: pd.Timestamp, stale_days: int) -> dict[str, Any]:
             "mktcap cache has identical distant snapshots without carry-forward provenance",
             duplicate_groups=mcap_duplicate_audit.get("duplicate_groups", [])[:3],
         )
+    for label, idx_audit in index_cache_audit.items():
+        if idx_audit.get("status") == "missing":
+            _add_issue(issues, "HIGH", f"{label} index cache is missing; benchmark-relative gates cannot be verified offline")
+        for idx_issue in idx_audit.get("issues", []):
+            _add_issue(
+                issues,
+                str(idx_issue.get("severity", "HIGH")),
+                str(idx_issue.get("message", f"{label} index cache sanity failed")),
+                ticker=idx_audit.get("ticker"),
+                examples=idx_issue.get("examples", []),
+                threshold=idx_issue.get("threshold"),
+                breach_count=idx_issue.get("breach_count"),
+            )
     if avg_cache["gaps_gt_45d"]:
         _add_issue(issues, "HIGH", "avg_trading_value cache has gaps >45 days", gaps=avg_cache["gaps_gt_45d"][:10])
 
@@ -464,11 +670,15 @@ def build_audit(as_of: pd.Timestamp, stale_days: int) -> dict[str, Any]:
             "historical_mcap": hist_info,
             "listed_history": listed_info,
             "scored_panel_v0_latest": scored_audit,
-            "source_panels": _audit_source_panels(feature_store),
+            "source_panels": _audit_source_panels(feature_store) if include_source_panels else {
+                "skipped": True,
+                "reason": "--skip-source-panels",
+            },
         },
         "cache_coverage": {
             "mktcap_ALL": mcap_cache,
             "mktcap_duplicate_snapshot_audit": mcap_duplicate_audit,
+            "index_cache_sanity": index_cache_audit,
             "avg_value": avg_cache,
         },
         "workflows": workflows,
@@ -510,16 +720,19 @@ def write_markdown(audit: dict[str, Any], path: Path) -> None:
         lines.append("- No issues detected by this audit.")
 
     lines.extend(["", "## Core Coverage", ""])
-    hist = audit["assets"]["historical_mcap"]
-    scored = audit["assets"]["scored_panel_v0_latest"]
-    lines.append(f"- historical_mcap rows: `{hist.get('rows')}`, dates: `{hist.get('date_stats', {}).get('snapshot_date')}`")
-    lines.append(f"- latest scored_panel rows: `{scored.get('rows')}`, dates: `{scored.get('date_stats', {}).get('rebalance_date')}`")
-    lines.append(f"- mktcap cache: `{audit['cache_coverage']['mktcap_ALL']}`")
-    lines.append(f"- avg value cache: `{audit['cache_coverage']['avg_value']}`")
+    if "assets" in audit:
+        hist = audit["assets"]["historical_mcap"]
+        scored = audit["assets"]["scored_panel_v0_latest"]
+        lines.append(f"- historical_mcap rows: `{hist.get('rows')}`, dates: `{hist.get('date_stats', {}).get('snapshot_date')}`")
+        lines.append(f"- latest scored_panel rows: `{scored.get('rows')}`, dates: `{scored.get('date_stats', {}).get('rebalance_date')}`")
+        lines.append(f"- mktcap cache: `{audit['cache_coverage']['mktcap_ALL']}`")
+        lines.append(f"- avg value cache: `{audit['cache_coverage']['avg_value']}`")
+    lines.append(f"- index cache sanity: `{audit['cache_coverage'].get('index_cache_sanity')}`")
 
-    lines.extend(["", "## Cost Model", ""])
-    for k, v in audit["cost_model"].items():
-        lines.append(f"- {k}: `{v}`")
+    if "cost_model" in audit:
+        lines.extend(["", "## Cost Model", ""])
+        for k, v in audit["cost_model"].items():
+            lines.append(f"- {k}: `{v}`")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -530,7 +743,11 @@ def main() -> int:
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    audit = build_audit(as_of, args.stale_days)
+    audit = build_index_cache_audit(as_of) if args.index_cache_only else build_audit(
+        as_of,
+        args.stale_days,
+        include_source_panels=not args.skip_source_panels,
+    )
     stamp = as_of.strftime("%Y%m%d")
     json_path = out_dir / f"data_integrity_audit_{stamp}.json"
     md_path = out_dir / f"data_integrity_audit_{stamp}.md"

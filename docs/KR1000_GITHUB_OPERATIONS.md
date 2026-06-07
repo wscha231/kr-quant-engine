@@ -262,6 +262,28 @@ engine-version change or suspected cache corruption requires a from-scratch
   `32.17%`, MDD `-4.10%`, excess CAGR `-149.41%`; the 2026 `20` ticker /
   `4` date smoke produced CAGR `34.39%`, MDD `-0.88%`, excess CAGR
   `-529.75%`.
+- The 2018-current top-250 long-window tests failed. `rs_technical` produced
+  CAGR `16.87%`, MDD `-26.01%`, excess CAGR `-1.83%`. `technical_value`
+  produced CAGR `7.67%`, MDD `-31.44%`, excess CAGR `-11.03%`. Do not spend the
+  next pass scaling these modes to `500` or full KR1000 unless the feature-store
+  design changes; they are weaker than the locked production challenger.
+
+`Production Challenger Loss-Month Diagnostic`
+
+- `tools/analyze_kr1000_challenger_loss_months.py` compares the locked
+  challenger against KOSPI200 by month and joins cash weight, holdings, trades,
+  and reason-code context.
+- Current diagnostic output:
+  `outputs\kr1000_challenger_loss_months_2018_20260604`.
+- Result: `102` months, `52` underperform months, mean monthly active return
+  `0.39%`, median `-0.04%`, worst active month `-19.66%`.
+- Several worst underperformance months happened with near-100% cash while
+  KOSPI200 rallied (`2020-11`, `2023-11`, `2020-04`, `2022-10/11`,
+  `2025-01`). This points to a benchmark/large-cap sleeve or better risk-on
+  re-entry gate as the next credible improvement path.
+- `2026-05` was different: the strategy was invested and up `15.69%`, but
+  KOSPI200 rose `35.34%`. That needs sector/theme breadth or index-leader
+  participation diagnostics, not only a cash sleeve.
 
 `Quarterly Backtest`
 
@@ -581,7 +603,9 @@ official 8y CAGR/MDD pass.
 1. Check `SESSION_HANDOFF.md` first.
 2. Inspect the latest `kr1000_validation_gate_*/kr1000_validation_gate.json`.
 3. If data gate is blocked, fix data freshness/PIT leakage before tuning.
-4. If data gate passes but performance fails, compare component A/B:
+4. Inspect `outputs\kr1000_challenger_loss_months_2018_20260604` to separate
+   cash-underperformance months from invested stock-selection failures.
+5. If data gate passes but performance fails, compare component A/B:
    - `rs_only`
    - `rs_flow`
    - `rs_flow_technical`
@@ -590,9 +614,9 @@ official 8y CAGR/MDD pass.
    - `pmb_mid_rank_7_23`
    - `hybrid_pmb_rs`
    - `full`
-5. Only change factor weights or features after identifying which component
+6. Only change factor weights or features after identifying which component
    improves CAGR without breaking MDD.
-6. Run at least:
+7. Run at least:
 
 ```bash
 python tests/smoke_test.py --quick
@@ -606,7 +630,7 @@ python tests/test_pmb_false_positive_audit.py
 python tools/run_kr1000_validation_gate.py --component-ab --strategy-ab --dry-run
 ```
 
-7. When comparing broker strategy settings, use the runner CLI overrides rather
+8. When comparing broker strategy settings, use the runner CLI overrides rather
    than editing code:
    - `--gross-exposure`
    - `--hard-stop-loss-pct`

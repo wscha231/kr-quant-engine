@@ -53,6 +53,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--single-stock-max-weight", type=float, default=0.10)
     p.add_argument("--gross-exposure", type=float, default=1.0)
     p.add_argument("--hard-stop-loss-pct", type=float, default=0.15)
+    p.add_argument("--overlay-mode", default="rs_technical",
+                   choices=["rs_technical", "technical_value"],
+                   help="Research score mode for weekly overlay ranking.")
     p.add_argument("--run-backtest", action="store_true")
     return p.parse_args()
 
@@ -246,7 +249,12 @@ def build_weekly_overlay_panel(
     return pd.concat(rows, ignore_index=True, sort=False)
 
 
-def apply_weekly_overlay_score(panel: pd.DataFrame, *, max_weight: float = 0.10) -> pd.DataFrame:
+def apply_weekly_overlay_score(
+    panel: pd.DataFrame,
+    *,
+    max_weight: float = 0.10,
+    mode: str = "rs_technical",
+) -> pd.DataFrame:
     def score_one(g: pd.DataFrame) -> pd.DataFrame:
         out = g.copy()
         mcap = pd.to_numeric(out.get("market_cap"), errors="coerce")
@@ -259,16 +267,19 @@ def apply_weekly_overlay_score(panel: pd.DataFrame, *, max_weight: float = 0.10)
         risk = _numeric_series(out, "risk_veto_flag", 0).fillna(0).astype(int)
         hard = _numeric_series(out, "hard_exit_flag", 0).fillna(0).astype(int)
         dilution = _numeric_series(out, "dilution_risk_flag", 0).fillna(0).astype(int)
-        mask = (
+        base_mask = (
             (bench3 > 0.0)
-            & (tech > 0.50)
-            & (rs > 0.55)
             & (mcap >= mcap.quantile(0.60))
             & (liq >= liq.quantile(0.60))
             & (risk == 0)
             & (hard == 0)
         )
-        score = 0.65 * _rank_pct(tech) + 0.75 * _rank_pct(rs) + 0.25 * _rank_pct(val) + 0.15 * _rank_pct(flow)
+        if mode == "technical_value":
+            mask = base_mask & (tech > 0.0)
+            score = 0.60 * _rank_pct(tech) + 0.40 * _rank_pct(val)
+        else:
+            mask = base_mask & (tech > 0.50) & (rs > 0.55)
+            score = 0.65 * _rank_pct(tech) + 0.75 * _rank_pct(rs) + 0.25 * _rank_pct(val) + 0.15 * _rank_pct(flow)
         out["leader_score"] = score.where(mask, 0.0)
         pos = out["leader_score"] > 0
         if bool(pos.any()):
@@ -286,7 +297,7 @@ def apply_weekly_overlay_score(panel: pd.DataFrame, *, max_weight: float = 0.10)
             ascending=[False, False, False],
         )
         out.loc[ranked.index, "leader_rank"] = np.arange(1, len(ranked) + 1)
-        out["score_profile"] = "weekly_price_rs_overlay"
+        out["score_profile"] = f"weekly_price_{mode}_overlay"
         return out
 
     if panel.empty:
@@ -335,7 +346,11 @@ def main() -> int:
     signal_dates = _signal_dates(price_features["date"], start, end, args.frequency, args.max_dates)
     _, benchmark_close = _benchmark_returns(start, end, refresh_days=30)
     overlay = build_weekly_overlay_panel(monthly, price_features, signal_dates, benchmark_close)
-    scored = apply_weekly_overlay_score(overlay, max_weight=args.single_stock_max_weight)
+    scored = apply_weekly_overlay_score(
+        overlay,
+        max_weight=args.single_stock_max_weight,
+        mode=args.overlay_mode,
+    )
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -352,6 +367,7 @@ def main() -> int:
         "start": str(start.date()),
         "end": str(end.date()),
         "frequency": args.frequency,
+        "overlay_mode": args.overlay_mode,
         "signal_dates": int(scored["rebalance_date"].nunique()) if not scored.empty else 0,
         "rows": int(len(scored)),
         "tickers_requested": int(len(tickers)),

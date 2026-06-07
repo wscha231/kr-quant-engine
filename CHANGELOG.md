@@ -6,6 +6,79 @@
 
 ## 2026-06-07
 
+### 16:31 KST - kr1000-benchmark-audit-and-loss-month-diagnostic
+
+**Scope**: Added fast benchmark-index cache sanity checks, expanded weekly
+overlay A/B, and added a production-challenger loss-month diagnostic to target
+the remaining CAGR/IR gap with evidence instead of more score-weight guessing.
+
+**What landed**:
+- Added `--index-cache-only` and `--skip-source-panels` modes to
+  `tools/audit_data_integrity.py` for faster benchmark/data gate checks.
+- Added KOSPI/KOSPI200 index cache sanity auditing with bounded cache reads.
+- Added `--overlay-mode technical_value` to
+  `tools/build_kr1000_weekly_price_overlay.py`.
+- Added `tools/analyze_kr1000_challenger_loss_months.py` to compare monthly
+  challenger returns against KOSPI200 with cash weight, holdings, trades, and
+  reason-code context.
+- Added regression coverage for benchmark index sanity and loss-month active
+  return diagnostics.
+
+**Diagnostic result**:
+- KOSPI/KOSPI200 index cache spike looked suspicious at first, but external
+  provider spot checks through FDR/Yahoo and KODEX200 `069500.KS` matched the
+  same 2025-2026 move. The benchmark cache was treated as usable, and the audit
+  now blocks only extreme broad-index anomalies.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04 --index-cache-only --out-dir outputs\kr1000_index_cache_audit_20260604_v2`
+  completed with Critical `0`, High `0`, Medium `0`.
+- 2018-current weekly overlay, `rs_technical`, top 250 liquidity names:
+  CAGR `16.87%`, MDD `-26.01%`, excess CAGR `-1.83%`; this fails the official
+  gate and is worse than the locked production challenger.
+- 2018-current weekly overlay, `technical_value`, top 250 liquidity names:
+  CAGR `7.67%`, MDD `-31.44%`, excess CAGR `-11.03%`; do not scale this mode
+  before redesigning the weekly feature store.
+- Official top10/cap10 challenger loss-month diagnostic:
+  `102` months, `52` underperform months, mean monthly active return `0.39%`,
+  median `-0.04%`, worst active month `-19.66%`.
+- The worst underperformance cluster is not only bad stock selection. Several
+  large misses happened with near-100% cash while KOSPI200 rallied, so the next
+  credible improvement path is a tradable benchmark/large-cap sleeve or a
+  better risk-on re-entry gate, not another simple weekly RS overlay.
+
+**symbols_added**:
+- tools.audit_data_integrity._audit_index_cache_sanity
+- tools.audit_data_integrity.build_index_cache_audit
+- tools.audit_data_integrity.parse_args[`--index-cache-only`]
+- tools.audit_data_integrity.parse_args[`--skip-source-panels`]
+- tools.analyze_kr1000_challenger_loss_months.parse_args
+- tools.analyze_kr1000_challenger_loss_months.build_monthly_loss_panel
+- tools.analyze_kr1000_challenger_loss_months.summarize_loss_panel
+- tools.analyze_kr1000_challenger_loss_months.write_report
+- tools.analyze_kr1000_challenger_loss_months.main
+- tests.test_kr1000_data_repair_tools.test_index_cache_sanity_flags_implausible_benchmark_jump
+- tests.test_kr1000_data_repair_tools.test_challenger_loss_month_diagnostic_active_returns
+
+**symbols_changed**:
+- tools.audit_data_integrity.write_markdown
+- tools.audit_data_integrity.build_audit
+- tools.build_kr1000_weekly_price_overlay.parse_args
+- tools.build_kr1000_weekly_price_overlay.apply_weekly_overlay_score
+- tests/test_kr1000_data_repair_tools.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\analyze_kr1000_challenger_loss_months.py tools\build_kr1000_weekly_price_overlay.py tools\audit_data_integrity.py tests\test_kr1000_data_repair_tools.py` -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 18 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04 --index-cache-only --out-dir outputs\kr1000_index_cache_audit_20260604_v2` -> Critical `0`.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2018-01-01 --end 2026-06-04 --max-tickers 250 --run-backtest --out-dir outputs\kr1000_weekly_overlay_2018_250_v1` -> completed, research-only, CAGR `16.87%`, MDD `-26.01%`.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2018-01-01 --end 2026-06-04 --max-tickers 250 --overlay-mode technical_value --run-backtest --out-dir outputs\kr1000_weekly_overlay_2018_250_technical_value_v1` -> completed, research-only, CAGR `7.67%`, MDD `-31.44%`.
+- `py -3 tools\analyze_kr1000_challenger_loss_months.py --out-dir outputs\kr1000_challenger_loss_months_2018_20260604 --worst-count 20` -> completed.
+
 ### 15:36 KST - kr1000-weekly-price-overlay-research
 
 **Scope**: Added a KR1000-wide weekly trailing price/RS/technical overlay

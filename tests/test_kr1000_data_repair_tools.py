@@ -165,6 +165,33 @@ def test_mcap_duplicate_snapshot_audit_allows_carry_forward():
         assert audit["status"] == "passed"
 
 
+@_test("index cache sanity audit flags implausible benchmark jumps")
+def test_index_cache_sanity_flags_implausible_benchmark_jump():
+    from tools.audit_data_integrity import _audit_index_cache_sanity
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        dates = pd.date_range("2025-01-02", periods=260, freq="B")
+        stable = pd.DataFrame({
+            "date": dates,
+            "close": [300.0 + i * 0.05 for i in range(len(dates))],
+        })
+        stable.to_parquet(root / "index_1028_20250102_20251231.parquet", index=False)
+        passed = _audit_index_cache_sanity(root, ticker="1028", name="KOSPI200")
+        assert passed["status"] == "passed"
+        assert not passed["issues"]
+
+        broken = stable.copy()
+        broken.loc[broken.index[-2], "close"] = 500.0
+        broken.loc[broken.index[-1], "close"] = 2200.0
+        broken.to_parquet(root / "index_1028_20250102_20260102.parquet", index=False)
+        failed = _audit_index_cache_sanity(root, ticker="1028", name="KOSPI200")
+        assert failed["status"] == "failed"
+        messages = [x["message"] for x in failed["issues"]]
+        assert any("daily returns" in x for x in messages)
+        assert any("252-trading-day returns" in x for x in messages)
+
+
 def _write_mcap_snapshot(path: Path, *, source: str | None = None) -> None:
     data = {
         "ticker": ["000001", "000002"],
@@ -470,10 +497,53 @@ def test_weekly_price_overlay_builds_dynamic_scores():
     benchmark = pd.Series([100.0 + i * 0.2 for i in range(len(dates))], index=dates)
     overlay = build_weekly_overlay_panel(monthly, price_features, signal_dates, benchmark)
     scored = apply_weekly_overlay_score(overlay, max_weight=0.10)
+    technical_value = apply_weekly_overlay_score(overlay, max_weight=0.10, mode="technical_value")
     assert set(scored["rebalance_date"].dt.normalize().unique()) == set(signal_dates)
     assert "source_monthly_rebalance_date" in scored.columns
     assert pd.to_numeric(scored["leader_rank"], errors="coerce").notna().any()
     assert scored.loc[scored["ticker"] == "000001", "leader_score"].max() > 0
+    assert "weekly_price_technical_value_overlay" in set(technical_value["score_profile"])
+    assert pd.to_numeric(technical_value["leader_rank"], errors="coerce").notna().any()
+
+
+@_test("challenger loss-month diagnostic computes benchmark active returns")
+def test_challenger_loss_month_diagnostic_active_returns():
+    from tools.analyze_kr1000_challenger_loss_months import (
+        build_monthly_loss_panel,
+        summarize_loss_panel,
+    )
+
+    dates = pd.date_range("2024-01-02", "2024-03-29", freq="B")
+    nav = pd.DataFrame({
+        "date": dates,
+        "nav": [100.0 + i * 0.1 for i in range(len(dates))],
+        "cash": [20.0 for _ in dates],
+        "n_holdings": [3 for _ in dates],
+        "portfolio_drawdown": [0.0 for _ in dates],
+    })
+    nav.loc[nav["date"].dt.month == 2, "nav"] -= 8.0
+    benchmark = pd.Series([100.0 + i * 0.2 for i in range(len(dates))], index=dates)
+    holdings = pd.DataFrame({
+        "date": [dates[0], dates[1], dates[-1]],
+        "ticker": ["000001", "000002", "000001"],
+        "weight": [0.10, 0.08, 0.12],
+    })
+    trades = pd.DataFrame({
+        "execution_date": [dates[3], dates[20]],
+        "ticker": ["000001", "000002"],
+        "side": ["BUY", "SELL"],
+        "trade_value": [1000.0, -500.0],
+        "fee_krw": [1.0, 2.0],
+        "reason_code": ["BUY_TOP_SCORE", "SELL_RANK_BREAK"],
+    })
+    monthly = build_monthly_loss_panel(nav, benchmark, holdings, trades)
+    summary = summarize_loss_panel(monthly, worst_count=2)
+    assert len(monthly) == 3
+    assert "active_return" in monthly.columns
+    assert summary["months"] == 3
+    assert summary["underperform_months"] >= 1
+    assert summary["worst_months"][0]["active_return"] == monthly["active_return"].min()
+    assert monthly["top_holdings"].astype(str).str.contains("000001").any()
 
 
 @_test("current holdings resolver prefers DATA_ROOT state over project fallback")

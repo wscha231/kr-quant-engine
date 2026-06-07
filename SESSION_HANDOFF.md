@@ -1,11 +1,11 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-07 15:39 KST
+## Current Status - 2026-06-07 16:31 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest committed base before this pass: `f910f03`.
+Latest committed base before this pass: `e0d6e3d`.
 
 Active target:
 
@@ -42,13 +42,7 @@ The active production challenger remains:
 - hard stop: `15%`
 - portfolio drawdown ladder: disabled
 
-Official runner:
-
-```bash
-py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_value_mcap_regime --price-panel outputs\kr1000_bt_technical_value_mcap_regime_top15_g90_ladder_2018_20260604\leader_price_panel.parquet --top-holdings 10 --max-rank-for-prices 20 --buy-rank-threshold 10 --hold-rank-threshold 20 --single-stock-max-weight 0.10 --gross-exposure 1.00 --hard-stop-loss-pct 0.15 --out-dir outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604 --save-scored-panel
-```
-
-Result:
+Official runner result:
 
 - years `8.34`
 - CAGR `25.46%`
@@ -66,70 +60,83 @@ This remains below the official CAGR `>=30%`, IR `>0.5`, and stretch CAGR
 
 ## This Pass
 
-Weekly price overlay research:
+Benchmark/data audit:
 
-- Added `tools/build_kr1000_weekly_price_overlay.py`.
-- The tool carries the latest prior monthly PIT scored-panel row into weekly
-  signal dates, then refreshes trailing price/RS/technical/volatility/liquidity
-  features from cached ticker histories.
-- It is a research bridge toward a proper daily/weekly full-universe feature
-  refresh. It does not replace the official validation gate.
-- Optional broker-ledger outputs are marked `research_only=true`,
-  `official_broker_ledger_metric=false`, and `valid_for_production_metric=false`.
-- Added regression coverage in `tests/test_kr1000_data_repair_tools.py`.
+- Added fast `--index-cache-only` and `--skip-source-panels` paths to
+  `tools/audit_data_integrity.py`.
+- Added KOSPI/KOSPI200 index cache sanity metrics with bounded cache reads.
+- Initial KOSPI/KOSPI200 2025-2026 spike looked suspicious, but FDR/Yahoo
+  `^KS200`, Yahoo `^KS11`, and KODEX200 `069500.KS` spot checks matched the
+  same move. Treat the benchmark cache as usable; the audit now blocks only
+  more extreme broad-index anomalies.
+- Verified:
+  `py -3 tools\audit_data_integrity.py --as-of 2026-06-04 --index-cache-only --out-dir outputs\kr1000_index_cache_audit_20260604_v2`
+  -> Critical `0`, High `0`, Medium `0`.
 
-Short-window actual-cache smokes:
+Weekly overlay A/B:
 
-- `outputs/kr1000_weekly_overlay_smoke_2025_80x8_v2`: 80 tickers / 8 signal
-  dates, loaded `77/80`, CAGR `32.17%`, MDD `-4.10%`, excess CAGR `-149.41%`.
-- `outputs/kr1000_weekly_overlay_smoke_2026_20x4`: 20 tickers / 4 signal
-  dates, loaded `19/20`, CAGR `34.39%`, MDD `-0.88%`, excess CAGR `-529.75%`.
-- `outputs/kr1000_weekly_overlay_smoke_2026_5x1_flags`: 5 tickers / 1 signal
-  date, verified research-only metric flags.
+- Added `--overlay-mode technical_value` to
+  `tools/build_kr1000_weekly_price_overlay.py`.
+- 2018-current top-250 `rs_technical`:
+  - output `outputs\kr1000_weekly_overlay_2018_250_v1`
+  - loaded `244/250` tickers
+  - CAGR `16.87%`
+  - MDD `-26.01%`
+  - excess CAGR `-1.83%`
+- 2018-current top-250 `technical_value`:
+  - output `outputs\kr1000_weekly_overlay_2018_250_technical_value_v1`
+  - CAGR `7.67%`
+  - MDD `-31.44%`
+  - excess CAGR `-11.03%`
+- Conclusion: do not spend the next pass scaling these exact weekly overlay
+  modes to 500/full KR1000. They are weaker than the locked production
+  challenger.
 
-These are harness and metadata checks only. Do not treat them as official target
-progress because the windows are too short and benchmark-relative results are
-poor.
+Production challenger loss-month diagnostic:
 
-Prior cash benchmark sleeve research still stands:
-
-- `tools/analyze_kr1000_cash_benchmark_sleeve.py` is diagnostic-only.
-- Cost-aware selected sleeve: fraction `0.75`, 21d KOSPI200 guard `-3%`,
-  one-way cost `5bp`, CAGR `26.81%`, MDD `-33.38%`, IR `0.378`.
-- Do not claim KOSPI200 cash sleeve solves the target gap until an actual
-  tradable KODEX200/benchmark sleeve is integrated into the broker ledger and
-  clears the official gates.
+- Added `tools/analyze_kr1000_challenger_loss_months.py`.
+- Output: `outputs\kr1000_challenger_loss_months_2018_20260604`.
+- Result:
+  - months `102`
+  - underperform months `52` (`51.0%`)
+  - mean monthly active return `0.39%`
+  - median monthly active return `-0.04%`
+  - worst active month `2026-05`, active `-19.66%`
+- Key finding: several worst underperformance months are near-100% cash while
+  KOSPI200 rallies (`2020-11`, `2023-11`, `2020-04`, `2022-10/11`,
+  `2025-01`). The next credible improvement path is a tradable benchmark or
+  large-cap sleeve, or a better risk-on re-entry gate.
+- `2026-05` is different: the strategy was invested and up `15.69%`, but
+  KOSPI200 rose `35.34%`. That needs sector/theme breadth or index-leader
+  participation diagnostics, not only a cash sleeve.
 
 Daily broker usability:
 
-- `--skip-data-audit` exists in `tools/run_kr1000_daily_broker_check.py` for
-  local dry-runs only.
 - Production daily readiness still needs actual
   `DATA_ROOT/state/current_holdings.csv`.
 
 ## Tests Run
 
-- `py -3 -m py_compile tools\build_kr1000_weekly_price_overlay.py tests\test_kr1000_data_repair_tools.py` -> passed.
-- `py -3 tests\test_kr1000_data_repair_tools.py` -> 16 passed, 0 failed.
+- `py -3 -m py_compile tools\analyze_kr1000_challenger_loss_months.py tools\build_kr1000_weekly_price_overlay.py tools\audit_data_integrity.py tests\test_kr1000_data_repair_tools.py` -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 18 passed, 0 failed.
 - `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
 - `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
-- `py -3 tests\test_walkforward.py` -> 16 passed, 0 failed.
-- `py -3 tests\test_kr1000_validation_gate.py` -> 14 passed, 0 failed.
-- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
-- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2025-01-01 --end 2026-06-04 --max-dates 8 --max-tickers 80 --run-backtest --out-dir outputs\kr1000_weekly_overlay_smoke_2025_80x8_v2` -> completed, research-only.
-- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2026-01-01 --end 2026-06-04 --max-dates 4 --max-tickers 20 --run-backtest --out-dir outputs\kr1000_weekly_overlay_smoke_2026_20x4` -> completed, research-only.
-- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2026-05-01 --end 2026-06-04 --max-dates 1 --max-tickers 5 --run-backtest --out-dir outputs\kr1000_weekly_overlay_smoke_2026_5x1_flags` -> completed, metrics carry research-only flags.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04 --index-cache-only --out-dir outputs\kr1000_index_cache_audit_20260604_v2` -> Critical `0`.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2018-01-01 --end 2026-06-04 --max-tickers 250 --run-backtest --out-dir outputs\kr1000_weekly_overlay_2018_250_v1` -> completed, research-only.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2018-01-01 --end 2026-06-04 --max-tickers 250 --overlay-mode technical_value --run-backtest --out-dir outputs\kr1000_weekly_overlay_2018_250_technical_value_v1` -> completed, research-only.
+- `py -3 tools\analyze_kr1000_challenger_loss_months.py --out-dir outputs\kr1000_challenger_loss_months_2018_20260604 --worst-count 20` -> completed.
 
 ## Next Engineering Steps
 
 1. Keep the top10/cap10/no-ladder value preset as the active challenger; it is
    not a pass.
-2. Scale the new weekly overlay carefully:
-   - first 2018-current with `--max-tickers 250`, then `500`, then full KR1000
-   - watch cache I/O and missing cache coverage
-   - compare benchmark-relative CAGR and IR before tuning weights
-3. If the overlay remains excess-negative, stop score-weight tinkering and build
-   the proper daily/weekly feature store with KR1000-wide trailing price,
-   sector/theme RS, and breadth/regime columns.
-4. Daily readiness still needs actual `DATA_ROOT/state/current_holdings.csv`.
+2. Use `outputs\kr1000_challenger_loss_months_2018_20260604` before changing
+   score weights.
+3. Prototype a broker-ledger integrated tradable benchmark/large-cap sleeve for
+   months where the strategy is almost all cash but KOSPI200 trend is strong.
+   The previous diagnostic-only cash sleeve failed MDD, so this must be an
+   actual order/fill/cost-aware sleeve with stricter regime entry and exit.
+4. Separately analyze invested underperformance months such as `2026-05` for
+   sector/theme breadth and index-leader participation.
+5. Daily readiness still needs actual `DATA_ROOT/state/current_holdings.csv`.
    Without it, production daily broker readiness must remain blocked.
