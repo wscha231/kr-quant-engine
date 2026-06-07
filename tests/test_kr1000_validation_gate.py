@@ -158,6 +158,8 @@ def test_planned_component_ab_jobs():
         "pmb_mid_rank_regime",
         "pmb_mid_tech_regime",
         "kr1000_technical_mcap_regime",
+        "kr1000_technical_rs3_mcap_regime",
+        "kr1000_technical_value_mcap_regime",
         "hybrid_pmb_rs",
     }
     strategy_jobs = [j for j in official if j.get("strategy_preset") == "pmb_defensive_mdd_gate"]
@@ -180,32 +182,78 @@ def test_planned_component_ab_jobs():
     assert kr_technical_jobs[0]["profile"] == "kr1000_technical_mcap_regime"
     assert "--top-holdings" in kr_technical_jobs[0]["cmd"]
     assert "15" in kr_technical_jobs[0]["cmd"]
+    assert "--max-rank-for-prices" in kr_technical_jobs[0]["cmd"]
+    technical_cmd = kr_technical_jobs[0]["cmd"]
+    assert technical_cmd[technical_cmd.index("--max-rank-for-prices") + 1] == "30"
     assert "--gross-exposure" in kr_technical_jobs[0]["cmd"]
     assert "0.9" in kr_technical_jobs[0]["cmd"]
     assert "--portfolio-dd-thresholds" in kr_technical_jobs[0]["cmd"]
     assert "-0.1,-0.18,-0.24" in kr_technical_jobs[0]["cmd"]
     assert "--portfolio-dd-scales" in kr_technical_jobs[0]["cmd"]
     assert "0.95,0.75,0.5" in kr_technical_jobs[0]["cmd"]
+    kr_value_jobs = [j for j in official if j.get("strategy_preset") == "kr1000_technical_value_mcap_mdd_gate"]
+    assert len(kr_value_jobs) == 1
+    assert kr_value_jobs[0]["profile"] == "kr1000_technical_value_mcap_regime"
+    assert "--top-holdings" in kr_value_jobs[0]["cmd"]
+    assert "12" in kr_value_jobs[0]["cmd"]
+    assert "--max-rank-for-prices" in kr_value_jobs[0]["cmd"]
+    value_cmd = kr_value_jobs[0]["cmd"]
+    assert value_cmd[value_cmd.index("--max-rank-for-prices") + 1] == "24"
+    assert "--buy-rank-threshold" in kr_value_jobs[0]["cmd"]
+    assert "12" in kr_value_jobs[0]["cmd"]
+    assert "--hold-rank-threshold" in kr_value_jobs[0]["cmd"]
+    assert "24" in kr_value_jobs[0]["cmd"]
+    assert "--portfolio-dd-scales" in kr_value_jobs[0]["cmd"]
+    assert "0.95,0.75,0.5" in kr_value_jobs[0]["cmd"]
     assert {j["profile"] for j in stress} == {"full"}
     assert all("--score-profile" in j["cmd"] for j in jobs)
     assert all("--pmb-oos-picks" in j["cmd"] for j in jobs)
     assert all(j["start"] <= j["end"] for j in jobs)
 
 
-@_test("production gate tracks current best technical mcap preset")
-def test_production_gate_tracks_technical_mcap_preset():
+@_test("production gate tracks current best technical value preset")
+def test_production_gate_tracks_technical_value_preset():
     from tools.run_kr1000_validation_gate import (
         KR1000_STRATEGY_AB_PRESETS,
         PRODUCTION_GATE_STRATEGY_PRESET,
     )
 
-    assert PRODUCTION_GATE_STRATEGY_PRESET == "kr1000_technical_mcap_mdd_gate"
+    assert PRODUCTION_GATE_STRATEGY_PRESET == "kr1000_technical_value_mcap_mdd_gate"
     preset = KR1000_STRATEGY_AB_PRESETS[PRODUCTION_GATE_STRATEGY_PRESET]
-    assert preset["score_profile"] == "kr1000_technical_mcap_regime"
-    assert preset["top_holdings"] == 15
+    assert preset["score_profile"] == "kr1000_technical_value_mcap_regime"
+    assert preset["top_holdings"] == 12
+    assert preset["buy_rank_threshold"] == 12
+    assert preset["hold_rank_threshold"] == 24
     assert preset["gross_exposure"] == 0.90
     assert preset["portfolio_dd_thresholds"] == [-0.10, -0.18, -0.24]
     assert preset["portfolio_dd_scales"] == [0.95, 0.75, 0.50]
+
+
+@_test("non-PMB production preset does not require P_MB OOS coverage")
+def test_non_pmb_production_does_not_require_pmb_oos_coverage():
+    from kr_config import kr1000_leader_alpha_cfg
+    from tools.run_kr1000_validation_gate import evaluate_job_metrics
+
+    cfg = kr1000_leader_alpha_cfg()
+    metrics = {
+        "years": 8.25,
+        "cagr": 0.31,
+        "mdd": -0.24,
+        "excess_cagr": 0.01,
+        "sharpe": 1.05,
+        "information_ratio": 0.55,
+        "metric_mode": "broker_ledger_next_close",
+        "fill_mode": "next_close",
+        "valid_for_production_metric": True,
+    }
+    job = {
+        "period": "official_8y",
+        "profile": "kr1000_technical_value_mcap_regime",
+        "strategy_preset": "kr1000_technical_value_mcap_mdd_gate",
+    }
+    gate = evaluate_job_metrics(metrics, cfg, job, {"status": "failed", "pass": False})
+    assert gate["all_pass"] is True
+    assert "pmb_oos_coverage" not in gate["checks"]
 
 
 @_test("workflow audit treats full validation gate as broker backtest automation")

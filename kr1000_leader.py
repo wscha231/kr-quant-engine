@@ -62,6 +62,8 @@ KR1000_DIRECT_SCORE_PROFILES = (
     "pmb_mid_rank_regime",
     "pmb_mid_tech_regime",
     "kr1000_technical_mcap_regime",
+    "kr1000_technical_rs3_mcap_regime",
+    "kr1000_technical_value_mcap_regime",
     "hybrid_pmb_rs",
 )
 
@@ -87,6 +89,8 @@ KR1000_AB_SCORE_PROFILES = (
     "pmb_mid_rank_regime",
     "pmb_mid_tech_regime",
     "kr1000_technical_mcap_regime",
+    "kr1000_technical_rs3_mcap_regime",
+    "kr1000_technical_value_mcap_regime",
     "hybrid_pmb_rs",
 )
 CURRENT_HOLDINGS_COLUMNS = (
@@ -656,7 +660,11 @@ def apply_kr1000_score_profile(
         mask = mid_rank & market_ok & tech_ok & (pmb > 0.0)
         out["leader_score"] = _sparse_positive_rank_score(pmb.where(mask, 0.0))
         out["score_profile_eligible_flag"] = mask
-    elif profile == "kr1000_technical_mcap_regime":
+    elif profile in {
+        "kr1000_technical_mcap_regime",
+        "kr1000_technical_rs3_mcap_regime",
+        "kr1000_technical_value_mcap_regime",
+    }:
         bench_3m = _numeric(out, "bench_ret_3m", 0.0).fillna(0.0)
         tech = _numeric(out, "technical_score", 0.0).fillna(0.0)
         mcap = _numeric(out, "market_cap", np.nan)
@@ -670,7 +678,12 @@ def apply_kr1000_score_profile(
             else pd.Series(False, index=out.index)
         )
         mask = (bench_3m > 0.0) & (tech > 0.0) & mcap_ok.fillna(False) & liquidity_ok.fillna(False)
-        out["leader_score"] = _sparse_positive_rank_score(tech.where(mask, 0.0))
+        score_source = tech
+        if profile == "kr1000_technical_rs3_mcap_regime":
+            mask = mask & (_numeric(out, "rs_3m", 0.0).fillna(0.0) > 0.0)
+        elif profile == "kr1000_technical_value_mcap_regime":
+            score_source = _score_series(tech) + 0.40 * _score_series(_numeric(out, "valuation_score", 0.0))
+        out["leader_score"] = _sparse_positive_rank_score(score_source.where(mask, 0.0))
         out["score_profile_eligible_flag"] = mask
     elif profile == "hybrid_pmb_rs":
         pmb = _sparse_positive_rank_score(_numeric(out, "p_pre_surge", 0.0))

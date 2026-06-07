@@ -6,6 +6,72 @@
 
 ## 2026-06-07
 
+### 13:03 KST - kr1000-technical-value-production-challenger
+
+**Scope**: Promoted the new KR1000 technical+valuation concentration profile
+as the locked production challenger while keeping the official gate at CAGR
+`>=30%`, MDD `>=-25%`, KOSPI200 excess `>0`, Sharpe `>1.0`, and IR `>0.5`.
+
+**What landed**:
+- Added `kr1000_technical_rs3_mcap_regime` and
+  `kr1000_technical_value_mcap_regime` score profiles.
+- Added `KR1000_STRATEGY_AB_PRESETS["kr1000_technical_value_mcap_mdd_gate"]`
+  with top12, buy `<=12`, hold `<=24`, gross `0.90`, hard stop `15%`, and
+  portfolio DD ladder `-0.10,-0.18,-0.24 -> 0.95,0.75,0.50`.
+- Changed `PRODUCTION_GATE_STRATEGY_PRESET` from
+  `kr1000_technical_mcap_mdd_gate` to
+  `kr1000_technical_value_mcap_mdd_gate`.
+- Narrowed P_MB OOS coverage enforcement to P_MB score profiles only; a
+  non-PMB production challenger no longer depends on a P_MB OOS artifact.
+- Strategy A/B dry-run commands now expand `--max-rank-for-prices` to at least
+  the preset `hold_rank_threshold`, preventing a broker run from missing rank
+  21-24 hold-band prices when the CLI default remains `20`.
+
+**Diagnostic result**:
+- Official-condition broker-ledger next-close run:
+  `outputs\kr1000_bt_technical_value_mcap_regime_top12_g90_ladder_official_2018_20260604`.
+- Result: CAGR `21.86%`, KOSPI200 CAGR `18.57%`, excess CAGR `+3.30%`,
+  MDD `-22.94%`, Sharpe `1.190`, IR `0.093`, trades `748`, years `8.34`.
+- This is the first current 8y challenger that clears MDD, KOSPI200 excess, and
+  Sharpe together, but it still fails the official CAGR `>=30%` and IR `>0.5`
+  gates. Do not call the active goal complete.
+
+**symbols_added**:
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES[`kr1000_technical_rs3_mcap_regime`]
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES[`kr1000_technical_value_mcap_regime`]
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS[`kr1000_technical_value_mcap_mdd_gate`]
+- tests/test_kr1000_validation_gate.py::test_non_pmb_production_does_not_require_pmb_oos_coverage
+
+**symbols_changed**:
+- kr1000_leader.KR1000_AB_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS
+- tools.run_kr1000_validation_gate.PRODUCTION_GATE_STRATEGY_PRESET
+- tools.run_kr1000_validation_gate._job_requires_pmb_oos
+- tools.run_kr1000_validation_gate._planned_backtests
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Validation-gate production pass/fail now tracks
+  `kr1000_technical_value_mcap_mdd_gate`, not
+  `kr1000_technical_mcap_mdd_gate`.
+- Non-PMB production strategy jobs no longer require the P_MB OOS coverage
+  check. P_MB score profiles still require PIT-safe OOS coverage.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 14 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 16 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`, High `0`, Medium `0`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_technical_value_production_v2` -> planned `28` broker backtests and emitted the value production command with `--max-rank-for-prices 24`.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_value_mcap_regime --top-holdings 12 --max-rank-for-prices 24 --buy-rank-threshold 12 --hold-rank-threshold 24 --gross-exposure 0.90 --hard-stop-loss-pct 0.15 --portfolio-dd-ladder --portfolio-dd-thresholds -0.10,-0.18,-0.24 --portfolio-dd-scales 0.95,0.75,0.50 --out-dir outputs\kr1000_bt_technical_value_mcap_regime_top12_g90_ladder_official_2018_20260604 --save-scored-panel` -> CAGR `21.86%`, MDD `-22.94%`, excess `+3.30%`.
+
 ### 12:26 KST - kr1000-technical-mcap-g90-production-preset
 
 **Scope**: Promoted the best current MDD-safe KR1000 technical/mcap ladder

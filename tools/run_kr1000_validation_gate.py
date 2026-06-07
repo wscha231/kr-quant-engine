@@ -83,9 +83,20 @@ KR1000_STRATEGY_AB_PRESETS = {
         "portfolio_dd_thresholds": [-0.10, -0.18, -0.24],
         "portfolio_dd_scales": [0.95, 0.75, 0.50],
     },
+    "kr1000_technical_value_mcap_mdd_gate": {
+        "score_profile": "kr1000_technical_value_mcap_regime",
+        "top_holdings": 12,
+        "buy_rank_threshold": 12,
+        "hold_rank_threshold": 24,
+        "gross_exposure": 0.90,
+        "hard_stop_loss_pct": 0.15,
+        "portfolio_dd_ladder": True,
+        "portfolio_dd_thresholds": [-0.10, -0.18, -0.24],
+        "portfolio_dd_scales": [0.95, 0.75, 0.50],
+    },
 }
 
-PRODUCTION_GATE_STRATEGY_PRESET = "kr1000_technical_mcap_mdd_gate"
+PRODUCTION_GATE_STRATEGY_PRESET = "kr1000_technical_value_mcap_mdd_gate"
 PMB_SCORE_PROFILES = {
     "pmb_pre_surge",
     "pmb_pre_entry",
@@ -365,8 +376,7 @@ def evaluate_backtest_metrics(metrics: dict[str, Any], cfg: dict[str, Any]) -> d
 
 def _job_requires_pmb_oos(job: dict[str, Any]) -> bool:
     profile = str(job.get("profile", "")).strip().lower()
-    strategy = str(job.get("strategy_preset", "")).strip().lower()
-    return profile in PMB_SCORE_PROFILES or strategy == PRODUCTION_GATE_STRATEGY_PRESET
+    return profile in PMB_SCORE_PROFILES
 
 
 def _data_gate_blockers(audit: dict[str, Any]) -> list[str]:
@@ -454,6 +464,9 @@ def _planned_backtests(args: argparse.Namespace, as_of: pd.Timestamp, out_dir: P
         start, end = _period_window("official_8y", as_of)
         for name, preset in KR1000_STRATEGY_AB_PRESETS.items():
             profile = str(preset["score_profile"])
+            top_holdings = int(preset.get("top_holdings", args.top_holdings))
+            hold_rank = int(preset.get("hold_rank_threshold", top_holdings))
+            price_rank = int(preset.get("max_rank_for_prices", max(args.max_rank_for_prices, hold_rank)))
             job_out = out_dir / f"official_8y_{name}"
             cmd = [
                 sys.executable,
@@ -461,8 +474,8 @@ def _planned_backtests(args: argparse.Namespace, as_of: pd.Timestamp, out_dir: P
                 "--start", str(start.date()),
                 "--end", str(end.date()),
                 "--initial-cash", str(float(args.initial_cash)),
-                "--top-holdings", str(int(preset.get("top_holdings", args.top_holdings))),
-                "--max-rank-for-prices", str(int(args.max_rank_for_prices)),
+                "--top-holdings", str(top_holdings),
+                "--max-rank-for-prices", str(price_rank),
                 "--out-dir", str(job_out),
                 "--score-profile", profile,
                 "--save-scored-panel",

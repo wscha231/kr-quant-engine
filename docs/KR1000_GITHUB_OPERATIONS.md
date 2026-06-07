@@ -140,17 +140,25 @@ Sharpe `0.918`, IR `-0.320`, and average cash weight `63.81%`. This was better
 than the P_MB-only profiles but still failed the official CAGR, excess, Sharpe,
 and IR gates.
 
-The follow-up concentration/ladder passes found a stronger operating preset for
-the same profile. The current locked `kr1000_technical_mcap_mdd_gate` uses
-top15, buy `<=15`, hold `<=30`, gross `0.90`, and drawdown ladder
-`-0.10,-0.18,-0.24` -> `0.95,0.75,0.50`. The reproduced 2018-current
-broker-ledger result is CAGR `17.60%`, MDD `-23.45%`, excess CAGR `-0.97%`,
-Sharpe `1.055`, and IR `-0.111`. This improves the prior top15 ladder
-(`16.44%`, MDD `-24.17%`) and the top15 no-ladder sensitivity (`16.79%`, MDD
-`-24.36%`, Sharpe `0.98`). KOSPI-only, KOSDAQ-only, and exchange-balanced
-sparse sleeve checks did not improve the result; KOSDAQ-only was materially
-worse. The tuned top15 setup is the new production challenger baseline, not a
-production-pass strategy, because CAGR, KOSPI200 excess, and IR still fail.
+The follow-up concentration/ladder passes found stronger operating presets for
+the same technical large/liquid leader family. The older
+`kr1000_technical_mcap_mdd_gate` uses top15, buy `<=15`, hold `<=30`, gross
+`0.90`, and drawdown ladder `-0.10,-0.18,-0.24` -> `0.95,0.75,0.50`. Its
+reproduced 2018-current broker-ledger result is CAGR `17.60%`, MDD `-23.45%`,
+excess CAGR `-0.97%`, Sharpe `1.055`, and IR `-0.111`.
+
+The current locked production challenger is now
+`kr1000_technical_value_mcap_mdd_gate`. It uses
+`kr1000_technical_value_mcap_regime`, which keeps the same KOSPI200-positive,
+technical-positive, top-40%-market-cap, top-40%-liquidity eligibility mask, but
+ranks eligible names by technical score plus a 40% valuation-score overlay.
+The locked broker preset is top12, buy `<=12`, hold `<=24`, gross `0.90`, hard
+stop `15%`, and the same drawdown ladder `-0.10,-0.18,-0.24` ->
+`0.95,0.75,0.50`. The official-condition 2018-current broker-ledger result is
+CAGR `21.86%`, MDD `-22.94%`, excess CAGR `+3.30%`, Sharpe `1.190`, IR
+`0.093`, and trades `748`. This is the first current 8y challenger clearing
+MDD, KOSPI200 excess, and Sharpe together, but it is still not production-pass
+because CAGR `>=30%` and IR `>0.5` fail.
 
 ## GitHub Workflows
 
@@ -185,7 +193,13 @@ Production automation is split into three lanes:
     `pmb_pre_entry_blend_regime`, `pmb_pullback_recovery_regime`,
     `pmb_recovery_trend_value_regime`, `pmb_mid_rank_7_23`,
     `pmb_mid_rank_regime`, `pmb_mid_tech_regime`,
-    `kr1000_technical_mcap_regime`, `hybrid_pmb_rs`
+    `kr1000_technical_mcap_regime`, `kr1000_technical_rs3_mcap_regime`,
+    `kr1000_technical_value_mcap_regime`, `hybrid_pmb_rs`
+
+Strategy A/B presets automatically widen `--max-rank-for-prices` to at least
+the preset hold threshold. This prevents production broker runs from missing
+prices for held names inside the hold band, such as ranks `21-24` in the
+current `kr1000_technical_value_mcap_mdd_gate` preset.
 
 The default full GitHub run preserves caches and appends missing rebalance
 dates when a compatible prior `scored_panel_v0` exists, but it will widen the
@@ -352,10 +366,10 @@ The enrichment bridge defaults to cache-only price loading. Use
 rows whose full forward horizon is not observable are cleared back to NaN.
 
 Official production pass/fail uses the locked
-`kr1000_technical_mcap_mdd_gate` strategy preset when `--strategy-ab` is run.
-The `full` score profile remains a baseline gate for diagnosis. P_MB and hybrid
-jobs cannot pass their own official diagnostics unless the P_MB OOS coverage
-audit passes the 8y PIT-safe coverage check.
+`kr1000_technical_value_mcap_mdd_gate` strategy preset when `--strategy-ab` is
+run. The `full` score profile remains a baseline gate for diagnosis. P_MB and
+hybrid jobs cannot pass their own official diagnostics unless the P_MB OOS
+coverage audit passes the 8y PIT-safe coverage check.
 
 Mixed historical/latest scored panels are expected. New latest-readiness rows
 may add columns such as `eligible_final`; older historical rows with
@@ -632,9 +646,10 @@ As of the 2026-06-07 08:05 KST handoff:
 
 The next production step is to provide/sync actual
 `DATA_ROOT/state/current_holdings.csv` for the daily broker readiness path, then
-rebuild the P_MB label design itself. In particular, inspect fold-level false
-positives, add label definitions that separate pre-surge winners from ordinary
-high-volatility stocks, and prove loss probability has realized correlation
-before adding exposure. CAGR `>= 35%` remains the stretch target after the
-official `>= 30%` gate is cleared. Avoid more exposure-only experiments until
-the realized signal-quality audit improves.
+improve the current `kr1000_technical_value_mcap_mdd_gate` challenger. Start by
+auditing months where the top12 value profile loses to KOSPI200, then test
+sector/theme RS confirmation, theme break exits, and breadth/regime gates
+against that profile. Rebuild the P_MB label design separately; P_MB-only
+profiles are still too defensive for the official 8y gate. CAGR `>= 35%`
+remains the stretch target after the official `>= 30%` gate is cleared. Avoid
+more exposure-only experiments until realized excess return and IR improve.

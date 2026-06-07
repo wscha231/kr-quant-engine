@@ -188,6 +188,35 @@ def test_score_profiles():
     assert kr_technical.loc[3, "leader_score"] == 0
     assert kr_technical.loc[4, "leader_score"] == 0
 
+    kr_technical_rs3 = apply_kr1000_score_profile(
+        pd.DataFrame({
+            "ticker": ["000001", "000002"],
+            "bench_ret_3m": [0.05, 0.05],
+            "technical_score": [1.0, 2.0],
+            "rs_3m": [0.05, -0.01],
+            "market_cap": [1000.0, 1000.0],
+            "avg_trading_value_60d": [1000.0, 1000.0],
+        }),
+        "kr1000_technical_rs3_mcap_regime",
+    )
+    assert kr_technical_rs3.loc[0, "leader_score"] > 0
+    assert kr_technical_rs3.loc[1, "leader_score"] == 0
+    assert bool(kr_technical_rs3.loc[1, "score_profile_eligible_flag"]) is False
+
+    kr_technical_value = apply_kr1000_score_profile(
+        pd.DataFrame({
+            "ticker": ["000001", "000002", "000003"],
+            "bench_ret_3m": [0.05, 0.05, 0.05],
+            "technical_score": [1.0, 1.0, -1.0],
+            "valuation_score": [0.1, 2.0, 5.0],
+            "market_cap": [1000.0, 1000.0, 1000.0],
+            "avg_trading_value_60d": [1000.0, 1000.0, 1000.0],
+        }),
+        "kr1000_technical_value_mcap_regime",
+    )
+    assert kr_technical_value.loc[1, "leader_score"] > kr_technical_value.loc[0, "leader_score"]
+    assert kr_technical_value.loc[2, "leader_score"] == 0
+
     mid_rank = apply_kr1000_score_profile(candidates, "pmb_mid_rank_7_23")
     assert mid_rank.loc[0, "leader_score"] > 0
     assert mid_rank.loc[1, "leader_score"] == 0
