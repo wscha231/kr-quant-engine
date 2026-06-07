@@ -546,6 +546,41 @@ def test_challenger_loss_month_diagnostic_active_returns():
     assert monthly["top_holdings"].astype(str).str.contains("000001").any()
 
 
+@_test("rank-risk diagnostic compares high and low feature bins")
+def test_rank_risk_diagnostic_feature_bins():
+    from tools.analyze_kr1000_rank_risk import (
+        build_rank_risk_panel,
+        summarize_conditions,
+        summarize_feature_bins,
+        summarize_rank_risk,
+    )
+
+    rows = []
+    for i in range(30):
+        rows.append({
+            "rebalance_date": pd.Timestamp("2024-01-31") + pd.offsets.MonthEnd(i // 10),
+            "ticker": f"{i + 1:06d}",
+            "leader_rank": (i % 10) + 1,
+            "forward_return_1m": -0.05 + 0.01 * i,
+            "ret_1m": float(i),
+            "ret_3m": float(i) / 2.0,
+            "rsi_14": 40.0 + i,
+            "dist_from_52w_high": -0.20 + 0.01 * i,
+            "volume_zscore_50": float(i) / 10.0,
+        })
+    panel = build_rank_risk_panel(pd.DataFrame(rows), top_n=10)
+    bins = summarize_feature_bins(panel, ["ret_1m"], quantile=0.80)
+    conditions = summarize_conditions(panel)
+    summary = summarize_rank_risk(panel, bins, conditions)
+
+    assert len(panel) == 30
+    assert bins.loc[0, "feature"] == "ret_1m"
+    assert bins.loc[0, "high_mean_forward_return"] > bins.loc[0, "low_mean_forward_return"]
+    assert summary["diagnostic_only"] is True
+    assert summary["official_broker_ledger_metric"] is False
+    assert "ret_1m_gt_50pct" in set(conditions["condition"])
+
+
 @_test("current holdings resolver prefers DATA_ROOT state over project fallback")
 def test_current_holdings_resolver_prefers_data_root_state():
     from kr1000_leader import resolve_current_holdings_path

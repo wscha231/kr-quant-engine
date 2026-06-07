@@ -6,6 +6,61 @@
 
 ## 2026-06-07
 
+### 18:18 KST - kr1000-rank-risk-diagnostic
+
+**Scope**: Added a reusable rank-risk diagnostic to test overextension and
+continuation hypotheses before changing production scoring. The result argues
+against a simple overextension penalty and narrows the next model work toward
+volume-spike risk and rank-quality improvements inside the current top10
+signal.
+
+**What landed**:
+- Added `tools/analyze_kr1000_rank_risk.py`.
+- The tool reads a scored panel, filters top-ranked rows, compares high/low
+  feature bins against `forward_return_1m`, and writes CSV/JSON/Markdown
+  diagnostic artifacts.
+- Added regression coverage for feature-bin and condition-bin calculations.
+
+**Diagnostic result**:
+- Top10 diagnostic:
+  `outputs\kr1000_rank_risk_top10_2018_20260604`
+  -> rows `145`, months `39`, mean 1m forward return `2.59%`, median
+  `-0.69%`, loss rate `50.3%`.
+- Top20 diagnostic:
+  `outputs\kr1000_rank_risk_top20_2018_20260604`
+  -> rows `309`, months `40`, mean 1m forward return `1.91%`, median
+  `-0.84%`, loss rate `52.8%`.
+- High `ret_1m`, `rs_1m`, `ret_3m`, and `rs_3m` bins were better, not worse,
+  over the full window. Simple overextension penalties should not be promoted.
+- High `volume_zscore_50` and high `market_cap` bins were weak in the
+  diagnostic. The next useful scoring work should target volume-spike/reversal
+  risk and not remove strong continuation blindly.
+
+**symbols_added**:
+- tools.analyze_kr1000_rank_risk.parse_args
+- tools.analyze_kr1000_rank_risk.build_rank_risk_panel
+- tools.analyze_kr1000_rank_risk.summarize_feature_bins
+- tools.analyze_kr1000_rank_risk.summarize_conditions
+- tools.analyze_kr1000_rank_risk.summarize_rank_risk
+- tools.analyze_kr1000_rank_risk.write_report
+- tools.analyze_kr1000_rank_risk.main
+- tests.test_kr1000_data_repair_tools.test_rank_risk_diagnostic_feature_bins
+
+**symbols_changed**:
+- tests/test_kr1000_data_repair_tools.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\analyze_kr1000_rank_risk.py tests\test_kr1000_data_repair_tools.py` -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 19 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\analyze_kr1000_rank_risk.py --run-dir outputs\kr1000_bt_technical_value_mcap_cash_reason_default_2018_20260604 --top-n 10 --out-dir outputs\kr1000_rank_risk_top10_2018_20260604` -> completed.
+- `py -3 tools\analyze_kr1000_rank_risk.py --run-dir outputs\kr1000_bt_technical_value_mcap_cash_reason_default_2018_20260604 --top-n 20 --out-dir outputs\kr1000_rank_risk_top20_2018_20260604` -> completed.
+
 ### 18:04 KST - kr1000-broker-cash-reason-and-sequencing-ab
 
 **Scope**: Made broker cash constraints more observable and added an explicit
