@@ -56,6 +56,7 @@ KR1000_DIRECT_SCORE_PROFILES = (
     "pmb_pre_entry_defensive",
     "pmb_pre_entry_blend",
     "pmb_pre_entry_blend_regime",
+    "pmb_pullback_recovery_regime",
     "pmb_mid_rank_7_23",
     "pmb_mid_rank_regime",
     "pmb_mid_tech_regime",
@@ -78,6 +79,7 @@ KR1000_AB_SCORE_PROFILES = (
     "pmb_pre_entry_defensive",
     "pmb_pre_entry_blend",
     "pmb_pre_entry_blend_regime",
+    "pmb_pullback_recovery_regime",
     "pmb_mid_rank_7_23",
     "pmb_mid_rank_regime",
     "pmb_mid_tech_regime",
@@ -592,7 +594,7 @@ def apply_kr1000_score_profile(
         mask = pmb_selected & pre.gt(0.0) & market_ok & large_ok
         out["leader_score"] = _sparse_positive_rank_score(raw.where(mask, 0.0))
         out["score_profile_eligible_flag"] = mask
-    elif profile in {"pmb_pre_entry_blend", "pmb_pre_entry_blend_regime"}:
+    elif profile in {"pmb_pre_entry_blend", "pmb_pre_entry_blend_regime", "pmb_pullback_recovery_regime"}:
         pmb_selected = _numeric(out, "p_pre_surge", 0.0).fillna(0.0) > 0.0
         combined_raw = _numeric(out, "p_combined", np.nan).fillna(_numeric(out, "p_pre_surge", 0.0))
         combined = _sparse_positive_rank_score(combined_raw)
@@ -602,6 +604,11 @@ def apply_kr1000_score_profile(
         mask = pmb_selected
         if profile == "pmb_pre_entry_blend_regime":
             mask = mask & (_numeric(out, "bench_ret_3m", 0.0).fillna(0.0) > 0.0)
+            out["score_profile_eligible_flag"] = mask
+        elif profile == "pmb_pullback_recovery_regime":
+            bench_1m = _numeric(out, "bench_ret_1m", 0.0).fillna(0.0)
+            bench_3m = _numeric(out, "bench_ret_3m", 0.0).fillna(0.0)
+            mask = mask & (bench_1m <= -0.01) & (bench_3m >= 0.0)
             out["score_profile_eligible_flag"] = mask
         out["leader_score"] = _sparse_positive_rank_score(raw.where(mask, 0.0))
     elif profile == "pmb_mid_rank_7_23":

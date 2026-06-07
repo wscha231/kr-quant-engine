@@ -96,6 +96,15 @@ CAGR `-13.70%`, Sharpe `0.358`. This improves the prior strict run only
 slightly and confirms that the next work should redesign labels/features rather
 than just changing exposure or score weights.
 
+The `pmb_pullback_recovery_regime` profile is the first current 8y challenger
+that clears the drawdown gate with full P_MB OOS coverage. It uses
+`bench_ret_1m <= -0.01` and `bench_ret_3m >= 0.0` as an as-of benchmark regime
+mask, then applies the P_MB pre-entry blend only inside those months. The
+2018-current broker-ledger top20 result was CAGR `6.57%`, MDD `-17.82%`,
+excess CAGR `-12.00%`, Sharpe `0.846`, with average cash weight `88.32%`.
+This proves the MDD problem can be controlled, but the profile is too defensive
+to meet the CAGR/excess return gate.
+
 ## GitHub Workflows
 
 Production automation is split into three lanes:
@@ -564,6 +573,8 @@ As of the 2026-06-07 08:05 KST handoff:
 - Strict P_MB score-mode replay improved only marginally and still failed:
   `strict_pre_entry` buffer-2 top20 produced CAGR `4.87%`, MDD `-38.76%`,
   excess CAGR `-13.70%`.
+- `pmb_pullback_recovery_regime` fixes MDD but not CAGR: top20 produced CAGR
+  `6.57%`, MDD `-17.82%`, excess CAGR `-12.00%`, average cash weight `88.32%`.
 
 The next production step is to provide/sync actual
 `DATA_ROOT/state/current_holdings.csv` for the daily broker readiness path, then

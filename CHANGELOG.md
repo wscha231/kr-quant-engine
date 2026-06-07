@@ -6,6 +6,57 @@
 
 ## 2026-06-07
 
+### 10:08 KST - pmb-pullback-recovery-regime-profile
+
+**Scope**: Added a full-coverage P_MB regime profile that turns the sleeve on
+only after a KOSPI200 one-month pullback while the three-month benchmark trend
+is non-negative. This is the first current 8y broker-ledger challenger in this
+branch that clearly clears the MDD gate, but it still fails CAGR and excess
+return.
+
+**What landed**:
+- Added `pmb_pullback_recovery_regime` to KR1000 score profiles and component
+  A/B planning.
+- The profile keeps the PIT P_MB OOS picks file fully covered, then applies
+  an as-of benchmark regime mask:
+  `bench_ret_1m <= -0.01 and bench_ret_3m >= 0.0`.
+- The profile uses the existing P_MB pre-entry blend score inside allowed
+  months and sets `score_profile_eligible_flag = False` outside the regime.
+
+**Diagnostic result**:
+- Backtest:
+  `outputs\kr1000_bt_pmb_pullback_recovery_profile_top20_2018_20260604`.
+- Inputs: full-coverage
+  `G:\내 드라이브\kr_quant_engine\outputs\p_mb_oos_picks_purged_3sleeve_2018_20260604_latest.csv`.
+- Result: CAGR `6.57%`, KOSPI200 CAGR `18.57%`, excess CAGR `-12.00%`,
+  MDD `-17.82%`, Sharpe `0.846`, IR `-0.575`, trades `486`,
+  average cash weight `88.32%`.
+- Interpretation: the regime gate fixes drawdown but leaves too much cash and
+  too little alpha. Next work should add a return engine for non-pullback
+  months or improve labels, not loosen the drawdown guard blindly.
+
+**symbols_added**:
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES value
+  `pmb_pullback_recovery_regime`
+
+**symbols_changed**:
+- kr1000_leader.apply_kr1000_score_profile
+- tools.run_kr1000_validation_gate.PMB_SCORE_PROFILES
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none. Existing profiles are unchanged.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_pullback_profile` -> planned `22` broker backtests.
+
 ### 09:47 KST - pmb-strict-pre-entry-score-mode
 
 **Scope**: Added configurable P_MB 3-sleeve OOS score modes so the official
