@@ -105,6 +105,15 @@ excess CAGR `-12.00%`, Sharpe `0.846`, with average cash weight `88.32%`.
 This proves the MDD problem can be controlled, but the profile is too defensive
 to meet the CAGR/excess return gate.
 
+The follow-up `pmb_recovery_trend_value_regime` keeps that pullback-recovery
+guard and adds a value-filtered trend sleeve: `bench_ret_3m >= 0.0387` plus
+`valuation_score` above the P_MB-selected monthly median. It ranks with direct
+P_MB probabilities, `0.60 * p_pre_surge + 0.40 * p_pre_entry - 0.20 * p_risk`.
+This is the best current full-window P_MB broker-ledger challenger under the
+MDD gate: top20 CAGR `9.76%`, MDD `-19.06%`, excess CAGR `-8.81%`, Sharpe
+`0.763`; top15 CAGR `9.81%`, MDD `-18.08%`. It is still not production-pass
+because CAGR and KOSPI200 excess are too low.
+
 ## GitHub Workflows
 
 Production automation is split into three lanes:
@@ -575,6 +584,9 @@ As of the 2026-06-07 08:05 KST handoff:
   excess CAGR `-13.70%`.
 - `pmb_pullback_recovery_regime` fixes MDD but not CAGR: top20 produced CAGR
   `6.57%`, MDD `-17.82%`, excess CAGR `-12.00%`, average cash weight `88.32%`.
+- `pmb_recovery_trend_value_regime` is the current best MDD-safe P_MB
+  challenger: top20 produced CAGR `9.76%`, MDD `-19.06%`, excess CAGR
+  `-8.81%`; top15 produced CAGR `9.81%`, MDD `-18.08%`.
 
 The next production step is to provide/sync actual
 `DATA_ROOT/state/current_holdings.csv` for the daily broker readiness path, then

@@ -6,6 +6,60 @@
 
 ## 2026-06-07
 
+### 10:23 KST - pmb-recovery-trend-value-profile
+
+**Scope**: Added a higher-exposure P_MB recovery/trend/value regime profile.
+This keeps the drawdown-control logic from `pmb_pullback_recovery_regime`, then
+adds a value-filtered trend sleeve for non-pullback months. It improves the
+current 8y broker-ledger CAGR while keeping MDD inside the `-25%` gate, but it
+still fails the CAGR and KOSPI200-excess targets.
+
+**What landed**:
+- Added `pmb_recovery_trend_value_regime` to KR1000 score profiles and
+  validation component A/B planning.
+- The profile is eligible when either:
+  - pullback recovery: `bench_ret_1m <= -0.01 and bench_ret_3m >= 0.0`, or
+  - trend value: `bench_ret_3m >= 0.0387` and `valuation_score` is above the
+    P_MB-selected monthly median.
+- The profile ranks selected rows with direct P_MB probabilities:
+  `0.60 * p_pre_surge + 0.40 * p_pre_entry - 0.20 * p_risk`.
+
+**Diagnostic result**:
+- Official-window top20:
+  `outputs\kr1000_bt_pmb_recovery_trend_value_profile_top20_2018_20260604`.
+- Result: CAGR `9.76%`, KOSPI200 CAGR `18.57%`, excess CAGR `-8.81%`,
+  MDD `-19.06%`, Sharpe `0.763`, IR `-0.452`, trades `965`,
+  average cash weight `71.49%`.
+- Top15 sensitivity:
+  `outputs\kr1000_bt_pmb_recovery_trend_value_profile_top15_2018_20260604`.
+- Result: CAGR `9.81%`, MDD `-18.08%`, excess CAGR `-8.75%`, Sharpe `0.742`,
+  trades `784`, average cash weight `71.09%`.
+- Interpretation: this is the best current full-window P_MB broker-ledger
+  challenger under MDD `-25%`, but it is still far below the `30%` official
+  CAGR gate and below KOSPI200.
+
+**symbols_added**:
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES value
+  `pmb_recovery_trend_value_regime`
+
+**symbols_changed**:
+- kr1000_leader.apply_kr1000_score_profile
+- tools.run_kr1000_validation_gate.PMB_SCORE_PROFILES
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_recovery_trend_value_profile` -> planned `23` broker backtests.
+
 ### 10:08 KST - pmb-pullback-recovery-regime-profile
 
 **Scope**: Added a full-coverage P_MB regime profile that turns the sleeve on

@@ -141,6 +141,7 @@ def test_planned_component_ab_jobs():
         "pmb_pre_entry_blend",
         "pmb_pre_entry_blend_regime",
         "pmb_pullback_recovery_regime",
+        "pmb_recovery_trend_value_regime",
         "pmb_mid_rank_7_23",
         "pmb_mid_rank_regime",
         "pmb_mid_tech_regime",

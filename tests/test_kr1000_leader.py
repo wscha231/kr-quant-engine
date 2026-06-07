@@ -157,6 +157,20 @@ def test_score_profiles():
     assert bool(pullback_regime.loc[0, "score_profile_eligible_flag"]) is True
     assert bool(pullback_regime.loc[1, "score_profile_eligible_flag"]) is False
 
+    recovery_trend_value = apply_kr1000_score_profile(
+        candidates.assign(
+            p_combined=[0.7, 0.2],
+            bench_ret_1m=[0.04, 0.03],
+            bench_ret_3m=[0.06, 0.06],
+            valuation_score=[0.8, -0.2],
+        ),
+        "pmb_recovery_trend_value_regime",
+    )
+    assert recovery_trend_value.loc[0, "leader_score"] > 0
+    assert recovery_trend_value.loc[1, "leader_score"] == 0
+    assert bool(recovery_trend_value.loc[0, "score_profile_eligible_flag"]) is True
+    assert bool(recovery_trend_value.loc[1, "score_profile_eligible_flag"]) is False
+
     mid_rank = apply_kr1000_score_profile(candidates, "pmb_mid_rank_7_23")
     assert mid_rank.loc[0, "leader_score"] > 0
     assert mid_rank.loc[1, "leader_score"] == 0

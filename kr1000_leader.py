@@ -57,6 +57,7 @@ KR1000_DIRECT_SCORE_PROFILES = (
     "pmb_pre_entry_blend",
     "pmb_pre_entry_blend_regime",
     "pmb_pullback_recovery_regime",
+    "pmb_recovery_trend_value_regime",
     "pmb_mid_rank_7_23",
     "pmb_mid_rank_regime",
     "pmb_mid_tech_regime",
@@ -80,6 +81,7 @@ KR1000_AB_SCORE_PROFILES = (
     "pmb_pre_entry_blend",
     "pmb_pre_entry_blend_regime",
     "pmb_pullback_recovery_regime",
+    "pmb_recovery_trend_value_regime",
     "pmb_mid_rank_7_23",
     "pmb_mid_rank_regime",
     "pmb_mid_tech_regime",
@@ -594,7 +596,12 @@ def apply_kr1000_score_profile(
         mask = pmb_selected & pre.gt(0.0) & market_ok & large_ok
         out["leader_score"] = _sparse_positive_rank_score(raw.where(mask, 0.0))
         out["score_profile_eligible_flag"] = mask
-    elif profile in {"pmb_pre_entry_blend", "pmb_pre_entry_blend_regime", "pmb_pullback_recovery_regime"}:
+    elif profile in {
+        "pmb_pre_entry_blend",
+        "pmb_pre_entry_blend_regime",
+        "pmb_pullback_recovery_regime",
+        "pmb_recovery_trend_value_regime",
+    }:
         pmb_selected = _numeric(out, "p_pre_surge", 0.0).fillna(0.0) > 0.0
         combined_raw = _numeric(out, "p_combined", np.nan).fillna(_numeric(out, "p_pre_surge", 0.0))
         combined = _sparse_positive_rank_score(combined_raw)
@@ -609,6 +616,20 @@ def apply_kr1000_score_profile(
             bench_1m = _numeric(out, "bench_ret_1m", 0.0).fillna(0.0)
             bench_3m = _numeric(out, "bench_ret_3m", 0.0).fillna(0.0)
             mask = mask & (bench_1m <= -0.01) & (bench_3m >= 0.0)
+            out["score_profile_eligible_flag"] = mask
+        elif profile == "pmb_recovery_trend_value_regime":
+            bench_1m = _numeric(out, "bench_ret_1m", 0.0).fillna(0.0)
+            bench_3m = _numeric(out, "bench_ret_3m", 0.0).fillna(0.0)
+            pre_raw = _numeric(out, "p_pre_entry", 0.0).fillna(0.0).clip(lower=0.0)
+            pmb_raw = _numeric(out, "p_pre_surge", 0.0).fillna(0.0).clip(lower=0.0)
+            risk_raw = _numeric(out, "p_risk", 0.0).fillna(0.0).clip(lower=0.0, upper=0.95)
+            valuation = _numeric(out, "valuation_score", np.nan)
+            value_cut = valuation[pmb_selected].median(skipna=True)
+            value_ok = valuation >= value_cut if np.isfinite(value_cut) else pd.Series(False, index=out.index)
+            pullback_recovery = (bench_1m <= -0.01) & (bench_3m >= 0.0)
+            trend_value = (bench_3m >= 0.0387) & value_ok.fillna(False)
+            mask = mask & (pullback_recovery | trend_value)
+            raw = (0.60 * pmb_raw + 0.40 * pre_raw - 0.20 * risk_raw).clip(lower=0.0)
             out["score_profile_eligible_flag"] = mask
         out["leader_score"] = _sparse_positive_rank_score(raw.where(mask, 0.0))
     elif profile == "pmb_mid_rank_7_23":
