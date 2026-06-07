@@ -236,6 +236,27 @@ def test_features_broadcast():
     os.environ.pop("PHASE_PHASE3_MACRO_ENABLED", None)
 
 
+@_test("kr_features.add_macro_signals: uses PIT publication lag")
+def test_features_macro_pit_lag():
+    import os
+    from kr_features import add_macro_signals
+
+    os.environ["PHASE_PHASE3_MACRO_ENABLED"] = "1"
+    universe = pd.DataFrame({"ticker": ["A", "B"]})
+    panel = pd.DataFrame({
+        "date": pd.to_datetime(["2024-06-30", "2024-07-01"]),
+        "macro_kr_pmi": [52.5, np.nan],
+    })
+
+    # PMI has a 1-day publication lag. At 2024-06-30 it must not be visible.
+    out_same_day = add_macro_signals(universe, pd.Timestamp("2024-06-30"), macro_panel=panel)
+    assert out_same_day["macro_kr_pmi"].isna().all()
+
+    out_after_lag = add_macro_signals(universe, pd.Timestamp("2024-07-01"), macro_panel=panel)
+    assert (out_after_lag["macro_kr_pmi"] == 52.5).all()
+    os.environ.pop("PHASE_PHASE3_MACRO_ENABLED", None)
+
+
 print()
 print("=" * 60)
 print(f"Macro tests: {PASSED} passed, {FAILED} failed")

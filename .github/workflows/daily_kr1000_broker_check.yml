@@ -1,0 +1,148 @@
+name: Daily KR1000 Broker Check
+
+on:
+  schedule:
+    - cron: '40 8 * * 1-5'   # weekdays 17:40 KST, after KRX close
+  workflow_dispatch:
+    inputs:
+      refresh_avg_value:
+        description: 'recompute avg_value_60d for the full latest universe'
+        type: boolean
+        default: false
+      evaluation_date:
+        description: 'optional YYYY-MM-DD evaluation close date'
+        type: string
+        default: ''
+
+jobs:
+  broker_check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DART_API_KEY: ${{ secrets.DART_API_KEY }}
+      BOK_ECOS_API_KEY: ${{ secrets.BOK_ECOS_API_KEY }}
+      KR_DATA_DIR: ${{ github.workspace }}/data
+      RCLONE_CFG_TEXT: ${{ secrets.RCLONE_CONFIG_GDRIVE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Setup rclone
+        if: ${{ env.RCLONE_CFG_TEXT != '' }}
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_CFG_TEXT" > ~/.config/rclone/rclone.conf
+          rclone --config ~/.config/rclone/rclone.conf listremotes
+
+      - name: Sync KR data from GDrive
+        if: ${{ env.RCLONE_CFG_TEXT != '' }}
+        run: |
+          mkdir -p data/cache_pykrx data/cache_misc data/cache_macro data/cache_dart data/data_pit data/feature_store data/outputs data/state
+          rclone copy gdrive:kr_quant_engine/data_pit data/data_pit -P || true
+          rclone copy gdrive:kr_quant_engine/cache_misc data/cache_misc -P || true
+          rclone copy gdrive:kr_quant_engine/cache_macro data/cache_macro -P || true
+          rclone copy gdrive:kr_quant_engine/cache_dart data/cache_dart -P || true
+          rclone copy gdrive:kr_quant_engine/feature_store data/feature_store -P || true
+          rclone copy gdrive:kr_quant_engine/models data/models -P || true
+          rclone copy gdrive:kr_quant_engine/outputs data/outputs -P || true
+          rclone copy gdrive:kr_quant_engine/state data/state -P || true
+
+      - name: Quick smoke
+        run: |
+          python tests/smoke_test.py --quick
+          python tests/test_kr1000_data_store.py
+
+      - name: Setup KR1000 data store
+        run: python tools/setup_kr1000_data_store.py
+
+      - name: Import broker holdings export if present
+        run: |
+          RAW=""
+          for f in \
+            data/state/current_holdings_raw.csv \
+            data/state/current_holdings_raw.tsv \
+            data/state/broker_holdings.csv \
+            data/state/broker_holdings.tsv \
+            data/state/holdings_export.csv \
+            data/state/holdings_export.tsv
+          do
+            if [ -f "$f" ]; then RAW="$f"; break; fi
+          done
+          if [ -n "$RAW" ]; then
+            ARGS="--input $RAW --out data/state/current_holdings.csv --account-id broker"
+            if [ -n "${{ github.event.inputs.evaluation_date }}" ]; then
+              ARGS="$ARGS --as-of ${{ github.event.inputs.evaluation_date }}"
+            fi
+            python tools/import_current_holdings.py $ARGS
+          elif [ -f data/state/current_holdings.csv ]; then
+            python tools/import_current_holdings.py --input data/state/current_holdings.csv --out data/state/current_holdings.csv --dry-run
+          else
+            echo "No current holdings file or raw broker export found in data/state."
+          fi
+
+      - name: Refresh latest mcap and PIT data
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.refresh_avg_value }}" != "true" ]; then
+            ARGS="$ARGS --skip-avg-value"
+          fi
+          if [ -n "${{ github.event.inputs.evaluation_date }}" ]; then
+            ARGS="$ARGS --as-of ${{ github.event.inputs.evaluation_date }}"
+          fi
+          python tools/refresh_kr1000_daily_data.py $ARGS
+
+      - name: Build latest KR1000 scored snapshot
+        run: |
+          ARGS="--no-rs"
+          if [ -n "${{ github.event.inputs.evaluation_date }}" ]; then
+            ARGS="$ARGS --as-of ${{ github.event.inputs.evaluation_date }}"
+          fi
+          python tools/build_latest_kr1000_scored_snapshot.py $ARGS
+
+      - name: Run daily broker check
+        id: broker
+        run: |
+          ARGS="--current-holdings data/state/current_holdings.csv"
+          if [ -n "${{ github.event.inputs.evaluation_date }}" ]; then
+            ARGS="$ARGS --evaluation-date ${{ github.event.inputs.evaluation_date }}"
+          fi
+          set +e
+          python tools/run_kr1000_daily_broker_check.py $ARGS
+          rc=$?
+          echo "exitcode=$rc" >> "$GITHUB_OUTPUT"
+          # 0=completed, 2=blocked by data freshness/audit. Keep artifacts.
+          if [ "$rc" = "0" ] || [ "$rc" = "2" ]; then exit 0; fi
+          exit "$rc"
+
+      - name: Sync refreshed data and outputs back to GDrive
+        if: ${{ env.RCLONE_CFG_TEXT != '' && always() }}
+        run: |
+          rclone copy data/outputs gdrive:kr_quant_engine/outputs -P || true
+          rclone copy data/data_pit gdrive:kr_quant_engine/data_pit -P || true
+          rclone copy data/cache_misc gdrive:kr_quant_engine/cache_misc -P || true
+          rclone copy data/cache_pykrx gdrive:kr_quant_engine/cache_pykrx -P || true
+          rclone copy data/feature_store gdrive:kr_quant_engine/feature_store -P || true
+          rclone copy data/state gdrive:kr_quant_engine/state -P || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-kr1000-broker-check-${{ github.run_number }}
+          path: |
+            data/outputs/kr1000_latest_scored_snapshot_*.json
+            data/outputs/kr1000_daily_broker_check_*.json
+            data/outputs/kr1000_daily_broker_check_*.md
+            data/outputs/kr1000_daily_broker_trade_plan_*.csv
+            data/outputs/kr1000_daily_data_refresh_*.json
+            data/outputs/current_holdings_import_audit.json
+          retention-days: 90

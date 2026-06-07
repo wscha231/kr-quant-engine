@@ -156,6 +156,23 @@ def test_risk_label_uses_forward_dd():
     assert out.loc[out["ticker"] == "B", "is_risk"].iloc[0] == 1   # exactly -21%
     assert out.loc[out["ticker"] == "C", "is_risk"].iloc[0] == 1
     assert out.loc[out["ticker"] == "D", "is_risk"].iloc[0] == 0
+    assert out["is_risk_observed"].sum() == 4
+
+
+@_test("risk_label_marks_missing_forward_target_unobserved")
+def test_risk_label_missing_forward_target_unobserved():
+    from kr_multibagger_classifier import label_risk
+    panel = pd.DataFrame({
+        "ticker": ["A", "B"],
+        "rebalance_date": [pd.Timestamp("2024-06-30")] * 2,
+        "forward_min_return_1m": [-0.25, np.nan],
+    })
+    out = label_risk(panel, horizon_months=1, drawdown_threshold=-0.20)
+    by_ticker = out.set_index("ticker")
+    assert by_ticker.loc["A", "is_risk"] == 1
+    assert by_ticker.loc["A", "is_risk_observed"] == 1
+    assert by_ticker.loc["B", "is_risk"] == 0
+    assert by_ticker.loc["B", "is_risk_observed"] == 0
 
 
 @_test("calibration_curve_within_tolerance")
@@ -208,6 +225,168 @@ def test_3sleeve_picks_columns():
     # Ranking semantics: rank_in_month resets per rebalance_date
     rank_top = picks[picks["rank_in_month"] == 1]
     assert rank_top["rebalance_date"].nunique() == picks["rebalance_date"].nunique()
+
+
+@_test("P_MB 3-sleeve score modes penalize continuation and risk")
+def test_pmb_3sleeve_score_modes():
+    from kr_backtester_realistic import combine_pmb_3sleeve_scores
+
+    pre = pd.Series([0.8, 0.4, 0.2])
+    continuation = pd.Series([0.1, 0.8, 0.1])
+    risk = pd.Series([0.1, 0.1, 0.5])
+    balanced = combine_pmb_3sleeve_scores(
+        pre, continuation, risk, score_mode="balanced",
+    )
+    strict = combine_pmb_3sleeve_scores(
+        pre, continuation, risk, score_mode="strict_pre_entry",
+    )
+    focused = combine_pmb_3sleeve_scores(
+        pre, continuation, risk, score_mode="pre_entry_focus",
+    )
+
+    assert strict.iloc[0] > strict.iloc[1]
+    assert strict.iloc[0] > strict.iloc[2]
+    assert focused.iloc[0] > balanced.iloc[0]
+    assert focused.iloc[1] < balanced.iloc[1]
+
+
+@_test("P_MB OOS feature selector excludes forward/generated leakage columns")
+def test_pmb_oos_feature_selector_excludes_leakage():
+    from tools.build_pmb_oos_picks import select_pmb_feature_columns
+
+    panel = pd.DataFrame({
+        "rebalance_date": pd.date_range("2024-01-31", periods=6, freq="ME"),
+        "ticker": [f"{i:06d}" for i in range(6)],
+        "feat_value": np.arange(6, dtype=float),
+        "forward_return_1m": np.arange(6, dtype=float),
+        "target_next_month": np.arange(6, dtype=float),
+        "p_pre_surge": np.linspace(0.1, 0.6, 6),
+        "leader_rank": np.arange(6),
+        "is_pre_entry": [0, 1, 0, 0, 1, 0],
+        "is_continuation": [0, 0, 1, 0, 0, 1],
+        "is_risk": [0, 0, 0, 1, 0, 0],
+        "is_risk_observed": [1, 1, 1, 1, 1, 1],
+    })
+    features = select_pmb_feature_columns(panel)
+    assert "feat_value" in features
+    for col in ("forward_return_1m", "target_next_month",
+                "p_pre_surge", "leader_rank", "is_pre_entry",
+                "is_continuation", "is_risk", "is_risk_observed"):
+        assert col not in features, f"leaky/generated column selected: {col}"
+
+
+@_test("forward label builder computes 1m return and min forward drawdown")
+def test_forward_label_builder():
+    from kr_pipeline import add_forward_return_labels
+
+    panel = pd.DataFrame({
+        "rebalance_date": [pd.Timestamp("2024-01-31")],
+        "ticker": ["000001"],
+    })
+    prices = pd.DataFrame({
+        "date": pd.to_datetime(["2024-01-31", "2024-02-05", "2024-02-29"]),
+        "ticker": ["000001", "000001", "000001"],
+        "close": [100.0, 80.0, 110.0],
+    })
+    out = add_forward_return_labels(
+        panel,
+        cfg={"forward_label_horizon_months": 1},
+        price_panel=prices,
+    )
+    assert abs(float(out.loc[0, "forward_return_1m"]) - 0.10) < 1e-9
+    assert abs(float(out.loc[0, "forward_min_return_1m"]) - (-0.20)) < 1e-9
+
+
+@_test("forward label enrichment helper fills only requested date window")
+def test_forward_label_enrichment_helper():
+    from tools.enrich_scored_panel_forward_labels import enrich_panel_with_forward_labels
+
+    panel = pd.DataFrame({
+        "rebalance_date": [pd.Timestamp("2024-01-31"), pd.Timestamp("2024-03-31")],
+        "ticker": ["000001", "000001"],
+    })
+    prices = pd.DataFrame({
+        "date": pd.to_datetime([
+            "2024-01-31", "2024-02-05", "2024-02-29",
+            "2024-03-31", "2024-04-30",
+        ]),
+        "ticker": ["000001"] * 5,
+        "close": [100.0, 90.0, 120.0, 200.0, 210.0],
+    })
+    out, audit = enrich_panel_with_forward_labels(
+        panel,
+        cfg={"forward_label_horizon_months": 1},
+        price_panel=prices,
+        start="2024-01-01",
+        end="2024-01-31",
+    )
+    assert abs(float(out.loc[0, "forward_return_1m"]) - 0.20) < 1e-9
+    assert abs(float(out.loc[0, "forward_min_return_1m"]) - (-0.10)) < 1e-9
+    assert pd.isna(out.loc[1, "forward_return_1m"])
+    assert audit["active_rows"] == 1
+    assert audit["newly_label_ready_rows"] == 1
+
+
+@_test("forward label builder skips incomplete future horizon")
+def test_forward_label_builder_skips_incomplete_horizon():
+    from kr_pipeline import add_forward_return_labels
+
+    panel = pd.DataFrame({
+        "rebalance_date": [pd.Timestamp("2026-06-04")],
+        "ticker": ["000001"],
+    })
+    prices = pd.DataFrame({
+        "date": pd.to_datetime(["2026-06-04", "2026-06-30", "2026-07-03"]),
+        "ticker": ["000001", "000001", "000001"],
+        "close": [100.0, 120.0, 130.0],
+    })
+    out = add_forward_return_labels(
+        panel,
+        cfg={
+            "forward_label_horizon_months": 1,
+            "forward_label_as_of_date": "2026-06-06",
+        },
+        price_panel=prices,
+    )
+    assert pd.isna(out.loc[0, "forward_return_1m"])
+    assert pd.isna(out.loc[0, "forward_min_return_1m"])
+
+
+@_test("forward label enrichment clears stale incomplete labels")
+def test_forward_label_enrichment_clears_incomplete_labels():
+    from tools.enrich_scored_panel_forward_labels import enrich_panel_with_forward_labels
+
+    panel = pd.DataFrame({
+        "rebalance_date": [pd.Timestamp("2026-06-04")],
+        "ticker": ["000001"],
+        "forward_return_1m": [0.30],
+        "forward_min_return_1m": [-0.10],
+    })
+    out, audit = enrich_panel_with_forward_labels(
+        panel,
+        cfg={
+            "forward_label_horizon_months": 1,
+            "forward_label_as_of_date": "2026-06-06",
+            "forward_label_fetch_missing_prices": False,
+        },
+        price_panel=pd.DataFrame(columns=["date", "ticker", "close"]),
+    )
+    assert pd.isna(out.loc[0, "forward_return_1m"])
+    assert pd.isna(out.loc[0, "forward_min_return_1m"])
+    assert audit["cleared_incomplete_horizon_rows"] == 1
+
+
+@_test("train_entry_classifier exposes purged split controls")
+def test_train_entry_classifier_purged_signature():
+    import inspect
+    from kr_multibagger_classifier import train_entry_classifier
+
+    params = inspect.signature(train_entry_classifier).parameters
+    assert "purged" in params
+    assert "embargo_months" in params
+    src = inspect.getsource(train_entry_classifier)
+    assert "eval_set=(X_test, y_test)" not in src
+    assert "early_stopping_rounds" not in src
 
 
 print()

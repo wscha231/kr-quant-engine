@@ -17,6 +17,7 @@ with install instructions. Cache reads still work without pykrx.
 from __future__ import annotations
 
 import time
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -46,6 +47,10 @@ except ImportError:
 
 CACHE_DIR = DATA_ROOT / "cache_pykrx"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_TICKER_HISTORY_CACHE_INDEX: dict[str, list[tuple[int, int, Path]]] | None = None
+_INDEX_HISTORY_CACHE_INDEX: dict[str, list[tuple[int, int, Path]]] | None = None
+_MARCAP_YEAR_CACHE: dict[int, pd.DataFrame] = {}
+_MARCAP_YEAR_BY_TICKER_CACHE: dict[int, dict[str, pd.DataFrame]] = {}
 
 
 def _require_pykrx() -> None:
@@ -88,8 +93,225 @@ def _load_cached(path: Path, refresh_days: int = 1) -> Optional[pd.DataFrame]:
 def _save_cache(df: pd.DataFrame, path: Path) -> None:
     try:
         df.to_parquet(path, index=False)
+        global _TICKER_HISTORY_CACHE_INDEX, _INDEX_HISTORY_CACHE_INDEX
+        if path.name.startswith("ticker_"):
+            _TICKER_HISTORY_CACHE_INDEX = None
+        if path.name.startswith("index_"):
+            _INDEX_HISTORY_CACHE_INDEX = None
     except Exception as e:
         log(f"[pykrx_client] cache write fail {path.name}: {e}", level="WARN")
+
+
+def _ticker_history_cache_index() -> dict[str, list[tuple[int, int, Path]]]:
+    """Index ticker history caches by ticker and covered date range."""
+    global _TICKER_HISTORY_CACHE_INDEX
+    if _TICKER_HISTORY_CACHE_INDEX is not None:
+        return _TICKER_HISTORY_CACHE_INDEX
+    pattern = re.compile(r"^ticker_(\d{6})_(\d{8})_(\d{8})\.parquet$")
+    index: dict[str, list[tuple[int, int, Path]]] = {}
+    for path in CACHE_DIR.glob("ticker_*.parquet"):
+        match = pattern.match(path.name)
+        if not match:
+            continue
+        try:
+            start_i = int(match.group(2))
+            end_i = int(match.group(3))
+        except ValueError:
+            continue
+        index.setdefault(match.group(1), []).append((start_i, end_i, path))
+    _TICKER_HISTORY_CACHE_INDEX = index
+    return index
+
+
+def _index_history_cache_index() -> dict[str, list[tuple[int, int, Path]]]:
+    """Index cached index OHLCV files by index ticker and covered date range."""
+    global _INDEX_HISTORY_CACHE_INDEX
+    if _INDEX_HISTORY_CACHE_INDEX is not None:
+        return _INDEX_HISTORY_CACHE_INDEX
+    pattern = re.compile(r"^index_([^_]+)_(\d{8})_(\d{8})\.parquet$")
+    index: dict[str, list[tuple[int, int, Path]]] = {}
+    for path in CACHE_DIR.glob("index_*.parquet"):
+        match = pattern.match(path.name)
+        if not match:
+            continue
+        try:
+            start_i = int(match.group(2))
+            end_i = int(match.group(3))
+        except ValueError:
+            continue
+        index.setdefault(match.group(1), []).append((start_i, end_i, path))
+    _INDEX_HISTORY_CACHE_INDEX = index
+    return index
+
+
+def _load_covering_ticker_history_cache(
+    ticker: str,
+    start: str,
+    end: str,
+) -> Optional[pd.DataFrame]:
+    """Load the narrowest existing ticker cache that covers start..end.
+
+    Historical feature rebuilds request many overlapping windows. Exact cache
+    keys make those rebuilds unnecessarily slow; broad cached histories are
+    immutable for already-observed dates and can be sliced PIT-safely.
+    """
+    wanted_start = int(_yyyymmdd(start))
+    wanted_end = int(_yyyymmdd(end))
+    best: tuple[int, Path] | None = None
+    for cache_start, cache_end, path in _ticker_history_cache_index().get(str(ticker).zfill(6), []):
+        if cache_start <= wanted_start and cache_end >= wanted_end:
+            span = cache_end - cache_start
+            if best is None or span < best[0]:
+                best = (span, path)
+    if best is None:
+        return None
+    try:
+        df = pd.read_parquet(best[1])
+    except Exception as e:
+        log(f"[pykrx_client] covering ticker cache read fail {best[1].name}: {e}", level="WARN")
+        return None
+    if df.empty or "date" not in df.columns:
+        return None
+    out = df.copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out = out.dropna(subset=["date"])
+    out = out[
+        (out["date"] >= pd.Timestamp(start))
+        & (out["date"] <= pd.Timestamp(end))
+    ].copy()
+    if out.empty:
+        return None
+    if "ticker" not in out.columns:
+        out["ticker"] = str(ticker).zfill(6)
+    return out
+
+
+def _load_covering_index_history_cache(
+    ticker: str,
+    start: str,
+    end: str,
+) -> Optional[pd.DataFrame]:
+    wanted_start = int(_yyyymmdd(start))
+    wanted_end = int(_yyyymmdd(end))
+    best: tuple[int, Path] | None = None
+    for cache_start, cache_end, path in _index_history_cache_index().get(str(ticker), []):
+        if cache_start <= wanted_start and cache_end >= wanted_end:
+            span = cache_end - cache_start
+            if best is None or span < best[0]:
+                best = (span, path)
+    if best is None:
+        return None
+    try:
+        df = pd.read_parquet(best[1])
+    except Exception as e:
+        log(f"[pykrx_client] covering index cache read fail {best[1].name}: {e}", level="WARN")
+        return None
+    if df.empty or "date" not in df.columns:
+        return None
+    out = df.copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out = out.dropna(subset=["date"])
+    out = out[
+        (out["date"] >= pd.Timestamp(start))
+        & (out["date"] <= pd.Timestamp(end))
+    ].copy()
+    return out if not out.empty else None
+
+
+def _load_marcap_year(year: int) -> pd.DataFrame:
+    """Load local yearly marcap cache in ticker-history format."""
+    year = int(year)
+    if year in _MARCAP_YEAR_CACHE:
+        return _MARCAP_YEAR_CACHE[year]
+    path = CACHE_DIR / f"marcap_{year}.parquet"
+    if not path.exists():
+        _MARCAP_YEAR_CACHE[year] = pd.DataFrame()
+        return _MARCAP_YEAR_CACHE[year]
+    cols = [
+        "Code", "Date", "Open", "High", "Low", "Close", "Volume",
+        "Amount", "ChangesRatio", "Market",
+    ]
+    try:
+        df = pd.read_parquet(path, columns=cols)
+    except Exception:
+        try:
+            df = pd.read_parquet(path)
+        except Exception as e:
+            log(f"[pykrx_client] marcap cache read fail {path.name}: {e}", level="WARN")
+            _MARCAP_YEAR_CACHE[year] = pd.DataFrame()
+            return _MARCAP_YEAR_CACHE[year]
+        df = df[[c for c in cols if c in df.columns]]
+    if df.empty or not {"Code", "Date", "Close"}.issubset(df.columns):
+        _MARCAP_YEAR_CACHE[year] = pd.DataFrame()
+        return _MARCAP_YEAR_CACHE[year]
+    out = df.rename(columns={
+        "Code": "ticker",
+        "Date": "date",
+        "Open": "open",
+        "High": "high",
+        "Low": "low",
+        "Close": "close",
+        "Volume": "volume",
+        "Amount": "value",
+        "ChangesRatio": "change_pct",
+        "Market": "market",
+    }).copy()
+    out["ticker"] = out["ticker"].astype(str).str.zfill(6)
+    out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.normalize()
+    out = out.dropna(subset=["date", "close"])
+    if "market" in out.columns:
+        out["market"] = out["market"].astype(str).str.upper()
+        out = out[out["market"].isin(["KOSPI", "KOSDAQ"])].copy()
+    _MARCAP_YEAR_CACHE[year] = out.sort_values(["ticker", "date"]).reset_index(drop=True)
+    _MARCAP_YEAR_BY_TICKER_CACHE[year] = {
+        str(tk): group.reset_index(drop=True)
+        for tk, group in _MARCAP_YEAR_CACHE[year].groupby("ticker", sort=False)
+    }
+    return _MARCAP_YEAR_CACHE[year]
+
+
+def _load_ticker_history_from_marcap_cache(
+    ticker: str,
+    start: str,
+    end: str,
+) -> Optional[pd.DataFrame]:
+    """Return ticker OHLCV from local marcap_YYYY caches when available."""
+    tk = str(ticker).zfill(6)
+    start_ts = pd.Timestamp(start).normalize()
+    end_ts = pd.Timestamp(end).normalize()
+    frames = []
+    for year in range(int(start_ts.year), int(end_ts.year) + 1):
+        year_df = _load_marcap_year(year)
+        if year_df.empty:
+            continue
+        ticker_df = _MARCAP_YEAR_BY_TICKER_CACHE.get(year, {}).get(tk)
+        if ticker_df is None or ticker_df.empty:
+            continue
+        sub = ticker_df[
+            (ticker_df["date"] >= start_ts)
+            & (ticker_df["date"] <= end_ts)
+        ].copy()
+        if not sub.empty:
+            frames.append(sub)
+    if not frames:
+        return None
+    out = pd.concat(frames, ignore_index=True)
+    out = out.sort_values("date").drop_duplicates("date", keep="last").reset_index(drop=True)
+    if "value" not in out.columns and {"close", "volume"}.issubset(out.columns):
+        out["value"] = (
+            pd.to_numeric(out["close"], errors="coerce").fillna(0)
+            * pd.to_numeric(out["volume"], errors="coerce").fillna(0)
+        )
+    return out
+
+
+def _marcap_year_cache_covers(start: str, end: str) -> bool:
+    start_ts = pd.Timestamp(start).normalize()
+    end_ts = pd.Timestamp(end).normalize()
+    for year in range(int(start_ts.year), int(end_ts.year) + 1):
+        if not (CACHE_DIR / f"marcap_{year}.parquet").exists():
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +439,12 @@ def fetch_daily_ohlcv_market(date: str, market: str = "ALL", refresh_days: int =
     return out
 
 
-def fetch_market_cap_market(date: str, market: str = "ALL", refresh_days: int = 1) -> pd.DataFrame:
+def fetch_market_cap_market(
+    date: str,
+    market: str = "ALL",
+    refresh_days: int = 1,
+    allow_fdr_fallback: bool = True,
+) -> pd.DataFrame:
     """Market cap + 주식수 snapshot.
 
     Columns: ticker, market_cap, listed_shares, volume, value, market, date.
@@ -254,7 +481,7 @@ def fetch_market_cap_market(date: str, market: str = "ALL", refresh_days: int = 
         if frames:
             out = pd.concat(frames, ignore_index=True)
 
-    if out.empty and FDR_AVAILABLE:
+    if out.empty and FDR_AVAILABLE and allow_fdr_fallback:
         log(f"[pykrx_client] pykrx empty, falling back to FDR for mcap", level="WARN")
         out = _fetch_listing_via_fdr(market)
         # FDR returns: ticker, name, market, market_cap, listed_shares, close, volume, value
@@ -361,7 +588,7 @@ _FDR_INDEX_MAP = {
     "1001": "KS11",      # KOSPI
     "1028": "KS200",     # KOSPI 200
     "2001": "KQ11",      # KOSDAQ
-    "2203": "KQ150",     # KOSDAQ 150
+    "2203": "KQ11",      # KOSDAQ150 fallback proxy; FDR has no stable KQ150 symbol.
     "1003": "VKOSPI",    # KRX VKOSPI (FDR may not have)
 }
 
@@ -377,6 +604,9 @@ def fetch_index_ohlcv(ticker: str, start: str, end: str, refresh_days: int = 1) 
     cached = _load_cached(path, refresh_days)
     if cached is not None and not cached.empty:
         return cached
+    covering = _load_covering_index_history_cache(ticker, start, end)
+    if covering is not None and not covering.empty:
+        return covering
 
     df = pd.DataFrame()
     if PYKRX_AVAILABLE:
@@ -429,9 +659,19 @@ def fetch_ticker_history(ticker: str, start: str, end: str, refresh_days: int = 
     """
     cache_name = f"ticker_{ticker}_{_yyyymmdd(start)}_{_yyyymmdd(end)}"
     path = CACHE_DIR / f"{cache_name}.parquet"
+    marcap = _load_ticker_history_from_marcap_cache(ticker, start, end)
+    if marcap is not None and not marcap.empty:
+        if pd.to_datetime(marcap["date"], errors="coerce").max() >= pd.Timestamp(end).normalize():
+            return marcap
+    if _marcap_year_cache_covers(start, end):
+        return pd.DataFrame()
+
     cached = _load_cached(path, refresh_days)
     if cached is not None and not cached.empty:
         return cached
+    covering = _load_covering_ticker_history_cache(ticker, start, end)
+    if covering is not None and not covering.empty:
+        return covering
 
     df = pd.DataFrame()
     if PYKRX_AVAILABLE:

@@ -72,6 +72,9 @@ def compute_avg_trading_value_60d(
     lookback_days: int = 60,
     refresh_days: int = 7,
     tickers: Optional[list[str]] = None,
+    fallback_max_days: int = 0,
+    mktcap_value_fallback: bool = False,
+    mktcap_value_fallback_max_days: int = 0,
 ) -> pd.DataFrame:
     """For each ticker, compute avg 거래대금 over last N business days ending
     on rebalance_date.
@@ -84,7 +87,9 @@ def compute_avg_trading_value_60d(
 
     Returns DataFrame: ticker, avg_trading_value, days_observed.
 
-    Caches per (rebalance_date, lookback_days) at cache_misc/.
+    Caches per (rebalance_date, lookback_days) at cache_misc/. When
+    fallback_max_days > 0 and the exact cache is unavailable, the latest prior
+    cache within that date gap may be reused. Future caches are never used.
     """
     from kr_pykrx_client import fetch_listing, fetch_ticker_history
 
@@ -99,6 +104,39 @@ def compute_avg_trading_value_60d(
                 return pd.read_parquet(cache_path)
             except Exception as e:
                 log(f"[universe] cache read fail {cache_path.name}: {e}", level="WARN")
+
+    if fallback_max_days > 0 and refresh_days != 0:
+        fallback_path = find_prior_avg_value_cache(
+            rebalance_date,
+            lookback_days=lookback_days,
+            fallback_max_days=fallback_max_days,
+        )
+        if fallback_path is not None:
+            try:
+                prior = pd.read_parquet(fallback_path)
+                if tickers is not None and "ticker" in prior.columns:
+                    allowed = {str(t).zfill(6) for t in tickers}
+                    prior = prior[prior["ticker"].astype(str).str.zfill(6).isin(allowed)].copy()
+                log(
+                    f"[universe] reuse PIT-safe prior avg_value cache "
+                    f"{fallback_path.name} for {rebalance_date.strftime('%Y-%m-%d')}"
+                )
+                return prior
+            except Exception as e:
+                log(f"[universe] prior avg_value cache read fail {fallback_path.name}: {e}", level="WARN")
+
+    if mktcap_value_fallback:
+        proxy = compute_avg_value_proxy_from_mktcap_cache(
+            rebalance_date,
+            tickers=tickers,
+            fallback_max_days=mktcap_value_fallback_max_days,
+        )
+        if not proxy.empty:
+            log(
+                f"[universe] use mktcap value proxy for avg_value "
+                f"at {rebalance_date.strftime('%Y-%m-%d')}: {len(proxy)} rows"
+            )
+            return proxy
 
     if tickers is None:
         listing = fetch_listing(rebalance_date.strftime("%Y%m%d"), market="ALL",
@@ -143,6 +181,115 @@ def compute_avg_trading_value_60d(
             log(f"[universe] cache write fail {cache_path.name}: {e}", level="WARN")
     log(f"[universe] avg_value: {len(out)} tickers with valid data")
     return out
+
+
+def compute_avg_value_proxy_from_mktcap_cache(
+    rebalance_date: pd.Timestamp,
+    tickers: Optional[list[str]] = None,
+    fallback_max_days: int = 0,
+    cache_dir: Optional[Path] = None,
+) -> pd.DataFrame:
+    """Use PIT mktcap snapshot trading value as a liquidity proxy.
+
+    This is not a true 60-day average. It exists to keep daily/weekly
+    operations moving when the expensive per-ticker 60d cache is missing.
+    The source remains PIT-safe because only mktcap snapshots dated on or
+    before rebalance_date are eligible.
+    """
+    path = find_prior_mktcap_value_cache(
+        rebalance_date,
+        fallback_max_days=fallback_max_days,
+        cache_dir=cache_dir,
+    )
+    if path is None:
+        return pd.DataFrame(columns=["ticker", "avg_trading_value", "days_observed"])
+    try:
+        df = pd.read_parquet(path)
+    except Exception as e:
+        log(f"[universe] mktcap value proxy read fail {path.name}: {e}", level="WARN")
+        return pd.DataFrame(columns=["ticker", "avg_trading_value", "days_observed"])
+    if df.empty or not {"ticker", "value"}.issubset(df.columns):
+        return pd.DataFrame(columns=["ticker", "avg_trading_value", "days_observed"])
+    out = df[["ticker", "value"]].copy()
+    out["ticker"] = out["ticker"].astype(str).str.zfill(6)
+    out["avg_trading_value"] = pd.to_numeric(out["value"], errors="coerce")
+    out = out.dropna(subset=["avg_trading_value"])
+    out = out[out["avg_trading_value"] > 0].copy()
+    if tickers is not None:
+        allowed = {str(t).zfill(6) for t in tickers}
+        out = out[out["ticker"].isin(allowed)].copy()
+    out["days_observed"] = 1
+    out["avg_value_source"] = f"mktcap_value_proxy:{path.stem[-8:]}"
+    return out[["ticker", "avg_trading_value", "days_observed", "avg_value_source"]].reset_index(drop=True)
+
+
+def find_prior_mktcap_value_cache(
+    rebalance_date: pd.Timestamp,
+    fallback_max_days: int = 0,
+    cache_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """Return latest prior mktcap_ALL cache with a value column."""
+    if fallback_max_days <= 0:
+        return None
+    root = Path(cache_dir) if cache_dir is not None else DATA_ROOT / "cache_pykrx"
+    if not root.exists():
+        return None
+    rd = pd.Timestamp(rebalance_date).normalize()
+    pattern = re.compile(r"^mktcap_ALL_(\d{8})\.parquet$")
+    candidates: list[tuple[pd.Timestamp, Path]] = []
+    for path in root.glob("mktcap_ALL_*.parquet"):
+        match = pattern.match(path.name)
+        if not match:
+            continue
+        cache_date = pd.Timestamp(match.group(1)).normalize()
+        if cache_date > rd:
+            continue
+        if (rd - cache_date).days > int(fallback_max_days):
+            continue
+        candidates.append((cache_date, path))
+    for _, path in sorted(candidates, key=lambda x: x[0], reverse=True):
+        try:
+            cols = pd.read_parquet(path, columns=["ticker", "value"]).columns
+        except Exception:
+            continue
+        if "value" in cols:
+            return path
+    return None
+
+
+def find_prior_avg_value_cache(
+    rebalance_date: pd.Timestamp,
+    lookback_days: int = 60,
+    fallback_max_days: int = 0,
+    cache_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """Return latest prior avg_value cache within fallback_max_days.
+
+    This helper is intentionally date-based rather than mtime-based because
+    avg trading value snapshots are historical facts once computed. It is
+    PIT-safe: only cache files dated on or before rebalance_date are eligible.
+    """
+    if fallback_max_days <= 0:
+        return None
+    root = Path(cache_dir) if cache_dir is not None else DATA_ROOT / "cache_misc"
+    if not root.exists():
+        return None
+    rd = pd.Timestamp(rebalance_date).normalize()
+    pattern = re.compile(rf"^avg_value_{int(lookback_days)}d_(\d{{8}})\.parquet$")
+    candidates: list[tuple[pd.Timestamp, Path]] = []
+    for path in root.glob(f"avg_value_{int(lookback_days)}d_*.parquet"):
+        match = pattern.match(path.name)
+        if not match:
+            continue
+        cache_date = pd.Timestamp(match.group(1)).normalize()
+        if cache_date > rd:
+            continue
+        if (rd - cache_date).days > int(fallback_max_days):
+            continue
+        candidates.append((cache_date, path))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda x: x[0])[1]
 
 
 # ---------------------------------------------------------------------------
@@ -195,9 +342,13 @@ def build_universe_snapshot(
     exchanges = [e.upper() for e in cfg.get("exchanges", list(EXCHANGES))]
 
     # 1+2. PIT listing + mcap from cached snapshot at-or-before rd
-    pit_listing = fetch_listing_at_date(rd, market="ALL", name_lookup=True)
+    pit_listing = fetch_listing_at_date(
+        rd,
+        market="ALL",
+        name_lookup=bool(cfg.get("universe_name_lookup", True)),
+    )
     if pit_listing.empty:
-        log(f"[universe] PIT snapshot missing for {rd.strftime('%Y-%m-%d')} — "
+        log(f"[universe] PIT snapshot missing for {rd.strftime('%Y-%m-%d')} - "
             f"caller must rebuild cache or pick a later start date.", level="WARN")
         return pd.DataFrame()
 
@@ -221,7 +372,15 @@ def build_universe_snapshot(
     # 3. 60d avg trading value — pass PIT tickers explicitly so the function
     # does not fall back to FDR-current via its `tickers=None` branch.
     pit_tickers = listing["ticker"].astype(str).tolist()
-    avg_val = compute_avg_trading_value_60d(rd, lookback_days=60, tickers=pit_tickers)
+    avg_val = compute_avg_trading_value_60d(
+        rd,
+        lookback_days=60,
+        refresh_days=int(cfg.get("avg_value_refresh_days", 7)),
+        tickers=pit_tickers,
+        fallback_max_days=int(cfg.get("avg_value_fallback_max_days", 0)),
+        mktcap_value_fallback=bool(cfg.get("avg_value_mktcap_value_fallback", False)),
+        mktcap_value_fallback_max_days=int(cfg.get("avg_value_mktcap_value_fallback_max_days", 0)),
+    )
 
     # 4. Listed months (PIT-correct from kr_pit_universe)
     listed = compute_listed_months(rd, pit_tickers)
@@ -297,7 +456,7 @@ def build_universe_monthly_v0(
     cfg = {**DEFAULT_CFG, **(cfg or {})}
     end_date = end_date or datetime.now().strftime("%Y-%m-%d")
 
-    log(f"[universe] build_universe_monthly_v0 {start_date} → {end_date}")
+    log(f"[universe] build_universe_monthly_v0 {start_date} -> {end_date}")
     month_ends = fetch_month_end_business_days(
         pd.Timestamp(start_date).strftime("%Y%m%d"),
         pd.Timestamp(end_date).strftime("%Y%m%d"),

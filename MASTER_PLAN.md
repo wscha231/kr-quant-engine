@@ -1,5 +1,7 @@
 # Master Plan v0.1 — kr_quant_engine (2026-04-27)
 
+**Current official gate**: KR1000 broker-ledger next-close 8y+ validation must clear CAGR `>= 30%`, MDD `>= -25%`, and KOSPI200 excess CAGR `> 0`. CAGR `>= 35%` is stretch only until the official gate is cleared.
+
 **Core goal**: KOSPI + KOSDAQ 통합 유니버스에서 KOSPI200 초과수익 + CAGR 최대화. 1차 목표 CAGR 25%+ (Main), 35%+ (Concentrated N=5).
 
 **Reference baseline (r1000-quant-engine)**:

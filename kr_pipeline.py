@@ -23,6 +23,7 @@ from kr_config import (
     DEFAULT_ROUND_TRIP_COST,
     KR_ENGINE_REUSE_VERSION,
     DATA_ROOT,
+    PHASE4_PMB_TARGET_COLUMNS,
 )
 from kr_features import (
     add_universe_features,
@@ -36,6 +37,106 @@ from kr_pykrx_client import (
     fetch_ticker_history,
 )
 from kr_universe import build_universe_snapshot
+
+
+# ---------------------------------------------------------------------------
+# Forward target labels for P_MB risk sleeve
+# ---------------------------------------------------------------------------
+def _last_close_at_or_before_series(close: pd.Series, day: pd.Timestamp) -> float:
+    sub = close.loc[close.index <= pd.Timestamp(day).normalize()]
+    if sub.empty:
+        return float("nan")
+    return float(sub.iloc[-1])
+
+
+def add_forward_return_labels(
+    scored_panel: pd.DataFrame,
+    cfg: Optional[dict] = None,
+    price_panel: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Add forward return / forward drawdown labels for classifier targets.
+
+    These columns are target labels for walk-forward classifier training, not
+    tradable features. Downstream feature selection excludes the `forward_`
+    prefix to avoid leakage.
+    """
+    cfg = {**DEFAULT_CFG, **(cfg or {})}
+    out = scored_panel.copy()
+    for col in PHASE4_PMB_TARGET_COLUMNS:
+        if col not in out.columns:
+            out[col] = np.nan
+    if out.empty or not {"rebalance_date", "ticker"}.issubset(out.columns):
+        return out
+
+    horizon_months = int(cfg.get("forward_label_horizon_months", 1) or 1)
+    refresh_days = int(cfg.get("forward_label_refresh_days", cfg.get("avg_value_refresh_days", 3650)) or 3650)
+    fetch_missing_prices = bool(cfg.get("forward_label_fetch_missing_prices", True))
+    label_as_of_raw = cfg.get("forward_label_as_of_date")
+    label_as_of = (
+        pd.Timestamp(label_as_of_raw).normalize()
+        if label_as_of_raw
+        else pd.Timestamp.today().normalize()
+    )
+    out["rebalance_date"] = pd.to_datetime(out["rebalance_date"], errors="coerce").dt.normalize()
+    out["ticker"] = out["ticker"].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6)
+    missing = out[list(PHASE4_PMB_TARGET_COLUMNS)].isna().any(axis=1)
+    work = out.loc[missing & out["rebalance_date"].notna(), ["rebalance_date", "ticker"]]
+    if work.empty:
+        return out
+
+    prices_by_ticker: dict[str, pd.DataFrame] = {}
+    if price_panel is not None and not price_panel.empty:
+        pp = price_panel.copy()
+        pp["ticker"] = pp["ticker"].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6)
+        pp["date"] = pd.to_datetime(pp["date"], errors="coerce").dt.normalize()
+        if "close" in pp.columns:
+            pp["close"] = pd.to_numeric(pp["close"], errors="coerce")
+            for tk, group in pp.dropna(subset=["date", "close"]).groupby("ticker"):
+                prices_by_ticker[str(tk)] = group.sort_values("date")
+
+    min_date = pd.Timestamp(work["rebalance_date"].min()).normalize()
+    max_date = pd.Timestamp(work["rebalance_date"].max()).normalize()
+    fetch_start = (min_date - pd.Timedelta(days=10)).strftime("%Y%m%d")
+    fetch_end = (max_date + pd.DateOffset(months=horizon_months) + pd.Timedelta(days=10)).strftime("%Y%m%d")
+
+    filled = 0
+    groups = work.groupby("ticker").groups
+    total_tickers = len(groups)
+    for i, (tk, idxs) in enumerate(groups.items(), start=1):
+        if i == 1 or i % 100 == 0 or i == total_tickers:
+            log(f"[pipeline] forward labels ticker {i}/{total_tickers}")
+        hist = prices_by_ticker.get(str(tk))
+        if hist is None:
+            if not fetch_missing_prices:
+                continue
+            hist = fetch_ticker_history(str(tk), fetch_start, fetch_end, refresh_days=refresh_days)
+            if hist is None or hist.empty:
+                continue
+            hist = hist.copy()
+            if "close" not in hist.columns:
+                continue
+            hist["date"] = pd.to_datetime(hist["date"], errors="coerce").dt.normalize()
+            hist["close"] = pd.to_numeric(hist["close"], errors="coerce")
+            hist = hist.dropna(subset=["date", "close"]).sort_values("date")
+        if hist.empty:
+            continue
+        close = hist.drop_duplicates("date", keep="last").set_index("date")["close"].sort_index()
+        for idx in idxs:
+            rd = pd.Timestamp(out.at[idx, "rebalance_date"]).normalize()
+            entry_close = _last_close_at_or_before_series(close, rd)
+            if not np.isfinite(entry_close) or entry_close <= 0:
+                continue
+            horizon_end = rd + pd.DateOffset(months=horizon_months)
+            if horizon_end > label_as_of:
+                continue
+            future = close.loc[(close.index > rd) & (close.index <= horizon_end)]
+            if future.empty:
+                continue
+            out.at[idx, "forward_return_1m"] = float(future.iloc[-1] / entry_close - 1.0)
+            out.at[idx, "forward_min_return_1m"] = float(future.min() / entry_close - 1.0)
+            filled += 1
+    log(f"[pipeline] forward labels filled {filled}/{len(work)} missing rows")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -53,19 +154,103 @@ def build_scored_panel_v0(
     cfg = {**DEFAULT_CFG, **(cfg or {})}
     end_date = end_date or datetime.now().strftime("%Y-%m-%d")
 
-    cache_path = DATA_ROOT / "feature_store" / (
-        f"scored_panel_v0_{start_date}_{end_date}_{KR_ENGINE_REUSE_VERSION}.parquet"
-    )
+    cache_path = scored_panel_cache_path(start_date, end_date)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    if cfg.get("reuse_existing_artifacts", True) and cache_path.exists():
-        log(f"[pipeline] reuse cached scored panel {cache_path.name}")
-        return pd.read_parquet(cache_path)
-
     month_ends = fetch_month_end_business_days(
         pd.Timestamp(start_date).strftime("%Y%m%d"),
         pd.Timestamp(end_date).strftime("%Y%m%d"),
     )
-    log(f"[pipeline] build scored panel: {len(month_ends)} month-ends")
+    if cfg.get("reuse_existing_artifacts", True) and cache_path.exists():
+        cached_panel = pd.read_parquet(cache_path)
+        if not cfg.get("scored_panel_incremental_rebuild", True):
+            log(f"[pipeline] reuse cached scored panel {cache_path.name}")
+            return cached_panel
+        cached_dates: set[pd.Timestamp] = set()
+        if "rebalance_date" in cached_panel.columns and not cached_panel.empty:
+            cached_dates = {
+                pd.Timestamp(x).normalize()
+                for x in pd.to_datetime(cached_panel["rebalance_date"], errors="coerce").dropna().unique()
+            }
+        wanted_dates = {pd.Timestamp(x).normalize() for x in month_ends}
+        missing_exact = sorted(wanted_dates - cached_dates)
+        if not missing_exact:
+            log(f"[pipeline] reuse cached scored panel {cache_path.name}")
+            return cached_panel
+        log(
+            f"[pipeline] exact scored panel cache {cache_path.name} is missing "
+            f"{len(missing_exact)} month-ends; continuing incremental rebuild",
+            level="WARN",
+        )
+    prior_panel = pd.DataFrame()
+    prior_max_date: Optional[pd.Timestamp] = None
+    prior_dates: set[pd.Timestamp] = set()
+    if cfg.get("reuse_existing_artifacts", True) and cfg.get("scored_panel_incremental_rebuild", True):
+        prior_path = find_incremental_scored_panel_cache(
+            start_date,
+            end_date,
+            allow_prior_engine_versions=bool(cfg.get("scored_panel_allow_prior_engine_reuse", False)),
+        )
+        if prior_path is not None:
+            try:
+                prior_panel = pd.read_parquet(prior_path)
+                if "rebalance_date" in prior_panel.columns and not prior_panel.empty:
+                    prior_panel["rebalance_date"] = pd.to_datetime(
+                        prior_panel["rebalance_date"], errors="coerce"
+                    ).dt.normalize()
+                    target_start = pd.Timestamp(start_date).normalize()
+                    target_end = pd.Timestamp(end_date).normalize()
+                    prior_panel = prior_panel[
+                        (prior_panel["rebalance_date"] >= target_start)
+                        & (prior_panel["rebalance_date"] <= target_end)
+                    ].copy()
+                    prior_max_date = prior_panel["rebalance_date"].max()
+                    prior_dates = {
+                        pd.Timestamp(x).normalize()
+                        for x in prior_panel["rebalance_date"].dropna().unique()
+                    }
+                    log(
+                        f"[pipeline] incremental scored panel base {prior_path.name} "
+                        f"covering {len(prior_dates)} month-ends through {prior_max_date.strftime('%Y-%m-%d')}"
+                    )
+            except Exception as e:
+                prior_panel = pd.DataFrame()
+                prior_max_date = None
+                prior_dates = set()
+                log(f"[pipeline] incremental scored panel read fail {prior_path.name}: {e}", level="WARN")
+
+    if prior_dates:
+        build_month_ends = [
+            pd.Timestamp(me).normalize()
+            for me in month_ends
+            if pd.Timestamp(me).normalize() not in prior_dates
+        ]
+    else:
+        build_month_ends = [pd.Timestamp(me).normalize() for me in month_ends]
+    log(
+        f"[pipeline] build scored panel: {len(build_month_ends)}/{len(month_ends)} "
+        f"month-ends to compute"
+    )
+    max_new_months = int(cfg.get("scored_panel_incremental_max_new_months", 0) or 0)
+    if prior_max_date is not None and max_new_months > 0 and len(build_month_ends) > max_new_months:
+        original_count = len(build_month_ends)
+        fill_order = str(cfg.get("scored_panel_incremental_fill_order", "latest") or "latest").lower()
+        if fill_order == "earliest":
+            build_month_ends = build_month_ends[:max_new_months]
+        else:
+            fill_order = "latest"
+            build_month_ends = build_month_ends[-max_new_months:]
+        log(
+            f"[pipeline] incremental max_new_months={max_new_months}: compute "
+            f"{fill_order} {len(build_month_ends)} of {original_count} missing month-ends"
+        )
+
+    if not build_month_ends and not prior_panel.empty:
+        try:
+            prior_panel.to_parquet(cache_path, index=False)
+            log(f"[pipeline] materialized scored panel cache -> {cache_path}")
+        except Exception as e:
+            log(f"[pipeline] panel save fail: {e}", level="WARN")
+        return prior_panel
 
     # ----- P1: pre-build full fundamentals panel once (DART bulk fetch) -----
     fund_panel = pd.DataFrame()
@@ -73,7 +258,7 @@ def build_scored_panel_v0(
         # Sample tickers from a recent month to drive the corp_code fetch
         # (faster than per-month re-discovery)
         log("[pipeline] phase1 enabled -> pre-build DART fundamentals panel")
-        sample_snap = build_universe_snapshot(month_ends[-1], cfg=cfg)
+        sample_snap = build_universe_snapshot(build_month_ends[-1], cfg=cfg)
         if not sample_snap.empty:
             sample_tickers = sample_snap[sample_snap["eligible"]]["ticker"].astype(str).tolist()
             fund_start = int(cfg.get("dart_fund_start_year", 2014))
@@ -99,8 +284,8 @@ def build_scored_panel_v0(
                         log(f"[pipeline] fund_panel save fail: {e}", level="WARN")
 
     frames = []
-    for i, me in enumerate(month_ends, 1):
-        log(f"[pipeline] [{i}/{len(month_ends)}] {me.strftime('%Y-%m-%d')}")
+    for i, me in enumerate(build_month_ends, 1):
+        log(f"[pipeline] [{i}/{len(build_month_ends)}] {me.strftime('%Y-%m-%d')}")
         snap = build_universe_snapshot(me, cfg=cfg)
         if snap.empty:
             continue
@@ -111,15 +296,93 @@ def build_scored_panel_v0(
         feat = add_universe_features(eligible, me, fund_panel=fund_panel)
         frames.append(feat)
 
-    if not frames:
+    if not frames and prior_panel.empty:
         return pd.DataFrame()
-    panel = pd.concat(frames, ignore_index=True)
+    all_frames = []
+    if not prior_panel.empty:
+        all_frames.append(prior_panel)
+    all_frames.extend(frames)
+    panel = pd.concat(all_frames, ignore_index=True)
+    if {"rebalance_date", "ticker"}.issubset(panel.columns):
+        panel["rebalance_date"] = pd.to_datetime(panel["rebalance_date"], errors="coerce").dt.normalize()
+        panel["ticker"] = panel["ticker"].astype(str).str.zfill(6)
+        panel = panel.drop_duplicates(["rebalance_date", "ticker"], keep="last")
+        panel = panel.sort_values(["rebalance_date", "ticker"]).reset_index(drop=True)
+    if cfg.get("forward_label_enabled", True):
+        panel = add_forward_return_labels(panel, cfg=cfg)
     try:
         panel.to_parquet(cache_path, index=False)
         log(f"[pipeline] saved scored panel ({len(panel)} rows) -> {cache_path}")
     except Exception as e:
         log(f"[pipeline] panel save fail: {e}", level="WARN")
     return panel
+
+
+def scored_panel_cache_path(start_date: str, end_date: str) -> Path:
+    """Canonical scored_panel_v0 cache path for a date window."""
+    return DATA_ROOT / "feature_store" / (
+        f"scored_panel_v0_{start_date}_{end_date}_{KR_ENGINE_REUSE_VERSION}.parquet"
+    )
+
+
+def find_incremental_scored_panel_cache(
+    start_date: str,
+    end_date: str,
+    feature_store: Optional[Path] = None,
+    allow_prior_engine_versions: bool = False,
+) -> Optional[Path]:
+    """Find the best prior scored_panel cache that overlaps the target window.
+
+    Only panels whose filename end date is on or before the target end date are
+    eligible. This prevents a future-dated panel from leaking into a historical
+    rebuild while still allowing a weekly job to append only new month-ends.
+    The cache may start after the requested start date: the builder computes
+    missing leading months and reuses overlapping later rows.
+    """
+    root = Path(feature_store) if feature_store is not None else DATA_ROOT / "feature_store"
+    if not root.exists():
+        return None
+    target_end = pd.Timestamp(end_date).normalize()
+    target_start = pd.Timestamp(start_date).normalize()
+    pattern = "scored_panel_v0_*.parquet"
+    candidates: list[tuple[int, int, pd.Timestamp, float, Path]] = []
+    for path in root.glob(pattern):
+        name = path.name
+        prefix = "scored_panel_v0_"
+        suffix = ".parquet"
+        if not name.startswith(prefix) or not name.endswith(suffix):
+            continue
+        tail = name[len(prefix):-len(suffix)]
+        parts = tail.split("_", 2)
+        if len(parts) != 3:
+            continue
+        raw_start, raw_end, engine_version = parts
+        engine_match = engine_version == KR_ENGINE_REUSE_VERSION
+        if not engine_match and not allow_prior_engine_versions:
+            continue
+        try:
+            panel_start = pd.Timestamp(raw_start).normalize()
+            panel_end = pd.Timestamp(raw_end).normalize()
+        except Exception:
+            continue
+        if panel_end > target_end:
+            continue
+        overlap_start = max(panel_start, target_start)
+        overlap_end = min(panel_end, target_end)
+        if overlap_end < overlap_start:
+            continue
+        overlap_months = len(pd.period_range(overlap_start.to_period("M"), overlap_end.to_period("M"), freq="M"))
+        starts_at_or_before_target = 1 if panel_start <= target_start else 0
+        candidates.append((
+            overlap_months,
+            starts_at_or_before_target,
+            panel_end,
+            path.stat().st_mtime,
+            path,
+        ))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda x: (x[0], x[1], x[2], x[3]))[4]
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +625,7 @@ def run_p0_baseline(cfg: Optional[dict] = None) -> dict:
     n = int(cfg.get("portfolio_size", 30))
 
     log(f"[pipeline] === P0 baseline run ===")
-    log(f"[pipeline] window {start_date} → {end_date}, Top-{n}, cost={cfg.get('round_trip_cost'):.4f}")
+    log(f"[pipeline] window {start_date} -> {end_date}, Top-{n}, cost={cfg.get('round_trip_cost'):.4f}")
 
     t0 = time.time()
     panel = build_scored_panel_v0(start_date, end_date, cfg=cfg)
@@ -429,7 +692,7 @@ def run_verdict_only() -> dict:
     turnover = metrics.get("avg_turnover", 0.0)
 
     print("=" * 60)
-    print(f"P0 BASELINE VERDICT — engine {metrics.get('engine_version')}")
+    print(f"P0 BASELINE VERDICT - engine {metrics.get('engine_version')}")
     print("=" * 60)
     print(f"  Strategy CAGR : {cagr:7.2%}")
     print(f"  Benchmark CAGR: {bench:7.2%}  (KOSPI200)")
@@ -446,11 +709,11 @@ def run_verdict_only() -> dict:
     # Ship gate (P0 vs benchmark only — first baseline)
     p0_target_excess = 0.03   # +3pp vs benchmark
     if excess >= p0_target_excess:
-        verdict = "SHIP — proceed to P1 (DART fundamentals)"
+        verdict = "SHIP - proceed to P1 (DART fundamentals)"
     elif excess >= 0:
-        verdict = "PARTIAL — universe/cost OK, alpha weak. Tune before P1."
+        verdict = "PARTIAL - universe/cost OK, alpha weak. Tune before P1."
     else:
-        verdict = "REGRESS — strategy underperforms benchmark. Debug cost / filters / signals."
+        verdict = "REGRESS - strategy underperforms benchmark. Debug cost / filters / signals."
     print(f"  VERDICT: {verdict}")
     print("=" * 60)
     return {"metrics": metrics, "validation": validation, "verdict": verdict}

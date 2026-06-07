@@ -30,9 +30,34 @@ jobs:
       - name: Smoke test (full)
         run: python tests/smoke_test.py
 
+      - name: KR1000 data-store tests
+        run: python tests/test_kr1000_data_store.py
+
+      - name: KR1000 leader tests
+        run: python tests/test_kr1000_leader.py
+
+      - name: KR1000 validation gate tests
+        run: python tests/test_kr1000_validation_gate.py
+
+      - name: P_MB OOS quality tests
+        run: python tests/test_pmb_oos_quality.py
+
+      - name: P_MB realized rerank tests
+        run: python tests/test_pmb_realized_rerank.py
+
+      - name: P_MB broad realized rerank tests
+        run: python tests/test_pmb_broad_realized_rerank.py
+
+      - name: P_MB false-positive audit tests
+        run: python tests/test_pmb_false_positive_audit.py
+
       - name: PIT universe tests (Phase C1)
-        run: python tests/test_pit_universe.py
-        # Some tests soft-skip when no historical mcap cache present.
+        run: |
+          if [ -f data_pit/historical_mcap.parquet ] || ls cache_pykrx/mktcap_ALL_*.parquet >/dev/null 2>&1; then
+            python tests/test_pit_universe.py
+          else
+            echo "Skipping PIT universe tests: no historical_mcap or mktcap cache in CI checkout."
+          fi
 
       - name: Governance tests (Phase C2)
         run: python tests/test_governance.py

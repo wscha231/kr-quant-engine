@@ -1,0 +1,201 @@
+name: KR1000 Data Update and Validation
+
+on:
+  schedule:
+    - cron: '50 8 * * 1-5'   # weekdays 17:50 KST, after KRX close
+    - cron: '0 18 * * 6'     # Sunday 03:00 KST, weekly full rebuild
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'light=market/PIT/daily gate, full=rebuild scored panel + backtests, validation_only=no refresh'
+        type: choice
+        options:
+          - light
+          - full
+          - validation_only
+        default: light
+      as_of:
+        description: 'optional YYYY-MM-DD latest observable KRX close'
+        type: string
+        default: ''
+      component_ab:
+        description: 'run RS/flow/technical component A/B in full mode'
+        type: boolean
+        default: true
+      force_full_rebuild:
+        description: 'ignore scored-panel caches and rebuild the full window from scratch'
+        type: boolean
+        default: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 720
+    env:
+      DART_API_KEY: ${{ secrets.DART_API_KEY }}
+      BOK_ECOS_API_KEY: ${{ secrets.BOK_ECOS_API_KEY }}
+      KR_DATA_DIR: ${{ github.workspace }}/data
+      RCLONE_CFG_TEXT: ${{ secrets.RCLONE_CONFIG_GDRIVE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve run mode
+        id: mode
+        shell: bash
+        run: |
+          MODE="${{ inputs.mode || '' }}"
+          if [ -z "$MODE" ]; then
+            if [ "${{ github.event.schedule || '' }}" = "0 18 * * 6" ]; then
+              MODE="full"
+            else
+              MODE="light"
+            fi
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "component_ab=${{ inputs.component_ab || 'true' }}" >> "$GITHUB_OUTPUT"
+          echo "force_full_rebuild=${{ inputs.force_full_rebuild || 'false' }}" >> "$GITHUB_OUTPUT"
+          echo "as_of=${{ inputs.as_of || '' }}" >> "$GITHUB_OUTPUT"
+          echo "Resolved KR1000 validation mode: $MODE"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Setup rclone
+        if: ${{ env.RCLONE_CFG_TEXT != '' }}
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_CFG_TEXT" > ~/.config/rclone/rclone.conf
+          rclone --config ~/.config/rclone/rclone.conf listremotes
+
+      - name: Sync data from GDrive
+        if: ${{ env.RCLONE_CFG_TEXT != '' }}
+        shell: bash
+        run: |
+          mkdir -p data/cache_pykrx data/cache_dart data/cache_macro data/cache_misc data/feature_store data/models data/data_pit data/outputs data/state
+          rclone copy gdrive:kr_quant_engine/data_pit data/data_pit -P || true
+          rclone copy gdrive:kr_quant_engine/cache_misc data/cache_misc -P || true
+          rclone copy gdrive:kr_quant_engine/cache_macro data/cache_macro -P || true
+          rclone copy gdrive:kr_quant_engine/cache_dart data/cache_dart -P || true
+          rclone copy gdrive:kr_quant_engine/feature_store data/feature_store -P || true
+          rclone copy gdrive:kr_quant_engine/models data/models -P || true
+          rclone copy gdrive:kr_quant_engine/state data/state -P || true
+          if [ "${{ steps.mode.outputs.mode }}" = "full" ]; then
+            rclone copy gdrive:kr_quant_engine/cache_pykrx data/cache_pykrx -P || true
+          fi
+
+      - name: Smoke tests
+        run: |
+          python tests/smoke_test.py --quick
+          python tests/test_kr1000_data_store.py
+          python tests/test_kr1000_leader.py
+          python tests/test_kr1000_validation_gate.py
+
+      - name: Setup KR1000 data store
+        run: python tools/setup_kr1000_data_store.py
+
+      - name: Import broker holdings export if present
+        shell: bash
+        run: |
+          RAW=""
+          for f in \
+            data/state/current_holdings_raw.csv \
+            data/state/current_holdings_raw.tsv \
+            data/state/broker_holdings.csv \
+            data/state/broker_holdings.tsv \
+            data/state/holdings_export.csv \
+            data/state/holdings_export.tsv
+          do
+            if [ -f "$f" ]; then RAW="$f"; break; fi
+          done
+          if [ -n "$RAW" ]; then
+            ARGS="--input $RAW --out data/state/current_holdings.csv --account-id broker"
+            if [ -n "${{ steps.mode.outputs.as_of }}" ]; then
+              ARGS="$ARGS --as-of ${{ steps.mode.outputs.as_of }}"
+            fi
+            python tools/import_current_holdings.py $ARGS
+          elif [ -f data/state/current_holdings.csv ]; then
+            python tools/import_current_holdings.py --input data/state/current_holdings.csv --out data/state/current_holdings.csv --dry-run
+          else
+            echo "No current holdings file or raw broker export found in data/state."
+          fi
+
+      - name: Run KR1000 validation gate
+        id: gate
+        shell: bash
+        run: |
+          ARGS=""
+          if [ -n "${{ steps.mode.outputs.as_of }}" ]; then
+            ARGS="$ARGS --as-of ${{ steps.mode.outputs.as_of }}"
+          fi
+
+          case "${{ steps.mode.outputs.mode }}" in
+            light)
+              ARGS="$ARGS --refresh-data --skip-avg-value-refresh --build-latest-snapshot --skip-backtests"
+              ;;
+            full)
+              ARGS="$ARGS --refresh-data --rebuild-scored-panel --build-pmb-oos-picks"
+              if [ "${{ steps.mode.outputs.force_full_rebuild }}" = "true" ]; then
+                ARGS="$ARGS --full-rebuild"
+              fi
+              if [ "${{ steps.mode.outputs.component_ab }}" = "true" ]; then
+                ARGS="$ARGS --component-ab --strategy-ab"
+              fi
+              ;;
+            validation_only)
+              ;;
+            *)
+              echo "Unknown mode: ${{ steps.mode.outputs.mode }}"
+              exit 2
+              ;;
+          esac
+
+          set +e
+          python tools/run_kr1000_validation_gate.py $ARGS
+          rc=$?
+          echo "exitcode=$rc" >> "$GITHUB_OUTPUT"
+          if [ "${{ steps.mode.outputs.mode }}" = "light" ] && [ "$rc" = "2" ]; then
+            echo "::warning::KR1000 light gate is blocked; keeping workflow green so artifacts sync."
+            exit 0
+          fi
+          exit "$rc"
+
+      - name: Sync refreshed data and outputs back to GDrive
+        if: ${{ env.RCLONE_CFG_TEXT != '' && always() }}
+        shell: bash
+        run: |
+          rclone copy data/outputs gdrive:kr_quant_engine/outputs -P || true
+          rclone copy data/data_pit gdrive:kr_quant_engine/data_pit -P || true
+          rclone copy data/cache_misc gdrive:kr_quant_engine/cache_misc -P || true
+          rclone copy data/cache_macro gdrive:kr_quant_engine/cache_macro -P || true
+          rclone copy data/cache_dart gdrive:kr_quant_engine/cache_dart -P || true
+          rclone copy data/feature_store gdrive:kr_quant_engine/feature_store -P || true
+          rclone copy data/models gdrive:kr_quant_engine/models -P || true
+          rclone copy data/state gdrive:kr_quant_engine/state -P || true
+          if [ "${{ steps.mode.outputs.mode }}" = "full" ]; then
+            rclone copy data/cache_pykrx gdrive:kr_quant_engine/cache_pykrx -P || true
+          fi
+
+      - name: Upload validation artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kr1000-validation-${{ steps.mode.outputs.mode }}-${{ github.run_number }}
+          path: |
+            data/outputs/kr1000_latest_scored_snapshot_*.json
+            data/outputs/kr1000_validation_gate_*/**
+            data/outputs/kr1000_daily_broker_check_*.json
+            data/outputs/kr1000_daily_broker_check_*.md
+            data/outputs/kr1000_daily_broker_trade_plan_*.csv
+            data/outputs/kr1000_daily_data_refresh_*.json
+            data/outputs/current_holdings_import_audit.json
+            data/outputs/p_mb_oos_picks_purged_3sleeve*.csv
+            data/outputs/p_mb_oos_picks_purged_3sleeve*.json
+          retention-days: 180

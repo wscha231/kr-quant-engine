@@ -47,8 +47,40 @@ jobs:
           rclone copy gdrive:kr_quant_engine/feature_store data/feature_store -P || true
           rclone copy gdrive:kr_quant_engine/models data/models -P || true
 
+      - name: Setup KR1000 data store
+        run: python tools/setup_kr1000_data_store.py
+
+      - name: Enrich scored panel forward labels
+        run: |
+          python tools/enrich_scored_panel_forward_labels.py \
+            --out data/feature_store/scored_panel_v0_quarterly_forward_labels.parquet \
+            --audit-json data/outputs/scored_panel_forward_labels_quarterly.json
+
+      - name: Build purged P_MB OOS picks
+        run: |
+          python tools/build_pmb_oos_picks.py \
+            --panel data/feature_store/scored_panel_v0_quarterly_forward_labels.parquet \
+            --out data/outputs/p_mb_oos_picks_purged_3sleeve_latest.csv \
+            --coverage-json data/outputs/p_mb_oos_picks_purged_3sleeve_latest.coverage.json
+
       - name: Run quarterly backtest
-        run: python tools/run_quarterly_backtest.py --top-n 20 --weighting equal
+        run: python tools/run_quarterly_backtest.py --picks data/outputs/p_mb_oos_picks_purged_3sleeve_latest.csv --top-n 20 --weighting equal
+
+      - name: Run KR1000 validation diagnostic
+        run: |
+          set +e
+          python tools/run_kr1000_validation_gate.py \
+            --periods official_8y,full_2016,stress_2020_2022,stress_2023_current \
+            --profiles full \
+            --pmb-oos-picks data/outputs/p_mb_oos_picks_purged_3sleeve_latest.csv \
+            --skip-daily-check \
+            --allow-blocked-backtest
+          rc=$?
+          # Keep the legacy quarterly report available even if the KR1000
+          # diagnostic is blocked by stale feature_store or price coverage.
+          if [ "$rc" != "0" ]; then
+            echo "::warning::KR1000 validation diagnostic exited with status $rc"
+          fi
 
       - name: Sync outputs back to GDrive
         if: ${{ env.RCLONE_CFG_TEXT != '' }}
@@ -62,6 +94,9 @@ jobs:
           path: |
             data/outputs/quarterly_backtest_*.json
             data/outputs/quarterly_backtest_*_monthly.csv
+            data/outputs/p_mb_oos_picks_purged_3sleeve*.csv
+            data/outputs/p_mb_oos_picks_purged_3sleeve*.json
+            data/outputs/kr1000_validation_gate_*/**
           retention-days: 365
 
       - name: Slack notify

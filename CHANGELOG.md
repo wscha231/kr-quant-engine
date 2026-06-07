@@ -4,6 +4,2920 @@
 
 ---
 
+## 2026-06-07
+
+### 18:18 KST - kr1000-rank-risk-diagnostic
+
+**Scope**: Added a reusable rank-risk diagnostic to test overextension and
+continuation hypotheses before changing production scoring. The result argues
+against a simple overextension penalty and narrows the next model work toward
+volume-spike risk and rank-quality improvements inside the current top10
+signal.
+
+**What landed**:
+- Added `tools/analyze_kr1000_rank_risk.py`.
+- The tool reads a scored panel, filters top-ranked rows, compares high/low
+  feature bins against `forward_return_1m`, and writes CSV/JSON/Markdown
+  diagnostic artifacts.
+- Added regression coverage for feature-bin and condition-bin calculations.
+
+**Diagnostic result**:
+- Top10 diagnostic:
+  `outputs\kr1000_rank_risk_top10_2018_20260604`
+  -> rows `145`, months `39`, mean 1m forward return `2.59%`, median
+  `-0.69%`, loss rate `50.3%`.
+- Top20 diagnostic:
+  `outputs\kr1000_rank_risk_top20_2018_20260604`
+  -> rows `309`, months `40`, mean 1m forward return `1.91%`, median
+  `-0.84%`, loss rate `52.8%`.
+- High `ret_1m`, `rs_1m`, `ret_3m`, and `rs_3m` bins were better, not worse,
+  over the full window. Simple overextension penalties should not be promoted.
+- High `volume_zscore_50` and high `market_cap` bins were weak in the
+  diagnostic. The next useful scoring work should target volume-spike/reversal
+  risk and not remove strong continuation blindly.
+
+**symbols_added**:
+- tools.analyze_kr1000_rank_risk.parse_args
+- tools.analyze_kr1000_rank_risk.build_rank_risk_panel
+- tools.analyze_kr1000_rank_risk.summarize_feature_bins
+- tools.analyze_kr1000_rank_risk.summarize_conditions
+- tools.analyze_kr1000_rank_risk.summarize_rank_risk
+- tools.analyze_kr1000_rank_risk.write_report
+- tools.analyze_kr1000_rank_risk.main
+- tests.test_kr1000_data_repair_tools.test_rank_risk_diagnostic_feature_bins
+
+**symbols_changed**:
+- tests/test_kr1000_data_repair_tools.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\analyze_kr1000_rank_risk.py tests\test_kr1000_data_repair_tools.py` -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 19 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\analyze_kr1000_rank_risk.py --run-dir outputs\kr1000_bt_technical_value_mcap_cash_reason_default_2018_20260604 --top-n 10 --out-dir outputs\kr1000_rank_risk_top10_2018_20260604` -> completed.
+- `py -3 tools\analyze_kr1000_rank_risk.py --run-dir outputs\kr1000_bt_technical_value_mcap_cash_reason_default_2018_20260604 --top-n 20 --out-dir outputs\kr1000_rank_risk_top20_2018_20260604` -> completed.
+
+### 18:04 KST - kr1000-broker-cash-reason-and-sequencing-ab
+
+**Scope**: Made broker cash constraints more observable and added an explicit
+sell-before-buy same-day execution A/B switch. The production default remains
+unchanged because the sell-before-buy buying-power assumption worsened the
+official 8y CAGR/MDD frontier.
+
+**What landed**:
+- Added `NO_TRADE_INSUFFICIENT_CASH` for buy orders that pass min-notional but
+  cannot be filled from available cash.
+- Added `metrics["insufficient_cash_orders"]` and
+  `metrics["sell_before_buy_same_day"]` to broker-ledger backtest outputs.
+- Added `--sell-before-buy-same-day` to `tools/run_kr1000_backtest.py`.
+- Added validation-gate plumbing for strategy presets that choose to pass
+  `sell_before_buy_same_day`.
+- Added regression tests for explicit cash-blocked buy reason codes and
+  optional same-day sell-before-buy sequencing.
+
+**Diagnostic result**:
+- Default production-style cash ledger was unchanged:
+  `outputs\kr1000_bt_technical_value_mcap_cash_reason_default_2018_20260604`
+  -> CAGR `25.46%`, MDD `-21.90%`, excess `+6.89%`, Sharpe `1.259`,
+  IR `0.251`, insufficient-cash orders `127`.
+- Explicit `--sell-before-buy-same-day` A/B:
+  `outputs\kr1000_bt_technical_value_mcap_sell_first_rank_order_2018_20260604`
+  -> CAGR `21.60%`, MDD `-27.98%`, excess `+3.04%`, Sharpe `0.97`.
+- The 2026-05 underperformance was not solved by simply allowing sell proceeds
+  to fund same-day buys. It increased exposure to weak top-rank names and broke
+  the MDD gate.
+- Offline index-leader/mcap/RS score experiments and DD-ladder variants did not
+  beat the locked production challenger on the official CAGR/MDD gate.
+
+**symbols_added**:
+- kr1000_leader._order_execution_priority
+- tools.run_kr1000_backtest.parse_args[`--sell-before-buy-same-day`]
+- tests.test_kr1000_leader.test_event_backtester_sells_before_buys_on_same_fill_date
+- tests.test_kr1000_leader.test_event_backtester_labels_insufficient_cash_buys
+
+**symbols_changed**:
+- kr1000_leader.run_event_driven_backtest
+- tools.run_kr1000_backtest.main
+- tools.run_kr1000_validation_gate._extend_cmd_with_strategy_preset
+- tests/test_kr1000_leader.py
+
+**config_fields_added**:
+- sell_before_buy_same_day
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_backtest.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 18 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 14 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_value_mcap_regime --price-panel outputs\kr1000_bt_technical_value_mcap_regime_top15_g90_ladder_2018_20260604\leader_price_panel.parquet --top-holdings 10 --max-rank-for-prices 20 --buy-rank-threshold 10 --hold-rank-threshold 20 --single-stock-max-weight 0.10 --gross-exposure 1.00 --hard-stop-loss-pct 0.15 --out-dir outputs\kr1000_bt_technical_value_mcap_cash_reason_default_2018_20260604 --save-scored-panel` -> completed.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_value_mcap_regime --price-panel outputs\kr1000_bt_technical_value_mcap_regime_top15_g90_ladder_2018_20260604\leader_price_panel.parquet --top-holdings 10 --max-rank-for-prices 20 --buy-rank-threshold 10 --hold-rank-threshold 20 --single-stock-max-weight 0.10 --gross-exposure 1.00 --hard-stop-loss-pct 0.15 --sell-before-buy-same-day --out-dir outputs\kr1000_bt_technical_value_mcap_sell_first_rank_order_2018_20260604 --save-scored-panel` -> completed, failed MDD gate.
+
+### 16:57 KST - kr1000-broker-benchmark-sleeve-challenger
+
+**Scope**: Added an order/fill/cost-aware KOSPI200 proxy sleeve to the
+broker-ledger backtester as a production-challenger A/B path for high-cash
+months. The sleeve is disabled by default unless `--benchmark-sleeve` is
+passed, and the current production gate preset remains unchanged.
+
+**What landed**:
+- Added synthetic benchmark sleeve ticker `900200` inside
+  `run_event_driven_backtest()` using the already PIT-safe `benchmark_nav`
+  series.
+- Added daily idle-cash sleeve monitoring so hard-stop exits can be followed by
+  next-close benchmark proxy orders when cash is high and KOSPI200 trend is
+  strong.
+- Added CLI controls to `tools/run_kr1000_backtest.py`:
+  `--benchmark-sleeve`, `--benchmark-sleeve-fraction`,
+  `--benchmark-sleeve-cash-trigger`,
+  `--benchmark-sleeve-bench-ret-1m-min`,
+  `--benchmark-sleeve-bench-ret-3m-min`, and
+  `--benchmark-sleeve-max-weight`.
+- Added validation A/B preset
+  `kr1000_technical_value_mcap_benchmark_sleeve`.
+- Kept `PRODUCTION_GATE_STRATEGY_PRESET` on
+  `kr1000_technical_value_mcap_mdd_gate`.
+
+**Backtest result**:
+- Baseline locked challenger:
+  CAGR `25.46%`, MDD `-21.90%`, KOSPI200 CAGR `18.57%`, excess `+6.89%`,
+  Sharpe `1.259`, IR `0.251`.
+- Naive large sleeve (`fraction=0.75`, `cash_trigger=0.80`,
+  `1m>=3%`, `3m>=0%`, `max=75%`) failed:
+  CAGR `19.49%`, MDD `-26.97%`.
+- Conservative default sleeve (`fraction=0.35`, `cash_trigger=0.95`,
+  `1m>=5%`, `3m>=10%`, `max=35%`) improved the locked challenger but still
+  does not pass the official gate:
+  CAGR `25.86%`, MDD `-19.65%`, KOSPI200 CAGR `18.57%`, excess `+7.29%`,
+  Sharpe `1.28`, IR `0.267`, sleeve trades `6`.
+
+**symbols_added**:
+- kr1000_leader.BENCHMARK_SLEEVE_TICKER
+- kr1000_leader.BENCHMARK_SLEEVE_NAME
+- kr1000_leader._normalise_single_ticker
+- kr1000_leader._augment_price_panel_with_benchmark_sleeve
+- kr1000_leader._benchmark_nav_trailing_return
+- kr1000_leader._benchmark_sleeve_target_weight
+- kr1000_leader._append_benchmark_sleeve_rebalance_order
+- tools.run_kr1000_backtest.parse_args[`--benchmark-sleeve`]
+- tools.run_kr1000_backtest.parse_args[`--benchmark-sleeve-fraction`]
+- tools.run_kr1000_backtest.parse_args[`--benchmark-sleeve-cash-trigger`]
+- tools.run_kr1000_backtest.parse_args[`--benchmark-sleeve-bench-ret-1m-min`]
+- tools.run_kr1000_backtest.parse_args[`--benchmark-sleeve-bench-ret-3m-min`]
+- tools.run_kr1000_backtest.parse_args[`--benchmark-sleeve-max-weight`]
+- tests.test_kr1000_leader.test_event_backtester_benchmark_sleeve_uses_idle_cash
+
+**symbols_changed**:
+- kr1000_leader.run_event_driven_backtest
+- tools.run_kr1000_backtest.main
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS
+- tools.run_kr1000_validation_gate._extend_cmd_with_strategy_preset
+- tests.test_kr1000_validation_gate.test_planned_component_ab_jobs
+
+**config_fields_added**:
+- benchmark_sleeve_enabled
+- benchmark_sleeve_ticker
+- benchmark_sleeve_fraction
+- benchmark_sleeve_cash_trigger
+- benchmark_sleeve_bench_ret_1m_min
+- benchmark_sleeve_bench_ret_3m_min
+- benchmark_sleeve_max_weight
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_backtest.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 16 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 14 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_value_mcap_regime --price-panel outputs\kr1000_bt_technical_value_mcap_regime_top15_g90_ladder_2018_20260604\leader_price_panel.parquet --top-holdings 10 --max-rank-for-prices 20 --buy-rank-threshold 10 --hold-rank-threshold 20 --single-stock-max-weight 0.10 --gross-exposure 1.00 --hard-stop-loss-pct 0.15 --benchmark-sleeve --out-dir outputs\kr1000_bt_technical_value_mcap_benchmark_sleeve_default_2018_20260604 --save-scored-panel` -> completed, CAGR `25.86%`, MDD `-19.65%`.
+
+### 16:31 KST - kr1000-benchmark-audit-and-loss-month-diagnostic
+
+**Scope**: Added fast benchmark-index cache sanity checks, expanded weekly
+overlay A/B, and added a production-challenger loss-month diagnostic to target
+the remaining CAGR/IR gap with evidence instead of more score-weight guessing.
+
+**What landed**:
+- Added `--index-cache-only` and `--skip-source-panels` modes to
+  `tools/audit_data_integrity.py` for faster benchmark/data gate checks.
+- Added KOSPI/KOSPI200 index cache sanity auditing with bounded cache reads.
+- Added `--overlay-mode technical_value` to
+  `tools/build_kr1000_weekly_price_overlay.py`.
+- Added `tools/analyze_kr1000_challenger_loss_months.py` to compare monthly
+  challenger returns against KOSPI200 with cash weight, holdings, trades, and
+  reason-code context.
+- Added regression coverage for benchmark index sanity and loss-month active
+  return diagnostics.
+
+**Diagnostic result**:
+- KOSPI/KOSPI200 index cache spike looked suspicious at first, but external
+  provider spot checks through FDR/Yahoo and KODEX200 `069500.KS` matched the
+  same 2025-2026 move. The benchmark cache was treated as usable, and the audit
+  now blocks only extreme broad-index anomalies.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04 --index-cache-only --out-dir outputs\kr1000_index_cache_audit_20260604_v2`
+  completed with Critical `0`, High `0`, Medium `0`.
+- 2018-current weekly overlay, `rs_technical`, top 250 liquidity names:
+  CAGR `16.87%`, MDD `-26.01%`, excess CAGR `-1.83%`; this fails the official
+  gate and is worse than the locked production challenger.
+- 2018-current weekly overlay, `technical_value`, top 250 liquidity names:
+  CAGR `7.67%`, MDD `-31.44%`, excess CAGR `-11.03%`; do not scale this mode
+  before redesigning the weekly feature store.
+- Official top10/cap10 challenger loss-month diagnostic:
+  `102` months, `52` underperform months, mean monthly active return `0.39%`,
+  median `-0.04%`, worst active month `-19.66%`.
+- The worst underperformance cluster is not only bad stock selection. Several
+  large misses happened with near-100% cash while KOSPI200 rallied, so the next
+  credible improvement path is a tradable benchmark/large-cap sleeve or a
+  better risk-on re-entry gate, not another simple weekly RS overlay.
+
+**symbols_added**:
+- tools.audit_data_integrity._audit_index_cache_sanity
+- tools.audit_data_integrity.build_index_cache_audit
+- tools.audit_data_integrity.parse_args[`--index-cache-only`]
+- tools.audit_data_integrity.parse_args[`--skip-source-panels`]
+- tools.analyze_kr1000_challenger_loss_months.parse_args
+- tools.analyze_kr1000_challenger_loss_months.build_monthly_loss_panel
+- tools.analyze_kr1000_challenger_loss_months.summarize_loss_panel
+- tools.analyze_kr1000_challenger_loss_months.write_report
+- tools.analyze_kr1000_challenger_loss_months.main
+- tests.test_kr1000_data_repair_tools.test_index_cache_sanity_flags_implausible_benchmark_jump
+- tests.test_kr1000_data_repair_tools.test_challenger_loss_month_diagnostic_active_returns
+
+**symbols_changed**:
+- tools.audit_data_integrity.write_markdown
+- tools.audit_data_integrity.build_audit
+- tools.build_kr1000_weekly_price_overlay.parse_args
+- tools.build_kr1000_weekly_price_overlay.apply_weekly_overlay_score
+- tests/test_kr1000_data_repair_tools.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\analyze_kr1000_challenger_loss_months.py tools\build_kr1000_weekly_price_overlay.py tools\audit_data_integrity.py tests\test_kr1000_data_repair_tools.py` -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 18 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04 --index-cache-only --out-dir outputs\kr1000_index_cache_audit_20260604_v2` -> Critical `0`.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2018-01-01 --end 2026-06-04 --max-tickers 250 --run-backtest --out-dir outputs\kr1000_weekly_overlay_2018_250_v1` -> completed, research-only, CAGR `16.87%`, MDD `-26.01%`.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2018-01-01 --end 2026-06-04 --max-tickers 250 --overlay-mode technical_value --run-backtest --out-dir outputs\kr1000_weekly_overlay_2018_250_technical_value_v1` -> completed, research-only, CAGR `7.67%`, MDD `-31.44%`.
+- `py -3 tools\analyze_kr1000_challenger_loss_months.py --out-dir outputs\kr1000_challenger_loss_months_2018_20260604 --worst-count 20` -> completed.
+
+### 15:36 KST - kr1000-weekly-price-overlay-research
+
+**Scope**: Added a KR1000-wide weekly trailing price/RS/technical overlay
+research tool so the next signal-quality pass can test fresher price signals
+without waiting for a full daily feature-store rebuild.
+
+**What landed**:
+- Added `tools/build_kr1000_weekly_price_overlay.py`.
+- The tool carries the latest prior monthly PIT scored-panel row into weekly
+  signal dates, then refreshes trailing cached price, RS, technical, volatility,
+  and liquidity features from ticker history caches.
+- Added cache-loading controls for research scaling:
+  `--max-tickers`, `--max-dates`, and `--max-cache-files-per-ticker`.
+- Optional `--run-backtest` routes the overlay through the existing
+  broker-ledger engine, but the output is marked `research_only=true`,
+  `official_broker_ledger_metric=false`, and
+  `valid_for_production_metric=false`.
+- Added regression coverage proving the weekly overlay builds carried PIT rows
+  and dynamic scores.
+
+**Diagnostic result**:
+- Limited 2025 smoke, `80` tickers / `8` signal dates:
+  `outputs\kr1000_weekly_overlay_smoke_2025_80x8_v2`, loaded `77/80`
+  tickers, CAGR `32.17%`, MDD `-4.10%`, excess CAGR `-149.41%`.
+- Tiny 2026 smoke, `20` tickers / `4` signal dates:
+  `outputs\kr1000_weekly_overlay_smoke_2026_20x4`, loaded `19/20`
+  tickers, CAGR `34.39%`, MDD `-0.88%`, excess CAGR `-529.75%`.
+- These short-window research runs prove the harness works; they do not prove
+  official target completion. The locked official challenger remains CAGR
+  `25.46%`, MDD `-21.90%`, excess CAGR `+6.89%`.
+
+**symbols_added**:
+- tools.build_kr1000_weekly_price_overlay.parse_args
+- tools.build_kr1000_weekly_price_overlay.latest_scored_panel_path
+- tools.build_kr1000_weekly_price_overlay.load_cached_price_panel
+- tools.build_kr1000_weekly_price_overlay.add_trailing_price_features
+- tools.build_kr1000_weekly_price_overlay.build_weekly_overlay_panel
+- tools.build_kr1000_weekly_price_overlay.apply_weekly_overlay_score
+- tools.build_kr1000_weekly_price_overlay.main
+- tests.test_kr1000_data_repair_tools.test_weekly_price_overlay_builds_dynamic_scores
+
+**symbols_changed**:
+- tests/test_kr1000_data_repair_tools.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\build_kr1000_weekly_price_overlay.py tests\test_kr1000_data_repair_tools.py` -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 16 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 16 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 14 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2025-01-01 --end 2026-06-04 --max-dates 8 --max-tickers 80 --run-backtest --out-dir outputs\kr1000_weekly_overlay_smoke_2025_80x8_v2` -> completed, research-only.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2026-01-01 --end 2026-06-04 --max-dates 4 --max-tickers 20 --run-backtest --out-dir outputs\kr1000_weekly_overlay_smoke_2026_20x4` -> completed, research-only.
+- `py -3 tools\build_kr1000_weekly_price_overlay.py --scored-panel "G:\내 드라이브\kr_quant_engine\feature_store\scored_panel_v0_2018-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet" --start 2026-05-01 --end 2026-06-04 --max-dates 1 --max-tickers 5 --run-backtest --out-dir outputs\kr1000_weekly_overlay_smoke_2026_5x1_flags` -> completed, metrics carry research-only flags.
+
+### 15:07 KST - kr1000-cash-benchmark-sleeve-diagnostic
+
+**Scope**: Added a cost-aware KOSPI200 proxy sleeve diagnostic and made the
+daily broker check faster to validate locally without weakening production
+defaults.
+
+**What landed**:
+- Added `tools/analyze_kr1000_cash_benchmark_sleeve.py` to test whether idle
+  broker cash should be allocated to a KOSPI200 proxy sleeve.
+- The sleeve diagnostic includes a 21-trading-day benchmark guard, one-way
+  rebalance cost, average sleeve exposure, and explicit
+  `official_broker_ledger_metric=false` metadata.
+- Added `--skip-data-audit` to `tools/run_kr1000_daily_broker_check.py` for
+  local dry-runs. Production default still runs `build_audit()`.
+- Added regression coverage for the sleeve diagnostic.
+
+**Diagnostic result**:
+- Cost-aware sleeve grid:
+  `outputs\kr1000_cash_benchmark_sleeve_diag_2018_20260604\cash_benchmark_sleeve_grid.csv`.
+- The selected 75% idle-cash sleeve with 21d guard `-3%` and `5bp` one-way
+  cost produced CAGR `26.81%`, MDD `-33.38%`, IR `0.378`; it fails the MDD
+  gate and is diagnostic-only.
+- The best MDD-safe cash-sleeve grid rows were only around CAGR `26.3%`, still
+  below the official `30%` gate and the `35%` stretch objective.
+- Weekly price-overlay research also underperformed: the best saved row in
+  `outputs\kr1000_weekly_price_overlay_research\weekly_overlay_results.csv`
+  was about CAGR `16.04%` with MDD `-37.38%`. Do not pursue the simple weekly
+  price-only overlay path without a stronger universe-wide daily feature build.
+
+**symbols_added**:
+- tools.analyze_kr1000_cash_benchmark_sleeve.parse_args
+- tools.analyze_kr1000_cash_benchmark_sleeve.simulate_cash_benchmark_sleeve
+- tools.analyze_kr1000_cash_benchmark_sleeve.main
+- tests.test_kr1000_data_repair_tools.test_cash_benchmark_sleeve_diagnostic_metrics
+- tools.run_kr1000_daily_broker_check.parse_args[`--skip-data-audit`]
+
+**symbols_changed**:
+- tools.run_kr1000_daily_broker_check.main
+- tests/test_kr1000_data_repair_tools.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\analyze_kr1000_cash_benchmark_sleeve.py tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py` -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 15 passed, 0 failed.
+- `py -3 tools\analyze_kr1000_cash_benchmark_sleeve.py --daily-nav outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604\leader_backtest_daily_nav.csv --out-dir outputs\kr1000_cash_benchmark_sleeve_diag_2018_20260604 --selected-fraction 0.75 --selected-guard -0.03 --selected-cost-bp 5` -> selected CAGR `26.81%`, MDD `-33.38%`.
+- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04 --scored-panel outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604\leader_scored_panel.parquet --allow-empty-holdings --skip-data-audit --out-dir outputs\kr1000_daily_check_skip_audit_test` -> completed, selected signal `2026-05-29`, visible latest `2026-06-04`.
+
+### 14:46 KST - kr1000-daily-actionable-signal-guard
+
+**Scope**: Hardened the daily broker-readiness path so a fast liquidity-only
+latest snapshot cannot drive live current-holdings actions.
+
+**What landed**:
+- Added explicit non-actionable snapshot detection for
+  `snapshot_build_mode=latest_fast_liquidity_only`.
+- Changed `tools/run_kr1000_daily_broker_check.py` to select the newest
+  actionable signal snapshot visible as of the evaluation close, while
+  recording the visible latest date and skipped snapshot reasons.
+- Added a regression test proving a 2026-06-04 liquidity-only snapshot falls
+  back to the 2026-05-29 full-feature signal instead of generating actions from
+  incomplete features.
+
+**Diagnostic result**:
+- `bench_ret_3m > 0 or bench_ret_1m > 0` recovery-filter A/B improved fast
+  ledger CAGR to roughly `25.68%`, but MDD worsened to `-25.38%`. Gross/stop/DD
+  ladder variants reduced CAGR before restoring the MDD gate, so this recovery
+  filter was not promoted.
+- The active production challenger remains the top10/cap10/no-ladder value
+  preset from the 14:13 KST entry: CAGR `25.46%`, MDD `-21.90%`, excess
+  `+6.89%`. The active goal is still incomplete.
+
+**symbols_added**:
+- tools.run_kr1000_daily_broker_check.NON_ACTIONABLE_SNAPSHOT_MODES
+- tools.run_kr1000_daily_broker_check.non_actionable_snapshot_reasons
+- tools.run_kr1000_daily_broker_check.select_actionable_signal_snapshot
+- tests.test_kr1000_data_repair_tools.test_daily_broker_check_skips_non_actionable_latest_snapshot
+
+**symbols_changed**:
+- tools.run_kr1000_daily_broker_check.render_report
+- tools.run_kr1000_daily_broker_check.main
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py` -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 14 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- Actual scored-panel selector check against
+  `outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604\leader_scored_panel.parquet`
+  selected signal `2026-05-29`, visible latest `2026-06-04`, skipped
+  `latest_fast_liquidity_only`.
+
+### 14:13 KST - kr1000-value-top10-cap10-challenger
+
+**Scope**: Re-locked the KR1000 production challenger to the best currently
+verified broker-ledger runner result: technical/value score, top10, cap10%,
+gross `1.00`, no portfolio DD ladder.
+
+**What landed**:
+- Added `--single-stock-max-weight` to `tools/run_kr1000_backtest.py` so
+  broker backtests can reproduce concentrated cap sensitivities through the
+  official runner instead of ad-hoc scored-panel edits.
+- Added diagnostic score profile `kr1000_technical_value06_mcap_regime`; it is
+  retained for A/B research but is not the locked production challenger.
+- Updated `KR1000_STRATEGY_AB_PRESETS["kr1000_technical_value_mcap_mdd_gate"]`
+  to use `kr1000_technical_value_mcap_regime` with top10, buy `<=10`, hold
+  `<=20`, `single_stock_max_weight=0.10`, gross `1.00`, hard stop `15%`, and
+  no portfolio drawdown ladder.
+- Kept `PRODUCTION_GATE_STRATEGY_PRESET` pointed at
+  `kr1000_technical_value_mcap_mdd_gate`.
+
+**Diagnostic result**:
+- Official runner result:
+  `outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604`.
+- Result: CAGR `25.46%`, KOSPI200 CAGR `18.57%`, excess CAGR `+6.89%`,
+  MDD `-21.90%`, Sharpe `1.259`, IR `0.251`, trades `583`, years `8.34`.
+- This improves the prior locked top12 value preset (`21.86%` CAGR,
+  `-22.94%` MDD, `+3.30%` excess, IR `0.093`) but still fails CAGR `>=30%`
+  and IR `>0.5`. Do not call the active goal complete.
+
+**symbols_added**:
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES[`kr1000_technical_value06_mcap_regime`]
+- tools.run_kr1000_backtest.parse_args[`--single-stock-max-weight`]
+
+**symbols_changed**:
+- kr1000_leader.KR1000_AB_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
+- tools.run_kr1000_backtest.main
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS
+- tools.run_kr1000_validation_gate._extend_cmd_with_strategy_preset
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- The validation gate's locked production challenger now uses top10/cap10/no
+  ladder. The prior top12/gross0.90/DD-ladder result remains historical
+  evidence, not the active production preset.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_backtest.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 14 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 16 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_value_top10_cap10_production` -> planned `29` broker backtests and emitted top10/cap10/no-ladder production command.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_value_mcap_regime --price-panel outputs\kr1000_bt_technical_value_mcap_regime_top15_g90_ladder_2018_20260604\leader_price_panel.parquet --top-holdings 10 --max-rank-for-prices 20 --buy-rank-threshold 10 --hold-rank-threshold 20 --single-stock-max-weight 0.10 --gross-exposure 1.00 --hard-stop-loss-pct 0.15 --out-dir outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604 --save-scored-panel` -> CAGR `25.46%`, MDD `-21.90%`, excess `+6.89%`.
+
+### 13:03 KST - kr1000-technical-value-production-challenger
+
+**Scope**: Promoted the new KR1000 technical+valuation concentration profile
+as the locked production challenger while keeping the official gate at CAGR
+`>=30%`, MDD `>=-25%`, KOSPI200 excess `>0`, Sharpe `>1.0`, and IR `>0.5`.
+
+**What landed**:
+- Added `kr1000_technical_rs3_mcap_regime` and
+  `kr1000_technical_value_mcap_regime` score profiles.
+- Added `KR1000_STRATEGY_AB_PRESETS["kr1000_technical_value_mcap_mdd_gate"]`
+  with top12, buy `<=12`, hold `<=24`, gross `0.90`, hard stop `15%`, and
+  portfolio DD ladder `-0.10,-0.18,-0.24 -> 0.95,0.75,0.50`.
+- Changed `PRODUCTION_GATE_STRATEGY_PRESET` from
+  `kr1000_technical_mcap_mdd_gate` to
+  `kr1000_technical_value_mcap_mdd_gate`.
+- Narrowed P_MB OOS coverage enforcement to P_MB score profiles only; a
+  non-PMB production challenger no longer depends on a P_MB OOS artifact.
+- Strategy A/B dry-run commands now expand `--max-rank-for-prices` to at least
+  the preset `hold_rank_threshold`, preventing a broker run from missing rank
+  21-24 hold-band prices when the CLI default remains `20`.
+
+**Diagnostic result**:
+- Official-condition broker-ledger next-close run:
+  `outputs\kr1000_bt_technical_value_mcap_regime_top12_g90_ladder_official_2018_20260604`.
+- Result: CAGR `21.86%`, KOSPI200 CAGR `18.57%`, excess CAGR `+3.30%`,
+  MDD `-22.94%`, Sharpe `1.190`, IR `0.093`, trades `748`, years `8.34`.
+- This is the first current 8y challenger that clears MDD, KOSPI200 excess, and
+  Sharpe together, but it still fails the official CAGR `>=30%` and IR `>0.5`
+  gates. Do not call the active goal complete.
+
+**symbols_added**:
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES[`kr1000_technical_rs3_mcap_regime`]
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES[`kr1000_technical_value_mcap_regime`]
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS[`kr1000_technical_value_mcap_mdd_gate`]
+- tests/test_kr1000_validation_gate.py::test_non_pmb_production_does_not_require_pmb_oos_coverage
+
+**symbols_changed**:
+- kr1000_leader.KR1000_AB_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS
+- tools.run_kr1000_validation_gate.PRODUCTION_GATE_STRATEGY_PRESET
+- tools.run_kr1000_validation_gate._job_requires_pmb_oos
+- tools.run_kr1000_validation_gate._planned_backtests
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Validation-gate production pass/fail now tracks
+  `kr1000_technical_value_mcap_mdd_gate`, not
+  `kr1000_technical_mcap_mdd_gate`.
+- Non-PMB production strategy jobs no longer require the P_MB OOS coverage
+  check. P_MB score profiles still require PIT-safe OOS coverage.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 14 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 16 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`, High `0`, Medium `0`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_technical_value_production_v2` -> planned `28` broker backtests and emitted the value production command with `--max-rank-for-prices 24`.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_value_mcap_regime --top-holdings 12 --max-rank-for-prices 24 --buy-rank-threshold 12 --hold-rank-threshold 24 --gross-exposure 0.90 --hard-stop-loss-pct 0.15 --portfolio-dd-ladder --portfolio-dd-thresholds -0.10,-0.18,-0.24 --portfolio-dd-scales 0.95,0.75,0.50 --out-dir outputs\kr1000_bt_technical_value_mcap_regime_top12_g90_ladder_official_2018_20260604 --save-scored-panel` -> CAGR `21.86%`, MDD `-22.94%`, excess `+3.30%`.
+
+### 12:26 KST - kr1000-technical-mcap-g90-production-preset
+
+**Scope**: Promoted the best current MDD-safe KR1000 technical/mcap ladder
+variant into the validation gate's locked production challenger preset.
+
+**What landed**:
+- Tuned `KR1000_STRATEGY_AB_PRESETS["kr1000_technical_mcap_mdd_gate"]` from
+  gross `1.00` with ladder `-0.08,-0.15,-0.25 -> 0.85,0.65,0.40` to gross
+  `0.90` with ladder `-0.10,-0.18,-0.24 -> 0.95,0.75,0.50`.
+- Changed `PRODUCTION_GATE_STRATEGY_PRESET` from `pmb_defensive_mdd_gate` to
+  `kr1000_technical_mcap_mdd_gate`.
+- Added a regression test that locks the production gate to the current best
+  technical/mcap preset.
+
+**Diagnostic result**:
+- Reproduced broker-ledger next-close run:
+  `outputs\kr1000_bt_technical_mcap_regime_top15_g90_ladder_best_2018_20260604`.
+- Result: CAGR `17.60%`, KOSPI200 CAGR `18.57%`, excess CAGR `-0.97%`,
+  MDD `-23.45%`, Sharpe `1.055`, IR `-0.111`, trades `984`.
+- Prior locked technical/mcap preset: CAGR `16.44%`, MDD `-24.17%`, excess
+  `-2.12%`, Sharpe `1.007`.
+- Interpretation: this is a real improvement in CAGR, MDD, Sharpe, and excess
+  gap, but it still fails the official CAGR `>=30%`, KOSPI200 excess `>0`, and
+  IR `>0.5` gates.
+
+**symbols_added**:
+- tests/test_kr1000_validation_gate.py::test_production_gate_tracks_technical_mcap_preset
+
+**symbols_changed**:
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS
+- tools.run_kr1000_validation_gate.PRODUCTION_GATE_STRATEGY_PRESET
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- The validation gate's production pass/fail now tracks
+  `kr1000_technical_mcap_mdd_gate`, not `pmb_defensive_mdd_gate`. P_MB profiles
+  still require the PIT-safe OOS coverage gate when they are run.
+
+**Validation**:
+- `py -3 -m py_compile tools\run_kr1000_validation_gate.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 13 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_technical_mcap_g90_production` -> planned `25` broker backtests and emitted the tuned production command.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_mcap_regime --price-panel outputs\kr1000_bt_sparse_bench_pos_mcap_liq_technical_top20_2018_20260604\leader_price_panel.parquet --top-holdings 15 --max-rank-for-prices 40 --buy-rank-threshold 15 --hold-rank-threshold 30 --gross-exposure 0.90 --portfolio-dd-ladder --portfolio-dd-thresholds -0.10,-0.18,-0.24 --portfolio-dd-scales 0.95,0.75,0.50 --out-dir outputs\kr1000_bt_technical_mcap_regime_top15_g90_ladder_best_2018_20260604 --save-scored-panel` -> CAGR `17.60%`, MDD `-23.45%`.
+
+### 12:05 KST - pmb-oos-default-path-hardening
+
+**Scope**: Hardened the official P_MB OOS input defaults so official
+broker-ledger runs cannot silently fall back to the legacy research picks CSV.
+
+**What landed**:
+- Changed `tools.run_kr1000_backtest._default_pmb_oos_picks_path()` to
+  `DATA_ROOT/outputs/p_mb_oos_picks_purged_3sleeve_latest.csv`.
+- Changed `tools.run_kr1000_validation_gate._default_pmb_oos_picks_path()` to
+  the same purged 3-sleeve latest artifact.
+- Updated the `--pmb-oos-picks` help text to remove the legacy
+  `research/06_walkforward_baselines/p_mb_v1_oos_picks.csv` default.
+- When `--build-pmb-oos-picks` is combined with
+  `--require-pmb-oos-coverage`, the validation gate now passes
+  `--fail-on-coverage-gap` to `tools/build_pmb_oos_picks.py`.
+
+**symbols_added**: none.
+
+**symbols_changed**:
+- tools.run_kr1000_backtest._default_pmb_oos_picks_path
+- tools.run_kr1000_validation_gate._default_pmb_oos_picks_path
+- tools.run_kr1000_validation_gate.main
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Official P_MB defaults no longer use
+  `research/06_walkforward_baselines/p_mb_v1_oos_picks.csv`. If the purged
+  latest OOS artifact is missing, official P_MB coverage must fail instead of
+  producing a legacy-backed metric.
+
+**Validation**:
+- `py -3 -m py_compile tools\run_kr1000_backtest.py tools\run_kr1000_validation_gate.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 12 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 16 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --require-pmb-oos-coverage --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_pmb_oos_default_hardened` -> planned `25` broker backtests.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`, High `0`, Medium `0`.
+
+### 11:20 KST - kr1000-technical-mcap-regime-profile
+
+**Scope**: Added a non-P_MB KR1000 technical/mcap/liquidity regime challenger.
+The prior P_MB profiles controlled drawdown but were capped near `10%` CAGR.
+This pass tested KR1000-wide sparse leader sleeves and promoted the best
+MDD-safe candidate into a real score profile.
+
+**What landed**:
+- Added `kr1000_technical_mcap_regime` to the official KR1000 score profile
+  registry and component A/B set.
+- The profile is eligible only when:
+  - KOSPI200 3-month return is positive,
+  - `technical_score > 0`,
+  - `market_cap` is at or above the monthly KR1000 60th percentile, and
+  - `avg_trading_value_60d` is at or above the monthly KR1000 60th percentile.
+- Added `kr1000_technical_mcap_mdd_gate` strategy A/B preset with the tested
+  portfolio drawdown ladder:
+  thresholds `-0.06,-0.12,-0.20`, scales `0.85,0.65,0.35`.
+
+**Diagnostic result**:
+- Official-window top15 with tuned drawdown ladder:
+  `outputs\kr1000_bt_technical_mcap_regime_top15_ladder_2018_20260604`.
+- Result: CAGR `16.44%`, KOSPI200 CAGR `18.57%`, excess CAGR `-2.12%`,
+  MDD `-24.17%`, Sharpe `1.007`, trades `975`.
+- Top20 with the original drawdown ladder:
+  `outputs\kr1000_bt_technical_mcap_regime_top20_ladder_2018_20260604`.
+- Result: CAGR `13.66%`, KOSPI200 CAGR `18.57%`, excess CAGR `-4.90%`,
+  MDD `-22.04%`, Sharpe `0.918`, IR `-0.320`, trades `1,275`.
+- Top15 without the ladder produced higher CAGR `16.79%` and MDD `-24.36%`
+  but Sharpe was weaker at `0.98`, so the strategy preset keeps the laddered
+  top15 configuration.
+- Interpretation: this is now the best current MDD-safe broker-ledger
+  challenger, improving the previous P_MB best CAGR `9.94%` / MDD `-19.27%`
+  and the initial top20 technical/mcap profile. It still fails the official
+  CAGR, KOSPI200 excess, and IR gates.
+
+**symbols_added**:
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES value
+  `kr1000_technical_mcap_regime`
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS value
+  `kr1000_technical_mcap_mdd_gate`
+
+**symbols_changed**:
+- kr1000_leader.apply_kr1000_score_profile
+- kr1000_leader.KR1000_AB_SCORE_PROFILES
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_technical_mcap_profile` -> planned `25` broker backtests.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_mcap_regime --price-panel outputs\kr1000_bt_sparse_bench_pos_mcap_liq_technical_top20_2018_20260604\leader_price_panel.parquet --top-holdings 20 --max-rank-for-prices 40 --buy-rank-threshold 20 --hold-rank-threshold 40 --portfolio-dd-ladder --portfolio-dd-thresholds -0.06,-0.12,-0.20 --portfolio-dd-scales 0.85,0.65,0.35 --out-dir outputs\kr1000_bt_technical_mcap_regime_top20_ladder_2018_20260604 --save-scored-panel` -> CAGR `13.66%`, MDD `-22.04%`.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_mcap_regime --price-panel outputs\kr1000_bt_sparse_bench_pos_mcap_liq_technical_top20_2018_20260604\leader_price_panel.parquet --top-holdings 15 --max-rank-for-prices 40 --buy-rank-threshold 15 --hold-rank-threshold 30 --portfolio-dd-ladder --portfolio-dd-thresholds -0.08,-0.15,-0.25 --portfolio-dd-scales 0.85,0.65,0.40 --out-dir outputs\kr1000_bt_technical_mcap_regime_top15_ladder_2018_20260604 --save-scored-panel` -> CAGR `16.44%`, MDD `-24.17%`.
+
+### 10:23 KST - pmb-recovery-trend-value-profile
+
+**Scope**: Added a higher-exposure P_MB recovery/trend/value regime profile.
+This keeps the drawdown-control logic from `pmb_pullback_recovery_regime`, then
+adds a value-filtered trend sleeve for non-pullback months. It improves the
+current 8y broker-ledger CAGR while keeping MDD inside the `-25%` gate, but it
+still fails the CAGR and KOSPI200-excess targets.
+
+**What landed**:
+- Added `pmb_recovery_trend_value_regime` to KR1000 score profiles and
+  validation component A/B planning.
+- The profile is eligible when either:
+  - pullback recovery: `bench_ret_1m <= -0.01 and bench_ret_3m >= 0.0`, or
+  - trend value: `bench_ret_3m >= 0.0387` and `valuation_score` is above the
+    P_MB-selected monthly median.
+- The profile ranks selected rows with direct P_MB probabilities:
+  `0.60 * p_pre_surge + 0.40 * p_pre_entry - 0.20 * p_risk`.
+
+**Diagnostic result**:
+- Official-window top20:
+  `outputs\kr1000_bt_pmb_recovery_trend_value_profile_top20_2018_20260604`.
+- Result: CAGR `9.76%`, KOSPI200 CAGR `18.57%`, excess CAGR `-8.81%`,
+  MDD `-19.06%`, Sharpe `0.763`, IR `-0.452`, trades `965`,
+  average cash weight `71.49%`.
+- Top15 sensitivity:
+  `outputs\kr1000_bt_pmb_recovery_trend_value_profile_top15_2018_20260604`.
+- Result: CAGR `9.81%`, MDD `-18.08%`, excess CAGR `-8.75%`, Sharpe `0.742`,
+  trades `784`, average cash weight `71.09%`.
+- Interpretation: this is the best current full-window P_MB broker-ledger
+  challenger under MDD `-25%`, but it is still far below the `30%` official
+  CAGR gate and below KOSPI200.
+
+**symbols_added**:
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES value
+  `pmb_recovery_trend_value_regime`
+
+**symbols_changed**:
+- kr1000_leader.apply_kr1000_score_profile
+- tools.run_kr1000_validation_gate.PMB_SCORE_PROFILES
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_recovery_trend_value_profile` -> planned `23` broker backtests.
+
+### 10:08 KST - pmb-pullback-recovery-regime-profile
+
+**Scope**: Added a full-coverage P_MB regime profile that turns the sleeve on
+only after a KOSPI200 one-month pullback while the three-month benchmark trend
+is non-negative. This is the first current 8y broker-ledger challenger in this
+branch that clearly clears the MDD gate, but it still fails CAGR and excess
+return.
+
+**What landed**:
+- Added `pmb_pullback_recovery_regime` to KR1000 score profiles and component
+  A/B planning.
+- The profile keeps the PIT P_MB OOS picks file fully covered, then applies
+  an as-of benchmark regime mask:
+  `bench_ret_1m <= -0.01 and bench_ret_3m >= 0.0`.
+- The profile uses the existing P_MB pre-entry blend score inside allowed
+  months and sets `score_profile_eligible_flag = False` outside the regime.
+
+**Diagnostic result**:
+- Backtest:
+  `outputs\kr1000_bt_pmb_pullback_recovery_profile_top20_2018_20260604`.
+- Inputs: full-coverage
+  `G:\내 드라이브\kr_quant_engine\outputs\p_mb_oos_picks_purged_3sleeve_2018_20260604_latest.csv`.
+- Result: CAGR `6.57%`, KOSPI200 CAGR `18.57%`, excess CAGR `-12.00%`,
+  MDD `-17.82%`, Sharpe `0.846`, IR `-0.575`, trades `486`,
+  average cash weight `88.32%`.
+- Interpretation: the regime gate fixes drawdown but leaves too much cash and
+  too little alpha. Next work should add a return engine for non-pullback
+  months or improve labels, not loosen the drawdown guard blindly.
+
+**symbols_added**:
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES value
+  `pmb_pullback_recovery_regime`
+
+**symbols_changed**:
+- kr1000_leader.apply_kr1000_score_profile
+- tools.run_kr1000_validation_gate.PMB_SCORE_PROFILES
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none. Existing profiles are unchanged.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_pullback_profile` -> planned `22` broker backtests.
+
+### 09:47 KST - pmb-strict-pre-entry-score-mode
+
+**Scope**: Added configurable P_MB 3-sleeve OOS score modes so the official
+broker harness can test stricter pre-entry rankings without overwriting legacy
+OOS picks. This is an implementation/diagnostic pass; it does not clear the
+official performance target.
+
+**What landed**:
+- Added `combine_pmb_3sleeve_scores()` with `balanced`,
+  `pre_entry_focus`, `strict_pre_entry`, `pre_entry_risk_only`,
+  `continuation_focus`, and `no_risk_balanced` modes.
+- Extended `generate_oos_picks_purged_3sleeve()` and
+  `tools/build_pmb_oos_picks.py` with `--score-mode`,
+  `--pre-buffer-months`, `--pre-surge-months`, `--post-surge-months`, and
+  `--risk-drawdown-threshold`.
+- Extended `tools/run_kr1000_validation_gate.py` with
+  `--pmb-oos-score-mode`, `--pmb-pre-buffer-months`, and
+  `--pmb-iterations`.
+- Preserved `p_balanced` and `p_clean_pre_entry` through the sparse OOS merge
+  for diagnostics while keeping `p_pre_surge = p_combined` for existing
+  backtest compatibility.
+
+**Diagnostic result**:
+- Built strict pre-entry OOS picks:
+  `G:\내 드라이브\kr_quant_engine\outputs\p_mb_oos_picks_strict_preentry_buf2_2018_20260604.csv`.
+- Coverage passed: `102/102` official months from 2018-01 through 2026-06,
+  split gap `10` months, `99` selected features.
+- Broker-ledger next-close top20 backtest:
+  `outputs\kr1000_bt_pmb_strict_preentry_buf2_top20_2018_20260604`.
+- Result: CAGR `4.87%`, KOSPI200 CAGR `18.57%`, excess CAGR `-13.70%`,
+  MDD `-38.76%`, Sharpe `0.358`, IR `-0.886`, trades `1,785`.
+- Conclusion: stricter continuation/risk penalization improves the prior
+  strict OOS run slightly but still fails the official CAGR/MDD/excess gates.
+  The next bottleneck remains label/feature quality, not broker mechanics.
+
+**symbols_added**:
+- kr_backtester_realistic.PMB_3SLEEVE_SCORE_MODES
+- kr_backtester_realistic.combine_pmb_3sleeve_scores
+- tests/test_walkforward.py::test_pmb_3sleeve_score_modes
+
+**symbols_changed**:
+- kr_backtester_realistic.generate_oos_picks_purged_3sleeve
+- tools.build_pmb_oos_picks.parse_args
+- tools.build_pmb_oos_picks.label_three_sleeve_panel
+- tools.build_pmb_oos_picks.build_purged_oos_picks
+- tools.run_kr1000_backtest.PMB_OOS_NUMERIC_COLUMNS
+- tools.run_kr1000_validation_gate.parse_args
+- tools.run_kr1000_validation_gate._render_report
+- tools.run_kr1000_validation_gate.main
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none. New CLI-only P_MB builder options are
+diagnostic controls, not config preset fields.
+
+**breaking_changes**: none. The default score mode remains `balanced`, which
+matches the prior 50/50 pre-entry plus continuation blend.
+
+**Validation**:
+- `py -3 -m py_compile kr_backtester_realistic.py tools\build_pmb_oos_picks.py tools\run_kr1000_validation_gate.py tools\run_kr1000_backtest.py tests\test_walkforward.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_walkforward.py` -> 16 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_pmb_false_positive_audit.py` -> 2 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`, High `0`, Medium `0`.
+
+### 09:17 KST - pmb-false-positive-leakage-safe-audit
+
+**Scope**: Added a leakage-safe false-positive audit for P_MB OOS candidates
+and rejected two sparse filter broker experiments that worsened drawdown. This
+does not improve the official CAGR/MDD gate yet; it prevents the next P_MB
+risk model from being built on hidden target leakage.
+
+**What landed**:
+- Added `tools/analyze_pmb_false_positives.py`.
+- Added `tests/test_pmb_false_positive_audit.py`.
+- Wired the new false-positive audit test into GitHub Smoke.
+- The feature selector explicitly excludes realized/analysis/forward/future
+  labels, generated trade labels, `year`, and `pmb_oos_fold_id`.
+
+**Diagnostic result**:
+- Ran `tools/analyze_pmb_false_positives.py` on
+  `outputs/pmb_oos_quality_realized_preentry_2018_20260604/pmb_rows.parquet`.
+- Observed rows: `2,438`; months: `100`; good-trade rate `20.18%`;
+  bad-trade rate `30.80%`.
+- Leakage-safe OOS model scores are weak:
+  - `p_good_oos` vs good trade: AUC `0.510`.
+  - `p_bad_oos` vs bad trade: AUC `0.538`.
+  - existing `p_risk` vs bad trade: AUC `0.492`.
+- Feature-gap table shows higher short/intermediate momentum often aligns
+  with bad trades, not cleaner winners; `bench_ret_1m`, `ret_3m`, `rs_3m`,
+  and `rs_score` have negative good-minus-bad gaps in the P_MB candidate set.
+- Two sparse filter broker-ledger tests failed badly:
+  - `filter_def_hi_bench_pos` top20: CAGR `3.15%`, MDD `-60.29%`,
+    excess CAGR `-15.42%`.
+  - `filter_def_hi_no_trend_bench_pos` top20: CAGR `3.54%`, MDD `-61.39%`,
+    excess CAGR `-15.03%`.
+- Conclusion: current P_MB features do not support a reliable false-positive
+  gate. Rebuild label definitions before more broker exposure/ranking tuning.
+
+**symbols_added**:
+- tools/analyze_pmb_false_positives.py
+- tools.analyze_pmb_false_positives.add_trade_outcome_labels
+- tools.analyze_pmb_false_positives.select_false_positive_features
+- tools.analyze_pmb_false_positives.walk_forward_false_positive_scores
+- tools.analyze_pmb_false_positives.build_false_positive_audit
+- tests/test_pmb_false_positive_audit.py
+- tests/test_pmb_false_positive_audit.py::test_feature_selector_excludes_leakage
+- tests/test_pmb_false_positive_audit.py::test_false_positive_walk_forward_embargo
+
+**symbols_changed**:
+- .github/workflows/smoke_test.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none. The false-positive audit is diagnostic-only and
+does not alter production rankings or official validation gates.
+
+**Validation**:
+- `py -3 -m py_compile tools\analyze_pmb_false_positives.py tests\test_pmb_false_positive_audit.py` -> passed.
+- `py -3 tests\test_pmb_false_positive_audit.py` -> 2 passed, 0 failed.
+- `py -3 tools\analyze_pmb_false_positives.py --pmb-rows outputs\pmb_oos_quality_realized_preentry_2018_20260604\pmb_rows.parquet --target-start 2018-01-01 --target-end 2026-06-04 --out-dir outputs\pmb_false_positive_audit_2018_20260604` -> completed.
+
+### 08:50 KST - pmb-broad-realized-rerank-diagnostic
+
+**Scope**: Added a broader KR1000 realized-outcome reranker for PIT-safe P_MB
+OOS picks. Unlike the selected-only reranker, this trains return/loss models
+from the full scored KR1000 panel, then scores only the OOS P_MB candidate rows
+for each test month.
+
+**What landed**:
+- Added `tools/build_pmb_broad_realized_rerank_picks.py`.
+- Added `tests/test_pmb_broad_realized_rerank.py`.
+- Wired the new broad reranker test into GitHub Smoke.
+- Hardened broad scored-panel preparation so `in_kr1000` flags are parsed
+  safely from bool, numeric, or string cache formats.
+
+**Diagnostic result**:
+- Built `outputs/p_mb_oos_picks_broad_realized_rerank_2018_20260604.csv`
+  with `3,060` rows over `2018-01-31` to `2026-06-04`.
+- Coverage passed: `102/102` official months.
+- Broad model training saw `102,227/159,005` realized broad rows and used
+  `18/20` available feature columns.
+- Broker-ledger next-close 2018-01-02 to 2026-06-04 still failed:
+  - broad realized rerank top20: CAGR `2.86%`, MDD `-38.83%`,
+    excess CAGR `-15.71%`, Sharpe `0.248`.
+  - broad realized rerank top15: CAGR `-0.84%`, MDD `-41.34%`,
+    excess CAGR `-19.41%`, Sharpe `0.053`.
+  - broad realized rerank top20 + DD ladder: CAGR `-2.08%`, MDD `-29.03%`,
+    excess CAGR `-20.64%`, Sharpe `-0.146`.
+  - best tested broad variant, base plus loss: CAGR `3.32%`, MDD `-38.62%`,
+    excess CAGR `-15.25%`, Sharpe `0.270`.
+- Conclusion: a broad linear realized-return/loss reranker does not fix the
+  P_MB false-positive problem. The next improvement should rebuild the P_MB
+  label design and loss model, not tune exposure.
+
+**symbols_added**:
+- tools/build_pmb_broad_realized_rerank_picks.py
+- tools.build_pmb_broad_realized_rerank_picks.add_realized_next_rebalance_returns
+- tools.build_pmb_broad_realized_rerank_picks.build_broad_realized_rerank_picks
+- tests/test_pmb_broad_realized_rerank.py
+- tests/test_pmb_broad_realized_rerank.py::test_add_realized_next_rebalance_returns
+- tests/test_pmb_broad_realized_rerank.py::test_broad_reranker_uses_pre_embargo_broad_rows
+
+**symbols_changed**:
+- .github/workflows/smoke_test.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none. The broad reranker is a diagnostic sidecar and
+does not replace the official P_MB OOS file or production gate.
+
+**Validation**:
+- `py -3 -m py_compile tools\build_pmb_broad_realized_rerank_picks.py tests\test_pmb_broad_realized_rerank.py` -> passed.
+- `py -3 tests\test_pmb_broad_realized_rerank.py` -> 2 passed, 0 failed.
+- `py -3 tools\build_pmb_broad_realized_rerank_picks.py --scored-panel <GDrive scored panel> --price-panel <GDrive price panel> --pmb-oos-picks <GDrive P_MB OOS picks> --target-start 2018-01-01 --target-end 2026-06-04 --out outputs\p_mb_oos_picks_broad_realized_rerank_2018_20260604.csv --k-per-month 30 --embargo-months 3 --min-train-rows 5000 --pmb-weight 0.04 --return-weight 1.0 --risk-penalty 0.10 --fail-on-coverage-gap` -> passed.
+
+### 08:30 KST - pmb-pre-entry-risk-rerank-challengers
+
+**Scope**: Preserved P_MB OOS risk/pre-entry columns in the broker path,
+blocked sparse OOS merge leakage fallback, added pre-entry/risk challenger
+profiles, and added a PIT realized-history reranking sidecar. The experiments
+improved some MDD diagnostics but still failed the CAGR target.
+
+**What landed**:
+- `tools.run_kr1000_backtest.merge_pmb_oos_predictions` now carries
+  `p_pre_entry`, `p_continuation`, `p_risk`, `p_combined`, and
+  `pmb_oos_fold_id` from sparse P_MB OOS picks.
+- Sparse OOS non-pick rows are now explicit zeroes for P_MB generated columns;
+  the broker path no longer falls back to panel/live classifier values when a
+  PIT OOS picks file is supplied.
+- Added challenger score profiles:
+  `pmb_pre_entry`, `pmb_pre_entry_defensive`,
+  `pmb_pre_entry_blend`, and `pmb_pre_entry_blend_regime`.
+- Added `tools/build_pmb_realized_rerank_picks.py`, which trains a
+  pre-embargo realized-return/loss reranker from prior P_MB OOS rows and writes
+  sparse picks compatible with the broker backtester.
+- Added `tests/test_pmb_realized_rerank.py` and wired it into GitHub Smoke.
+- Extended `tools/analyze_pmb_oos_quality.py` factor/filter output to include
+  P_MB sleeve probabilities and pre-entry defensive filters.
+
+**Diagnostic result**:
+- Realized diagnostic now includes P_MB sleeve columns. Key filter:
+  `pre_entry_defensive_high_bench_3m_pos` mean `1.937%`, median `-0.630%`,
+  loss `< -10%` rate `16.30%`, average min return `-8.01%`.
+- Broker-ledger 2018-01-01 to 2026-06-04 still fails:
+  - `pmb_pre_surge` strict OOS top20: CAGR `3.99%`, MDD `-35.87%`.
+  - `pmb_pre_entry` top20: CAGR `3.37%`, MDD `-29.00%`.
+  - `pmb_pre_entry_defensive` top15 + DD ladder: CAGR `3.38%`, MDD
+    `-26.29%`.
+  - `pmb_pre_entry_blend_regime` top15: CAGR `1.64%`, MDD `-23.80%`.
+  - realized-history rerank top20: CAGR `2.30%`, MDD `-39.30%`.
+- Conclusion: pre-entry/risk filters can approach the MDD gate, but they do not
+  restore CAGR. Simple realized-history linear reranking is not enough.
+
+**symbols_added**:
+- tools/build_pmb_realized_rerank_picks.py
+- tools.build_pmb_realized_rerank_picks.build_realized_rerank_picks
+- kr1000_leader score profile `pmb_pre_entry`
+- kr1000_leader score profile `pmb_pre_entry_defensive`
+- kr1000_leader score profile `pmb_pre_entry_blend`
+- kr1000_leader score profile `pmb_pre_entry_blend_regime`
+- tests/test_pmb_realized_rerank.py
+- tests/test_pmb_realized_rerank.py::test_reranker_uses_pre_embargo_rows
+- tests/test_pmb_realized_rerank.py::test_reranker_fallback_before_history
+
+**symbols_changed**:
+- tools.run_kr1000_backtest.merge_pmb_oos_predictions
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES
+- kr1000_leader.KR1000_AB_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
+- tools.run_kr1000_validation_gate.PMB_SCORE_PROFILES
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS
+- tools.analyze_pmb_oos_quality._factor_correlations
+- tools.analyze_pmb_oos_quality._filter_summary
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+- .github/workflows/smoke_test.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none for production commands, but official P_MB OOS
+backtests with a supplied sparse picks file now obey the documented behavior:
+non-picked rows receive zero generated P_MB probability instead of inheriting
+any panel-side classifier value.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_backtest.py tools\run_kr1000_validation_gate.py tools\analyze_pmb_oos_quality.py tools\build_pmb_realized_rerank_picks.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\test_pmb_oos_quality.py` -> 3 passed, 0 failed.
+- `py -3 tests\test_pmb_realized_rerank.py` -> 2 passed, 0 failed.
+- `py -3 tools\build_pmb_realized_rerank_picks.py --pmb-rows outputs\pmb_oos_quality_realized_preentry_2018_20260604\pmb_rows.parquet --target-start 2018-01-01 --target-end 2026-06-04 --out outputs\p_mb_oos_picks_realized_rerank_2018_20260604.csv --k-per-month 30 --embargo-months 3 --min-train-rows 240 --risk-penalty 0.12 --fail-on-coverage-gap` -> passed.
+
+### 08:05 KST - pmb-oos-realized-return-diagnostics
+
+**Scope**: Extended the P_MB OOS quality audit to use broker-like realized
+next-rebalance holding returns from the daily price panel, added CI coverage
+for the diagnostic helpers, and recorded that the current P_MB ranking still
+does not meet the 8y broker-ledger gate.
+
+**What landed**:
+- Added optional `--price-panel` support to `tools/analyze_pmb_oos_quality.py`.
+- Added realized diagnostic columns:
+  `realized_entry_date`, `realized_exit_date`, `realized_entry_close`,
+  `realized_exit_close`, `realized_holding_return`, `realized_min_return`,
+  `realized_max_return`, and `realized_holding_days`.
+- Added `analysis_return`, `analysis_min_return`, and
+  `analysis_return_source` so summaries use realized next-rebalance returns
+  when available and fall back to sparse forward labels otherwise.
+- Added `tests/test_pmb_oos_quality.py` and wired it into GitHub Smoke.
+
+**Diagnostic result**:
+- `py -3 tools\analyze_pmb_oos_quality.py --start 2018-01-01 --end 2026-06-04 --out-dir outputs\pmb_oos_quality_realized_2018_20260604`
+  wrote realized-return diagnostics using
+  `analysis_return_source=realized_next_rebalance`.
+- P_MB OOS rows: `2,708` over `102` months.
+- Observed forward-label rows: `534`; observed realized rows: `2,438`.
+- Realized filter summary:
+  - all P_MB OOS: mean `0.758%`, median `-1.606%`, loss `< -10%` rate
+    `23.46%`.
+  - rank `7..23`: mean `1.336%`, median `-1.331%`.
+  - rank `7..23` and benchmark 3m positive: mean `1.799%`, median
+    `-0.942%`.
+  - `rs_3m_nonpos` has lower loss risk than `rs_3m_pos`; high RS is still
+    not a clean confirmation edge.
+- Realized factor correlations remain weak:
+  - `market_cap` correlation `+0.0399`.
+  - `p_pre_surge` correlation `+0.0346`.
+  - `rs_score` correlation `+0.0122`.
+  - `rs_3m` correlation `-0.0076`.
+- Rank-window broker grid still fails the official target:
+  - best tested variant `r7_23_antirs`, top15: CAGR `6.235%`,
+    MDD `-34.18%`, excess CAGR `-12.33%`, Sharpe `0.421`.
+
+**symbols_added**:
+- tools.analyze_pmb_oos_quality._add_realized_holding_returns
+- tools.analyze_pmb_oos_quality._choose_analysis_return_source
+- tests/test_pmb_oos_quality.py
+- tests/test_pmb_oos_quality.py::test_add_realized_holding_returns
+- tests/test_pmb_oos_quality.py::test_analysis_source_prefers_realized_returns
+- tests/test_pmb_oos_quality.py::test_analysis_source_falls_back_to_forward_labels
+
+**symbols_changed**:
+- tools.analyze_pmb_oos_quality.parse_args
+- tools.analyze_pmb_oos_quality.build_quality_report
+- tools.analyze_pmb_oos_quality.main
+- .github/workflows/smoke_test.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none. The diagnostic keeps forward-label fallback when a
+daily price panel is not supplied.
+
+**Validation**:
+- `py -3 -m py_compile tools\analyze_pmb_oos_quality.py tests\test_pmb_oos_quality.py` -> passed.
+- `py -3 tests\test_pmb_oos_quality.py` -> 3 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+
+### 07:35 KST - pmb-oos-quality-audit-and-regime-challengers
+
+**Scope**: Added a repeatable P_MB OOS quality audit, introduced two
+cash-capable P_MB regime challenger profiles, and recorded that the latest
+2018-current broker-ledger experiments still fail the active performance gate.
+
+**What landed**:
+- Added `tools/analyze_pmb_oos_quality.py` to rebuild the official prepared
+  KR1000 panel, merge PIT-safe purged P_MB OOS picks, and export by-year,
+  rank-bucket, filter, and factor-correlation diagnostics.
+- Added `pmb_mid_rank_regime`, which only admits P_MB OOS ranks `7..23` when
+  KOSPI200 benchmark 3-month return is positive.
+- Added `pmb_mid_tech_regime`, which further requires positive
+  `technical_score`.
+- Added `score_profile_eligible_flag` handling in
+  `kr1000_leader.compute_leader_scores` so challenger profiles can move to
+  cash when no profile-qualified names exist instead of buying zero-score
+  filler rows.
+- Updated KR1000 validation-gate tests so component A/B plans include the new
+  challenger profiles.
+
+**Diagnostic result**:
+- `py -3 tools\analyze_pmb_oos_quality.py --start 2018-01-01 --end 2026-06-04`
+  wrote `outputs/pmb_oos_quality_2018_20260604/`.
+- P_MB OOS rows: `2,708` over `102` months; observed forward-label rows:
+  `534`.
+- Forward-label audit:
+  - all P_MB OOS: mean 1m `0.66%`, median `-2.19%`.
+  - rank `7..23`: mean 1m `1.32%`, median `-1.85%`.
+  - rank `7..23` and benchmark 3m positive: mean 1m `2.61%`, median
+    `-1.58%`.
+  - `trend_template_pass` had negative mean 1m `-0.32%` and worse average
+    forward drawdown.
+- Factor correlations inside observed P_MB OOS rows show positive recent
+  RS/momentum is not a confirmation edge in this sample:
+  - `rs_6m` correlation `-0.118`.
+  - `rs_3m` correlation `-0.101`.
+  - `rs_score` correlation `-0.078`.
+- Broker-ledger challengers still fail:
+  - `pmb_mid_rank_regime` top20: CAGR `1.92%`, MDD `-38.10%`.
+  - `pmb_mid_tech_regime` top20: CAGR `1.79%`, MDD `-36.89%`.
+  - compact P_MB mid-rank grid best: top15/gross `0.70` CAGR `9.49%`,
+    MDD `-38.64%`.
+  - ad-hoc anti-momentum grid best: mid-rank + large-cap tilt top15 CAGR
+    `5.52%`, MDD `-40.98%`; mid-rank + anti-RS top15 CAGR `5.03%`,
+    MDD `-33.16%`.
+
+**symbols_added**:
+- tools/analyze_pmb_oos_quality.py
+- tools.analyze_pmb_oos_quality.build_quality_report
+- kr1000_leader score profile `pmb_mid_rank_regime`
+- kr1000_leader score profile `pmb_mid_tech_regime`
+- tests/test_kr1000_leader.py::test_pmb_regime_profile_eligibility
+
+**symbols_changed**:
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES
+- kr1000_leader.KR1000_AB_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
+- kr1000_leader.compute_leader_scores
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none. Existing `pmb_pre_surge` and
+`pmb_mid_rank_7_23` profile behavior is preserved; cash-capable filters are
+new challenger profiles.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\analyze_pmb_oos_quality.py tests\test_kr1000_leader.py` -> passed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+
+### 06:45 KST - kr1000-component-score-recompute-and-signal-diagnostic
+
+**Scope**: Fixed collapsed KR1000 component A/B scoring caused by stale
+schema-union placeholders, then reran the official 8y broker-ledger component
+diagnostic against the active CAGR `>= 30%` / MDD `>= -25%` gate.
+
+**What landed**:
+- Added stale component detection in `kr1000_leader.add_leader_component_scores`
+  so columns such as `rs_score` and `technical_score` are recomputed when they
+  contain only NaN/zero placeholders but their source columns have live
+  cross-sectional variation.
+- Applied the recompute guard to RS, flow, technical, quality/growth,
+  valuation, theme/sector, and event/governance component scores.
+- Added an empty-schema return path to
+  `kr1000_leader.generate_trade_plan` so fully cash/no-target diagnostic
+  months do not fail on missing `reason_code`.
+- Added regression tests for zero-placeholder component recomputation and empty
+  trade-plan schema behavior.
+
+**Diagnostic result**:
+- Before this fix, `full`, `rs_only`, `rs_flow`, and `rs_flow_technical`
+  collapsed to identical broker metrics because component columns existed but
+  carried no signal.
+- After this fix, RS and technical components have live variation again, but
+  the official 8y signal quality still fails badly:
+  - `pmb_mid_rank_7_23 default`: CAGR `6.65%`, MDD `-44.12%`.
+  - `pmb_pre_surge default`: CAGR `3.99%`, MDD `-35.87%`.
+  - `full`: CAGR `-6.44%`, MDD `-64.11%`.
+  - `rs_flow_technical`: CAGR `-16.99%`, MDD `-86.49%`.
+  - `rs_only`: CAGR `-21.86%`, MDD `-92.44%`.
+- Regime/technical diagnostic filters can reduce MDD near or below the target,
+  but CAGR remains around `4%`; the confirmed bottleneck remains alpha/signal
+  quality, not the broker ledger or data coverage.
+
+**symbols_added**:
+- kr1000_leader._has_informative_source
+- kr1000_leader._should_recompute_component
+- tests/test_kr1000_leader.py::test_zero_component_placeholders_recomputed
+- tests/test_kr1000_leader.py::test_trade_plan_empty_schema
+
+**symbols_changed**:
+- kr1000_leader.add_leader_component_scores
+- kr1000_leader.generate_trade_plan
+- docs/KR1000_GITHUB_OPERATIONS.md
+- MASTER_PLAN.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 14 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 15 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --periods official_8y --profiles full --component-ab --require-pmb-oos-coverage ...`
+  -> `failed_performance`; component score collapse fixed, official target not
+  met.
+
+### 05:55 KST - kr1000-pit-repair-2016-oos-coverage-and-official-fail
+
+**Scope**: Replaced suspect KR1000 mcap history with PIT marcap yearly sources,
+extended the scored panel to 2016-current warm-up coverage, generated
+2018-current purged P_MB OOS picks, and recorded the official 8y broker-ledger
+failure against the active CAGR `>= 30%` / MDD `>= -25%` gate.
+
+**What landed**:
+- Added `tools/quarantine_suspect_mcap_caches.py` to quarantine distant
+  duplicate `mktcap_ALL_YYYYMMDD.parquet` snapshots and derived avg-value
+  proxy caches before PIT rebuilds.
+- Added `tools/materialize_mcap_from_marcap_yearly.py` to convert
+  `cache_pykrx/marcap_YYYY.parquet` daily rows into monthly PIT mcap caches.
+- Added `--max-date` to the marcap materializer so current-year files cannot
+  write snapshots after the validation `as_of` date.
+- Normalized `KOSDAQ GLOBAL` rows to `KOSDAQ` while continuing to exclude
+  KONEX from the KR1000 tradeable universe.
+- Strengthened `tools/run_kr1000_validation_gate.py` so official scored panels
+  must cover every month from target start through `as_of`, not only start
+  before the target date.
+- Strengthened validation data blockers so High-severity PIT mcap or
+  avg-value cache gaps block official backtests.
+- Updated `kr_pykrx_client.py` to reuse local yearly marcap daily history and
+  broader index caches before provider fetches.
+- Updated `tools/run_kr1000_backtest.py` to stop requesting prices after the
+  official `as_of` date; the old `+10d` request prevented local marcap caches
+  from serving 2026 official runs.
+
+**Operational result**:
+- Quarantined suspect duplicate data:
+  - `54` mcap snapshots
+  - `51` derived avg-value proxy caches
+  - manifest:
+    `G:\내 드라이브\kr_quant_engine\outputs\mcap_quarantine_20260606.json`
+- Downloaded local marcap yearly sources for `2015`, `2016`, and `2026`.
+- Materialized PIT monthly mcap caches from marcap yearly files:
+  - `2015-2016`: `24` written
+  - `2017-2025`: `36` written earlier in this repair path
+  - `2026`: `6` written with `--max-date 2026-06-04`
+- Rebuilt `historical_mcap.parquet` to `363,680` rows, `148` snapshots,
+  `2015-01-30` through `2026-06-04`.
+- Materialized avg-value proxy caches for 2015-2017 and refreshed 2026
+  proxies.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04`
+  -> Critical `0`, High `0`, Medium `0`.
+- Built scored panel:
+  `feature_store/scored_panel_v0_2016-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet`
+  with `159,005` rows, `126` monthly signals, no missing months.
+- Built official P_MB OOS picks:
+  `outputs/p_mb_oos_picks_purged_3sleeve_2018_20260604_latest.csv`
+  with `3,150` rows, `2017-10-31` through `2026-06-04`; official coverage
+  passed `102/102` months from `2018-01` through `2026-06`.
+- Official broker-ledger performance remains a hard fail:
+  - `pmb_defensive_mdd_gate`: CAGR `-0.32%`, MDD `-28.60%`,
+    excess CAGR `-18.88%`, Sharpe `0.04`, IR `-0.99`.
+  - Component A/B best CAGR was `pmb_mid_rank_7_23` at `6.65%`, but MDD was
+    `-44.12%`.
+
+**symbols_added**:
+- tools/quarantine_suspect_mcap_caches.py
+- tools/materialize_mcap_from_marcap_yearly.py
+- tools.materialize_mcap_from_marcap_yearly.snapshots_from_marcap_year
+- tools.materialize_mcap_from_marcap_yearly.materialize_mcap_from_marcap_years
+- tests/test_kr1000_data_repair_tools.py::test_quarantine_suspect_mcap_caches_dry_run
+- tests/test_kr1000_data_repair_tools.py::test_quarantine_suspect_mcap_caches_moves_files
+- tests/test_kr1000_data_repair_tools.py::test_materialize_mcap_from_marcap_yearly
+- tests/test_kr1000_data_repair_tools.py::test_materialize_mcap_from_marcap_yearly_max_date
+- tests/test_kr1000_validation_gate.py::test_scored_panel_window_gate_requires_monthly_continuity
+
+**symbols_changed**:
+- kr_pykrx_client.fetch_ticker_history
+- kr_pykrx_client.fetch_index_ohlcv
+- kr_pipeline.build_scored_panel_v0
+- run_local.parse_args
+- run_local.build_cfg
+- tools.run_kr1000_backtest._load_or_build_price_panel
+- tools.run_kr1000_backtest.main
+- tools.run_kr1000_validation_gate._audit_scored_panel_window
+- tools.run_kr1000_validation_gate._data_gate_blockers
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Official validation now fails if a scored panel has missing monthly signals
+  inside the 8y target window.
+- Official backtests no longer request post-`as_of` prices for the final
+  signal window.
+
+**Validation**:
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 13 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\test_kr1000_data_store.py` -> 11 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`,
+  High `0`, Medium `0`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --skip-backtests --require-pmb-oos-coverage --pmb-oos-picks G:\내 드라이브\kr_quant_engine\outputs\p_mb_oos_picks_purged_3sleeve_2018_20260604_latest.csv`
+  -> data/scored-panel/P_MB coverage gates passed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --periods official_8y --profiles pmb_pre_surge --strategy-ab --require-pmb-oos-coverage ...`
+  -> `failed_performance`, official production preset failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --periods official_8y --profiles full --component-ab --require-pmb-oos-coverage ...`
+  -> `failed_performance`; all component profiles failed the official gate.
+
+---
+
+## 2026-06-06
+
+### 21:25 KST - kr1000-mcap-leakage-audit-and-backfill-scope
+
+**Scope**: Tightened the KR1000 data gate after detecting historical mcap
+snapshots that are identical across distant dates without PIT provenance.
+
+**What landed**:
+- Added duplicate mcap snapshot detection to `tools/audit_data_integrity.py`.
+- The audit now flags distant identical `mktcap_ALL_YYYYMMDD.parquet` groups as
+  `CRITICAL` unless they are explicitly marked as carry-forward snapshots.
+- Added broad covering ticker-history cache reuse in
+  `kr_pykrx_client.fetch_ticker_history()` so historical feature rebuilds do
+  not refetch when a wider cached history already covers the requested window.
+- Updated `kr_pipeline.build_scored_panel_v0()` incremental rebuild logic to
+  reuse overlapping scored panels, including later-start panels, and compute
+  only missing rebalance dates.
+- Added `run_local.py --panel-only` and `run_local.py --no-forward-labels`.
+- `tools/run_kr1000_validation_gate.py --rebuild-scored-panel` now defaults to
+  panel-only rebuilds without forward labels; use `--rebuild-forward-labels`
+  or `--enrich-forward-labels` when target labels are explicitly needed.
+- Materialized 2016-2018 avg-value proxy caches from mcap snapshots:
+  `36` written, `0` failed.
+
+**Operational result**:
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` now reports
+  Critical `1`, High `0`, Medium `0`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --skip-backtests`
+  is blocked by `data_integrity_audit_has_critical`.
+- The flagged mcap group spans `2016-01-29` to `2026-05-29`, `54` snapshots,
+  `2772` rows, without valid PIT provenance on the original snapshots.
+- Official 8y broker-ledger performance must not be recorded until those
+  historical mcap caches are quarantined/replaced with true PIT data.
+
+**symbols_added**:
+- tools.audit_data_integrity._audit_mcap_duplicate_snapshots
+- tests/test_kr1000_data_repair_tools.py::test_mcap_duplicate_snapshot_audit_flags_leaky_current_fallback
+- tests/test_kr1000_data_repair_tools.py::test_mcap_duplicate_snapshot_audit_allows_carry_forward
+- tests/test_kr1000_data_store.py::test_ticker_history_covering_cache_reuse
+
+**symbols_changed**:
+- kr_pykrx_client.fetch_ticker_history
+- kr_pipeline.build_scored_panel_v0
+- kr_pipeline.find_incremental_scored_panel_cache
+- run_local.parse_args
+- run_local.build_cfg
+- tools.run_kr1000_validation_gate.parse_args
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Data integrity gate now fails on distant identical mcap snapshots without
+  carry-forward provenance.
+- Validation-gate scored-panel rebuilds skip forward target labels unless
+  explicitly requested.
+
+**Validation**:
+- `py -3 -m py_compile tools\audit_data_integrity.py kr_pykrx_client.py run_local.py kr_pipeline.py tools\run_kr1000_validation_gate.py tests\test_kr1000_data_repair_tools.py tests\test_kr1000_data_store.py tests\test_kr1000_validation_gate.py`
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 9 passed, 0 failed.
+- `py -3 tests\test_kr1000_data_store.py` -> 8 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 8 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `1`,
+  High `0`, Medium `0`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-daily-check --skip-backtests --out-dir outputs\kr1000_validation_data_leak_audit_check`
+  -> blocked on `data_integrity_audit_has_critical`.
+
+---
+
+### 18:35 KST - kr1000-broker-holdings-import-automation
+
+**Scope**: Added a broker-export import path so actual holdings can be fed
+into daily readiness without hand-editing the canonical schema.
+
+**What landed**:
+- Added `tools/import_current_holdings.py`.
+- The importer normalizes common English/Korean broker headers into
+  `CURRENT_HOLDINGS_COLUMNS`, computes missing market value/weights when
+  possible, and fails when no positive-share positions remain.
+- `tools/run_kr1000_daily_broker_check.py` now blocks holdings files whose
+  shares are all zero.
+- Daily and validation GitHub workflows now auto-import raw holdings exports
+  from `data/state/current_holdings_raw.{csv,tsv}`,
+  `data/state/broker_holdings.{csv,tsv}`, or
+  `data/state/holdings_export.{csv,tsv}` before broker readiness.
+- Workflows now sync `data/state` back to `gdrive:kr_quant_engine/state` and
+  upload `current_holdings_import_audit.json`.
+
+**Operational result**:
+- Users can drop a raw broker export into GDrive `state/` and the automation
+  will write/validate `state/current_holdings.csv` before the daily check.
+- Current local daily broker check remains blocked because no actual holdings
+  file or raw broker export exists yet.
+
+**symbols_added**:
+- tools/import_current_holdings.py
+- tools.import_current_holdings.read_source_table
+- tools.import_current_holdings.normalize_holdings_frame
+- tools.import_current_holdings.validate_current_holdings_frame
+- tests/test_kr1000_data_repair_tools.py::test_import_current_holdings_normalizes_korean_headers
+- tests/test_kr1000_data_repair_tools.py::test_import_current_holdings_rejects_empty_positions
+- tests/test_kr1000_data_store.py::test_workflows_import_and_sync_current_holdings_state
+
+**symbols_changed**:
+- tools.run_kr1000_daily_broker_check.current_holdings_blockers
+- .github/workflows/daily_kr1000_broker_check.yml
+- .github/workflows/kr1000_data_update_and_validation.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Daily broker readiness now blocks holdings files with no positive-share rows.
+
+**Validation**:
+- `py -3 -m py_compile tools\import_current_holdings.py tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py tests\test_kr1000_data_store.py`
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 7 passed, 0 failed.
+- `py -3 tests\test_kr1000_data_store.py` -> 7 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04`
+  -> still blocked on missing/empty holdings, as expected.
+
+---
+
+### 18:21 KST - kr1000-current-holdings-data-root-resolution
+
+**Scope**: Aligned current-holdings discovery with the project data-store
+contract.
+
+**What landed**:
+- Added `kr1000_leader.resolve_current_holdings_path()`.
+- `kr1000_leader.load_current_holdings()` now defaults to
+  `DATA_ROOT/state/current_holdings.csv`, with project-local
+  `state/current_holdings.csv` as a fallback.
+- `tools/run_kr1000_daily_broker_check.py` now uses the shared resolver.
+- Updated CLI help and operations docs to state the canonical DATA_ROOT
+  holdings path.
+
+**Operational result**:
+- `tools/run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04`
+  remains correctly `blocked`, now against canonical missing path
+  `G:\내 드라이브\kr_quant_engine\state\current_holdings.csv`.
+- The daily check's data audit is still clean: Critical `0`, High `0`,
+  Medium `0`.
+
+**symbols_added**:
+- kr1000_leader.resolve_current_holdings_path
+- tests/test_kr1000_data_repair_tools.py::test_current_holdings_resolver_prefers_data_root_state
+
+**symbols_changed**:
+- kr1000_leader.load_current_holdings
+- tools.run_kr1000_daily_broker_check.parse_args
+- tools.run_kr1000_daily_broker_check.main
+- tools.run_kr1000_leader.parse_args
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Default current-holdings discovery now prefers `DATA_ROOT/state` before the
+  project-local state directory.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py`
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 5 passed, 0 failed.
+- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04`
+  -> blocked on `current_holdings_file_missing` and `current_holdings_empty`;
+  `current_holdings_path` is `G:\내 드라이브\kr_quant_engine\state\current_holdings.csv`.
+
+---
+
+### 18:11 KST - kr1000-data-gate-clear-and-holdings-readiness-guard
+
+**Scope**: Cleared the remaining data-integrity High findings and hardened the
+daily broker check so production readiness requires actual holdings evidence.
+
+**What landed**:
+- Added `tools/materialize_mcap_carry_forward_caches.py`.
+- Added `tools/repair_scored_panel_fundamental_metadata.py`.
+- Added `tests/test_kr1000_data_repair_tools.py`.
+- Preserved mcap carry-forward provenance in `kr_pit_universe.build_historical_mcap_panel()`.
+- Fixed `kr_pykrx_client.fetch_daily_ohlcv_market()` cache write path so it no
+  longer references an undefined `allow_fdr_fallback` name.
+- Added `--allow-empty-holdings` to `tools/run_kr1000_daily_broker_check.py`
+  for research dry-runs only; production status now blocks when
+  `state/current_holdings.csv` is missing or empty.
+
+**Operational result**:
+- pykrx historical mcap backfill was source-blocked and returned empty for all
+  28 missing month-end dates, so missing mcap caches were filled with
+  carried-forward PIT snapshots only.
+- `tools/materialize_mcap_carry_forward_caches.py --start 2016-01-01 --end 2026-06-04`
+  wrote `28` mcap proxy caches, skipped `97`, failed `0`, and rebuilt
+  `historical_mcap.parquet` to `366,782` rows / `137` snapshots.
+- `tools/repair_scored_panel_fundamental_metadata.py` repaired `293`
+  stale DART period metadata rows; period-after-rcept and period-after-signal
+  audit counts are both `0`.
+- `tools/audit_data_integrity.py --as-of 2026-06-04` now reports Critical `0`,
+  High `0`, Medium `0`.
+- `tools/run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04` now
+  correctly returns `blocked` because actual `state/current_holdings.csv` is
+  absent, while still writing an inspection trade plan.
+
+**symbols_added**:
+- tools/materialize_mcap_carry_forward_caches.py
+- tools/repair_scored_panel_fundamental_metadata.py
+- tests/test_kr1000_data_repair_tools.py
+- tools.run_kr1000_daily_broker_check.resolve_current_holdings_path
+- tools.run_kr1000_daily_broker_check.current_holdings_blockers
+
+**symbols_changed**:
+- kr_pit_universe.build_historical_mcap_panel
+- kr_pykrx_client.fetch_daily_ohlcv_market
+- tools.run_kr1000_daily_broker_check.parse_args
+- tools.run_kr1000_daily_broker_check.main
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- `tools/run_kr1000_daily_broker_check.py` now exits blocked when actual
+  current holdings evidence is missing or empty. Use `--allow-empty-holdings`
+  only for non-production research dry-runs.
+
+**Validation**:
+- `py -3 -m py_compile kr_pykrx_client.py kr_pit_universe.py tools\materialize_mcap_carry_forward_caches.py tools\repair_scored_panel_fundamental_metadata.py tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py`
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 4 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_dart_pit.py` -> 17 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 8 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`,
+  High `0`, Medium `0`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_data_gate_clear`
+  -> planned 14 broker backtests, target CAGR `0.30`.
+- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04`
+  -> blocked on `current_holdings_file_missing` and `current_holdings_empty`.
+
+---
+
+### 17:34 KST - kr1000-handoff-after-avg-value-proxy-push
+
+**Scope**: Refreshed the single-inbox handoff after pushing the PIT-safe
+avg-value proxy cache materialization change.
+
+**What landed**:
+- Updated `SESSION_HANDOFF.md` to point at latest functional commit `1c33aca`.
+- Recorded the successful GitHub Smoke run for `1c33aca`.
+- Removed the stale instruction to commit the already-pushed avg-value proxy
+  cache materialization tool/docs.
+
+**Operational result**:
+- Next agents should start from the remaining data blockers only: historical
+  mcap cache gaps and stale scored-panel fundamentals metadata.
+- `research/10_theme_lifecycle/leader_themes_per_quarter.csv` remains
+  explicitly unstaged and unrelated.
+
+**symbols_added**: none.
+
+**symbols_changed**:
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- GitHub Smoke Test on `1c33aca` succeeded:
+  https://github.com/wscha231/kr-quant-engine/actions/runs/27057463059
+
+---
+
+### 17:26 KST - kr1000-avg-value-proxy-cache-backfill
+
+**Scope**: Materialized PIT-safe avg-value proxy caches to remove the
+2025-2026 `avg_trading_value` cache gap blocker.
+
+**What landed**:
+- Added `tools/materialize_avg_value_proxy_caches.py`.
+- The tool writes `avg_value_60d_YYYYMMDD.parquet` from the existing PIT-safe
+  `mktcap_ALL_YYYYMMDD.value` proxy and preserves `avg_value_source`.
+- Existing true avg-value caches are skipped unless `--overwrite` is supplied.
+
+**Operational result**:
+- Dry-run planned 15 proxy cache writes and skipped 2 existing true caches.
+- Materialized proxy caches for `2025-01-31` through `2026-03-31`.
+- `tools/audit_data_integrity.py --as-of 2026-06-04` improved from High `4`
+  to High `3`; the `avg_trading_value cache has gaps >45 days` issue is gone.
+- Remaining High items are mcap cache gaps and stale scored-panel fundamentals
+  metadata that requires a scored-panel rebuild.
+
+**symbols_added**:
+- tools/materialize_avg_value_proxy_caches.py
+
+**symbols_changed**:
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\materialize_avg_value_proxy_caches.py`
+- `py -3 tools\materialize_avg_value_proxy_caches.py --start 2025-01-01 --end 2026-06-04 --dry-run`
+  -> planned `15`, skipped `2`, failed `0`.
+- `py -3 tools\materialize_avg_value_proxy_caches.py --start 2025-01-01 --end 2026-06-04`
+  -> wrote `15`, skipped `2`, failed `0`.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`,
+  High `3`, Medium `0`.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_avg_proxy`
+  -> planned 14 broker backtests, target CAGR `0.30`.
+
+---
+
+### 17:07 KST - kr1000-pit-cache-safety-audit-tightening
+
+**Scope**: Tightened PIT data safety around historical market-cap cache
+backfills and stale DART fundamentals metadata.
+
+**What landed**:
+- Added `tools/backfill_mcap_cache_gaps.py`, a pykrx-only historical mcap gap
+  backfill tool that disables FDR current-list fallback.
+- Added `allow_fdr_fallback` to `kr_pykrx_client.fetch_market_cap_market()`.
+- `tools/refresh_kr1000_daily_data.py` now disables FDR fallback automatically
+  when the requested `--as-of` date is more than 14 days before `--run-date`.
+- Added `kr_features.sanitize_fundamental_period_metadata()` and call it from
+  both `prepare_pit_fundamentals_panel()` and `add_pit_fundamentals()`, so
+  old cached DART panels with impossible `period_end > rcept_dt` metadata are
+  repaired before PIT joins.
+- `_compute_ttm_from_panel()` and `_compute_yoy_from_panel()` now sort by
+  `period_end` / `rcept_dt` first, then report metadata.
+- `tools/audit_data_integrity.py` now recognizes full validation-gate
+  workflows as broker-backtest automation instead of requiring a direct
+  `run_kr1000_backtest.py` workflow call.
+
+**Operational result**:
+- `audit_data_integrity.py --as-of 2026-06-04` now reports Medium `0`
+  instead of Medium `1`; the prior "No GitHub workflow runs
+  tools/run_kr1000_backtest.py" false positive is cleared.
+- Remaining High `4` items are real current-data blockers:
+  mcap cache gaps, avg-value cache gaps, and stale scored-panel fundamentals
+  metadata that requires scored-panel rebuild.
+- Historical mcap backfill smoke with `--max-dates 1` failed safely:
+  pykrx returned empty for `2016-07-29`, and no FDR fallback data or empty
+  cache parquet was saved.
+
+**symbols_added**:
+- tools/backfill_mcap_cache_gaps.py
+- kr_features.sanitize_fundamental_period_metadata
+- tests/test_dart_pit.py::test_add_pit_fundamentals_sanitizes_cached_period_end
+- tests/test_kr1000_validation_gate.py::test_workflow_summary_counts_validation_gate_backtests
+
+**symbols_changed**:
+- kr_pykrx_client.fetch_market_cap_market
+- tools/refresh_kr1000_daily_data.main
+- kr_features.prepare_pit_fundamentals_panel
+- kr_features.add_pit_fundamentals
+- kr_features._compute_ttm_from_panel
+- kr_features._compute_yoy_from_panel
+- tools/audit_data_integrity._workflow_summary
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- Historical `refresh_kr1000_daily_data.py --as-of <old-date>` runs no longer
+  use FDR fallback for mcap snapshots. This is intentional to prevent current
+  listings from contaminating PIT historical caches.
+
+**Validation**:
+- `py -3 -m py_compile kr_pykrx_client.py tools\refresh_kr1000_daily_data.py tools\backfill_mcap_cache_gaps.py kr_features.py tools\audit_data_integrity.py`
+- `py -3 tests\test_dart_pit.py` -> 17 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 8 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`,
+  High `4`, Medium `0`.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 15 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_pit_safety`
+  -> planned 14 broker backtests, target CAGR `0.30`.
+- `py -3 tools\backfill_mcap_cache_gaps.py --start 2016-01-01 --end 2026-06-04 --dry-run`
+  -> 28 missing business-month-end mcap cache dates.
+- `py -3 tools\backfill_mcap_cache_gaps.py --start 2016-01-01 --end 2026-06-04 --max-dates 1`
+  -> failed safely with 1 empty pykrx result and no cache file written.
+
+---
+
+### 16:36 KST - kr1000-cagr30-gate-realignment-midrank-challenger
+
+**Scope**: Realigned the official KR1000 broker-ledger gate to CAGR `>= 30%`
+and added a formal P_MB mid-rank challenger for the same validation harness.
+
+**What landed**:
+- Changed `kr1000_leader_alpha_cfg()["target_cagr_gate"]` from `0.35` to
+  `0.30`; CAGR `>= 35%` is now documented as a stretch target only.
+- Added `pmb_mid_rank_7_23`, a score profile that only admits PIT-safe P_MB OOS
+  ranks `7..23`.
+- Added `pmb_mid_rank_no_leverage_mdd_gate` to strategy A/B with gross `1.0`,
+  hard stop `10%`, and the existing portfolio drawdown ladder.
+- Kept production pass/fail tied to the locked `pmb_defensive_mdd_gate` preset;
+  the mid-rank preset is a challenger until 8y OOS coverage is available.
+- Updated validation-gate reporting so the official CAGR target is rendered
+  from config instead of hard-coded text.
+
+**Operational result**:
+- Prior 2020-2024 diagnostic for the mid-rank rule was about CAGR `28.15%`,
+  MDD `-22.18%`, Sharpe `1.29`, and KOSPI200 excess `+25.88%` in the broker
+  harness.
+- This remains below the official CAGR `>= 30%` gate and is not an 8y official
+  pass.
+
+**symbols_added**:
+- kr1000_leader score profile `pmb_mid_rank_7_23`
+- tools/run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS[`pmb_mid_rank_no_leverage_mdd_gate`]
+- tests/test_kr1000_leader.py::test_pmb_mid_rank_profile_window
+
+**symbols_changed**:
+- kr_config.kr1000_leader_alpha_cfg
+- kr1000_leader.KR1000_DIRECT_SCORE_PROFILES
+- kr1000_leader.KR1000_AB_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
+- tools/run_kr1000_validation_gate.PMB_SCORE_PROFILES
+- tools/run_kr1000_validation_gate.evaluate_backtest_metrics
+- tools/run_kr1000_validation_gate._render_report
+- tests/test_kr1000_validation_gate.py
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none. `target_cagr_gate` changed value from `0.35`
+to `0.30`.
+
+**breaking_changes**:
+- The official KR1000 CAGR gate is now `30%`; `35%` should be treated as a
+  stretch target in future agent work.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_validation_gate.py kr_config.py`
+- `py -3 tests\test_kr1000_leader.py` -> 12 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
+- `py -3 tests\test_walkforward.py` -> 15 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_cagr30_midrank`
+  -> planned 14 broker backtests, target CAGR `0.30`, including
+  `pmb_mid_rank_7_23` and `pmb_mid_rank_no_leverage_mdd_gate`.
+- `py -3 tools\run_kr1000_backtest.py --start 2020-01-01 --end 2024-12-31 --score-profile pmb_mid_rank_7_23 ...`
+  -> reproduced CAGR `28.15%`, MDD `-22.18%`, Sharpe `1.29`, Excess `+25.88%`.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`,
+  High `4`, Medium `1`.
+
+---
+
+### 16:05 KST - kr1000-handoff-after-risk-guard-push
+
+**Scope**: Refreshed `SESSION_HANDOFF.md` after pushing `7b139c9` and
+confirming GitHub Smoke success.
+
+**What landed**:
+- Removed completed commit/push instructions from the handoff.
+- Kept the next-step warning that the new full-panel forward-label P_MB
+  diagnostics should not replace the legacy P_MB challenger.
+
+**symbols_added**: none.
+
+**symbols_changed**:
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- Documentation-only follow-up after GitHub Smoke success on `7b139c9`.
+
+---
+
+### 16:00 KST - kr1000-forward-label-cache-guard-risk-observed
+
+**Scope**: Hardened forward-label enrichment against incomplete-horizon
+leakage and prevented missing risk targets from being treated as observed
+non-risk labels during P_MB risk-sleeve training.
+
+**What landed**:
+- Added `forward_label_as_of_date` and `forward_label_fetch_missing_prices`.
+- `kr_pipeline.add_forward_return_labels()` now skips rows whose full forward
+  horizon is not observable as of `forward_label_as_of_date`.
+- `tools/enrich_scored_panel_forward_labels.py` now preloads covering ticker
+  caches, defaults to cache-only, supports `--label-as-of`, and clears stale
+  labels for incomplete horizons.
+- `kr_multibagger_classifier.label_risk()` now emits `is_risk_observed`.
+- `kr_backtester_realistic.generate_oos_picks_purged_3sleeve()` trains the
+  `is_risk` model only on rows where `is_risk_observed == 1`.
+- `tools/build_pmb_oos_picks.py` excludes `is_risk_observed` from classifier
+  features.
+
+**Operational result**:
+- Current GDrive scored panel was enriched cache-only to `34,744` fully
+  observed label-ready rows across `2019-01` to `2024-12`.
+- Incomplete `2026-06` labels were cleared via `--label-as-of 2026-06-06`.
+- New full-panel forward-label P_MB diagnostics remain weak:
+  - raw 3-sleeve: CAGR `2.44%`, MDD `-31.99%`
+  - pre-entry only: CAGR `3.26%`, MDD `-32.39%`
+  - no-risk combo: CAGR `2.60%`, MDD `-30.82%`
+  - observed-mask 3-sleeve: CAGR `4.26%`, MDD `-28.38%`
+- The legacy P_MB defensive result remains the best known challenger:
+  CAGR `25.38%`, MDD `-24.00%`, but it is still not an 8y official pass and
+  remains below the active CAGR `>= 35%` goal.
+
+**symbols_added**:
+- kr_config.forward_label_as_of_date
+- kr_config.forward_label_fetch_missing_prices
+- kr_multibagger_classifier.label_risk output column `is_risk_observed`
+- tests/test_walkforward.py::test_forward_label_builder_skips_incomplete_horizon
+- tests/test_walkforward.py::test_forward_label_enrichment_clears_incomplete_labels
+- tests/test_walkforward.py::test_risk_label_missing_forward_target_unobserved
+
+**symbols_changed**:
+- kr_pipeline.add_forward_return_labels
+- tools/enrich_scored_panel_forward_labels.py
+- kr_multibagger_classifier.label_risk
+- kr_backtester_realistic.generate_oos_picks_purged_3sleeve
+- tools/build_pmb_oos_picks.select_pmb_feature_columns
+- docs/KR1000_GITHUB_OPERATIONS.md
+
+**config_fields_added**:
+- `forward_label_as_of_date`
+- `forward_label_fetch_missing_prices`
+
+**breaking_changes**:
+- Forward labels are no longer produced for rows whose forward horizon is not
+  fully observable as of `forward_label_as_of_date`.
+
+**Validation**:
+- `py -3 -m py_compile kr_multibagger_classifier.py kr_backtester_realistic.py tools\build_pmb_oos_picks.py tools\enrich_scored_panel_forward_labels.py kr_pipeline.py kr_config.py`
+  -> passed.
+- `py -3 tests\test_walkforward.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+
+---
+
+### 14:42 KST - kr1000-handoff-pr-status-refresh
+
+**Scope**: Refreshed handoff status after pushing `b850775`, confirming GitHub
+Smoke success, and updating the draft PR body to the active `35%` target.
+
+**What landed**:
+- Updated `SESSION_HANDOFF.md` so the next agent starts from the actual next
+  production task instead of repeating the completed PR update step.
+
+**symbols_added**: none.
+
+**symbols_changed**:
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- Documentation-only follow-up after the prior smoke and validation pass.
+
+---
+
+### 14:34 KST - kr1000-forward-label-enrichment-bridge
+
+**Scope**: Added a scored-panel forward-label enrichment bridge so existing
+full-feature panels can activate the P_MB risk sleeve without waiting for a
+complete feature rebuild.
+
+**What landed**:
+- Added `tools/enrich_scored_panel_forward_labels.py`.
+- Added `--enrich-forward-labels` to `tools/run_kr1000_validation_gate.py`.
+- Validation dry-runs now route the enriched scored panel into both
+  `tools/build_pmb_oos_picks.py --panel ...` and broker backtests.
+- `tools/run_kr1000_validation_gate.py --scored-panel ... --build-pmb-oos-picks`
+  now passes the same scored panel to the P_MB OOS builder.
+- Quarterly GitHub diagnostics now enrich the copied feature-store panel before
+  building purged P_MB OOS picks.
+- Updated operations docs with the enrichment bridge commands.
+
+**Operational result**:
+- This separates the current blockers:
+  - label availability can be fixed by enrichment;
+  - 8y+ coverage still requires a scored panel starting no later than
+    `2018-01-01`, preferably `2016-01-01`;
+  - the official target remains CAGR `>= 35%`, MDD `>= -25%`.
+
+**symbols_added**:
+- tools/enrich_scored_panel_forward_labels.py::enrich_panel_with_forward_labels
+- tools/enrich_scored_panel_forward_labels.py::main
+- tests/test_walkforward.py::test_forward_label_enrichment_helper
+
+**symbols_changed**:
+- tools/run_kr1000_validation_gate.parse_args
+- tools/run_kr1000_validation_gate.main
+- .github/workflows/quarterly_backtest.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\enrich_scored_panel_forward_labels.py tools\run_kr1000_validation_gate.py kr_pipeline.py`
+  -> passed.
+- `py -3 tests\test_walkforward.py` -> 12 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --enrich-forward-labels --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_cagr35_forward_enrich`
+  -> planned `enrich_forward_labels`, then `build_pmb_oos_picks`, 12 broker
+  backtests, target CAGR `0.35`, and all backtests include `--scored-panel`.
+
+---
+
+### 14:30 KST - kr1000-forward-risk-labels-cagr35
+
+**Scope**: Restored the active objective to CAGR `>= 35%` / MDD `>= -25%`
+and added forward target labels needed to activate the P_MB risk sleeve during
+purged OOS generation.
+
+**What landed**:
+- Restored `kr1000_leader_alpha_cfg()["target_cagr_gate"]` to `0.35`.
+- Added `PHASE4_PMB_TARGET_COLUMNS` for `forward_return_1m` and
+  `forward_min_return_1m`.
+- Added `kr_pipeline.add_forward_return_labels()`.
+- `build_scored_panel_v0()` now appends 1-month forward return and intra-month
+  minimum forward return labels before writing the scored panel.
+- Kept the labels out of classifier features by retaining the existing
+  `forward_` prefix exclusion in `tools/build_pmb_oos_picks.py`.
+- Updated operations docs and handoff so the next required production step is
+  a 2018-current or 2016-current scored-panel rebuild with active risk labels.
+
+**Operational result**:
+- This does not itself improve the already-recorded 2020-2024 broker result.
+- It removes the current P_MB OOS smoke warning where `label_risk()` fell back
+  to all-zero risk labels because the scored panel lacked
+  `forward_min_return_1m` / `forward_return_1m`.
+- A full scored-panel rebuild is still required before official 8y OOS
+  validation can pass.
+
+**symbols_added**:
+- kr_config.PHASE4_PMB_TARGET_COLUMNS
+- kr_pipeline.add_forward_return_labels
+- kr_pipeline._last_close_at_or_before_series
+- tests/test_walkforward.py::test_forward_label_builder
+
+**symbols_changed**:
+- kr_config.ALL_PHASE_COLUMNS
+- kr_config.kr1000_leader_alpha_cfg
+- kr_pipeline.build_scored_panel_v0
+- tools/run_kr1000_validation_gate.evaluate_backtest_metrics
+- tools/run_kr1000_validation_gate._render_report
+- tests/test_kr1000_validation_gate.py::test_official_metric_gate
+- tests/test_kr1000_validation_gate.py::test_pmb_job_requires_oos_coverage
+- tests/smoke_test.py::test_kr1000_leader_registered
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**:
+- `forward_label_enabled`
+- `forward_label_horizon_months`
+- `forward_label_refresh_days`
+
+**breaking_changes**:
+- Official CAGR gate is again `0.35`; runs passing `30%` but below `35%` are
+  not complete for the active goal.
+
+**Validation**:
+- `py -3 -m py_compile kr_pipeline.py kr_config.py tools\run_kr1000_validation_gate.py`
+  -> passed.
+- `py -3 tests\test_walkforward.py` -> 11 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_cagr35_forward_labels`
+  -> planned `build_pmb_oos_picks`, 12 broker backtests, target CAGR `0.35`,
+  and all backtests include `--pmb-oos-picks`.
+- `git diff --check` -> passed.
+
+---
+
+### 14:05 KST - kr1000-official-gate-pmb-oos-realignment
+
+**Scope**: Realigned the official KR1000 validation target to the current user
+goal and hardened the P_MB path so production performance cannot be accepted
+without PIT-safe 8y OOS coverage.
+
+**What landed**:
+- Changed the official KR1000 CAGR gate from `35%` to `30%`; `35%` is now a
+  stretch target only.
+- Added a purged 3-sleeve P_MB OOS picks builder that writes separate
+  CSV/JSON artifacts and does not overwrite the legacy research picks file.
+- Added P_MB OOS coverage auditing to the validation gate.
+- Added scored-panel official-start auditing so official backtests require a
+  signal panel that starts no later than `2018-01-01`.
+- Made `pmb_defensive_mdd_gate` the official production gate when
+  `--strategy-ab` is run; `full` remains the baseline gate.
+- Made P_MB/hybrid/production jobs fail their gate when PIT-safe P_MB OOS
+  coverage is missing or incomplete.
+- Connected `run_classifier_retrain.py --purged --embargo-months 9` to the
+  classifier trainer and removed fold test-set early stopping from CV training.
+- Updated full GitHub validation and quarterly backtest workflows to build and
+  use purged P_MB OOS picks.
+
+**Operational result**:
+- Current known best remains the 2020-2024 P_MB defensive broker-ledger run:
+  CAGR `25.38%`, MDD `-24.00%`, Sharpe `1.23`, IR `1.00`.
+- This remains below the official `30%` CAGR gate and lacks 8y OOS coverage.
+- Current canonical scored panel starts at `2019-01-31`, so a 2018-current or
+  2016-current full-feature rebuild remains the next required data step.
+
+**symbols_added**:
+- tools/build_pmb_oos_picks.py
+- tools/run_kr1000_validation_gate.PRODUCTION_GATE_STRATEGY_PRESET
+- tools/run_kr1000_validation_gate.PMB_SCORE_PROFILES
+- tools/run_kr1000_validation_gate._job_requires_pmb_oos
+- tools/run_kr1000_validation_gate.evaluate_job_metrics
+- tools/run_kr1000_validation_gate._latest_scored_panel_path
+- tools/run_kr1000_validation_gate._read_rebalance_dates
+- tools/run_kr1000_validation_gate._audit_scored_panel_window
+- tests/test_kr1000_validation_gate.py::test_pmb_job_requires_oos_coverage
+- tests/test_kr1000_validation_gate.py::test_pmb_oos_coverage_gate
+- tests/test_kr1000_validation_gate.py::test_validation_dry_run_widens_rebuild_start
+- tests/test_walkforward.py::test_pmb_oos_feature_selector_excludes_leakage
+
+**symbols_changed**:
+- kr_config.kr1000_leader_alpha_cfg
+- kr_multibagger_classifier.train_entry_classifier
+- tools/run_classifier_retrain.main
+- tools/run_kr1000_validation_gate.parse_args
+- tools/run_kr1000_validation_gate.evaluate_backtest_metrics
+- tools/run_kr1000_validation_gate._planned_backtests
+- tools/run_kr1000_validation_gate._render_report
+- tools/run_kr1000_validation_gate.main
+- .github/workflows/kr1000_data_update_and_validation.yml
+- .github/workflows/quarterly_backtest.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none. `target_cagr_gate` changed value from `0.35` to
+`0.30`.
+
+**breaking_changes**:
+- Official validation status now follows `pmb_defensive_mdd_gate` when
+  `--strategy-ab` is included. `full` is still reported as a baseline gate.
+- P_MB/hybrid jobs require the P_MB OOS coverage gate to pass.
+
+**Validation**:
+- `py -3 -m py_compile tools\build_pmb_oos_picks.py tools\run_kr1000_validation_gate.py tools\run_classifier_retrain.py kr_multibagger_classifier.py`
+  -> passed.
+- `py -3 tests\test_walkforward.py` -> 10 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 7 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 11 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --component-ab --strategy-ab --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_pmb_oos`
+  -> planned `build_pmb_oos_picks`, 12 broker backtests, target CAGR `0.30`,
+  all backtest commands include `--pmb-oos-picks`.
+- `py -3 tools\build_pmb_oos_picks.py --target-start 2018-01-01 --target-end 2026-06-04 --iterations 20 --out H:\kr_quant_engine\outputs\p_mb_oos_picks_purged_3sleeve_smoke.csv --coverage-json H:\kr_quant_engine\outputs\p_mb_oos_picks_purged_3sleeve_smoke.coverage.json`
+  -> 1800 picks across 60 months, `2020-01-31` to `2024-12-30`, split gap
+  `10` months, coverage failed `60/102` months as expected from the current
+  2019-start scored panel. Risk sleeve was skipped because the current panel
+  lacks `forward_min_return_1m` / `forward_return_1m`.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04`
+  -> Critical `0`, High `4`, Medium `1`.
+
+---
+
+### 12:16 KST - kr1000-live-pmb-daily-automation
+
+**Scope**: Upgraded the daily KR1000 data-to-broker automation so the latest
+readiness snapshot can use the persisted P_MB classifier instead of ranking
+all latest rows with neutral scores.
+
+**What landed**:
+- `tools/build_latest_kr1000_scored_snapshot.py` can now infer the previous
+  KRX close when `--as-of` is omitted.
+- Added `--classifier-mode {auto,none,require}` to the latest snapshot builder.
+  In `auto` mode, it loads `models/classifier_latest.cbm` when available and
+  keeps neutral scoring when the model is absent.
+- Added PIT-safe classifier feature carry-forward from each ticker's prior
+  full-feature scored-panel row. Rows dated on or after the latest snapshot
+  date are excluded so repeated latest snapshots cannot feed themselves.
+- When live classifier scoring is applied, latest `--no-rs` snapshots use
+  `score_profile=pmb_pre_surge`; cached-RS snapshots use `hybrid_pmb_rs`.
+- `tools/run_kr1000_daily_broker_check.py` now respects an embedded
+  single-valued `score_profile` from the scored panel before recomputing ranks.
+- GitHub daily broker workflow now syncs `models`, builds the latest scored
+  snapshot before broker readiness, syncs `feature_store` back to GDrive, and
+  uploads the latest snapshot manifest.
+- GitHub light data/validation workflow now runs
+  `--build-latest-snapshot` inside `tools/run_kr1000_validation_gate.py` after
+  data refresh and before daily broker readiness.
+
+**Operational result**:
+- Local live-PMB latest snapshot test for `2026-06-04` scored 1000 KR1000 rows
+  with `classifier_latest.cbm`.
+- Feature alignment: `110/110` classifier features shared, `102` carried from
+  prior full-feature rows.
+- P_MB probability distribution: min `0.000012`, mean `0.2193`, max `0.9526`.
+- Daily broker check on the live-PMB snapshot completed with signal age `0`,
+  no blockers, `score_profile=pmb_pre_surge`, and a 22-row trade plan
+  (`BUY:20`, `SELL:2` using the example holdings file).
+- This improves daily stock-selection readiness. It is explicitly not official
+  CAGR/MDD evidence because carried features and latest live classifier scoring
+  are not a purged 8y broker-ledger backtest.
+
+**symbols_added**:
+- tools/build_latest_kr1000_scored_snapshot.previous_krx_close_date
+- tools/build_latest_kr1000_scored_snapshot._find_classifier
+- tools/build_latest_kr1000_scored_snapshot._load_classifier_feature_cols
+- tools/build_latest_kr1000_scored_snapshot._carry_forward_classifier_features
+- tools/build_latest_kr1000_scored_snapshot._score_live_classifier
+- tests/test_kr1000_data_store.py::test_latest_snapshot_classifier_feature_carry_is_pit_safe
+
+**symbols_changed**:
+- tools/build_latest_kr1000_scored_snapshot.parse_args
+- tools/build_latest_kr1000_scored_snapshot.build_latest_snapshot
+- tools/build_latest_kr1000_scored_snapshot.main
+- tools/run_kr1000_daily_broker_check.main
+- tools/run_kr1000_validation_gate.parse_args
+- tools/run_kr1000_validation_gate.main
+- .github/workflows/daily_kr1000_broker_check.yml
+- .github/workflows/kr1000_data_update_and_validation.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none. New behavior is CLI/workflow driven.
+
+**breaking_changes**: none. `--classifier-mode auto` degrades to the previous
+neutral latest snapshot behavior when the classifier or metadata is unavailable.
+
+**Validation**:
+- `py -3 tools\build_latest_kr1000_scored_snapshot.py --as-of 2026-06-04 --no-rs --classifier-mode require --out H:\kr_quant_engine\outputs\kr1000_latest_live_pmb_test.parquet --out-dir H:\kr_quant_engine\outputs\kr1000_latest_live_pmb_test`
+  -> 1000 latest rows, `latest_fast_liquidity_only_live_pmb`.
+- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04 --scored-panel H:\kr_quant_engine\outputs\kr1000_latest_live_pmb_test.parquet --current-holdings state\current_holdings.example.csv --out-dir H:\kr_quant_engine\outputs\kr1000_live_pmb_broker_check_test`
+  -> `completed`, signal age `0`, blockers `[]`, `score_profile=pmb_pre_surge`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --refresh-data --skip-avg-value-refresh --build-latest-snapshot --skip-backtests --dry-run --out-dir H:\kr_quant_engine\outputs\kr1000_validation_dryrun_live_snapshot`
+  -> planned commands `refresh_data`, then `build_latest_snapshot`.
+- `py -3 tests\test_kr1000_data_store.py` -> 6 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 4 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 11 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 -m py_compile tools\run_kr1000_daily_broker_check.py tools\build_latest_kr1000_scored_snapshot.py tools\run_kr1000_validation_gate.py`
+  -> passed.
+
+---
+
+## 2026-06-05
+
+### 19:12 KST - kr1000-schema-union-broker-ab
+
+**Scope**: Fixed a schema-union ranking regression introduced by the latest
+daily readiness rows and recorded focused broker-ledger A/B evidence for the
+next performance pass.
+
+**What landed**:
+- Added eligibility schema-union fallback in `compute_leader_scores()`.
+  When a concatenated scored panel has `eligible_final=NaN` on historical rows,
+  those rows now fall back to `in_kr1000` instead of being treated as
+  ineligible.
+- Added a regression test proving historical KR1000 rows still receive
+  `leader_rank` after latest-readiness rows add the newer `eligible_final`
+  column.
+- Made scored-panel rebuild start inference deterministic when cache files have
+  equal filesystem mtimes.
+- Confirmed that simple concentration/exposure changes are not the path to the
+  CAGR target. The current best challenger remains signal-limited rather than
+  broker-harness-limited.
+
+**Operational result**:
+- Restored historical P_MB ranking on the mixed scored panel.
+- Reconfirmed current best available 2020-2024 P_MB OOS broker-ledger
+  challenger: CAGR `25.38%`, MDD `-24.00%`, Sharpe `1.23`, IR `1.00`,
+  KOSPI200 excess `+23.12%`.
+- Daily hard-exit disabled A/B worsened to CAGR `21.64%`, MDD `-31.22%`,
+  Sharpe `1.00`; keep the hard-exit rule enabled.
+- Higher exposure / no ladder / tighter variants did not beat the current
+  best. Next performance work should improve signal coverage and full-feature
+  backfill, not remove defensive broker rules.
+
+**symbols_added**:
+- kr1000_leader._eligibility_series
+- tests/test_kr1000_leader.py::test_nan_eligible_final_falls_back_to_in_kr1000
+
+**symbols_changed**:
+- kr1000_leader.compute_leader_scores
+- tools/run_kr1000_validation_gate._infer_scored_panel_start_date
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none. This is a backwards-compatible schema-union fix for
+mixed historical/latest scored panels.
+
+**Validation**:
+- `py -3 tests\test_kr1000_leader.py` -> 11 passed, 0 failed.
+- `py -3 tests\test_kr1000_data_store.py` -> 5 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 4 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `git diff --check` -> passed.
+- `py -3 tools\run_kr1000_backtest.py ... --disable-daily-hard-exit` ->
+  CAGR `21.64%`, MDD `-31.22%`, Sharpe `1.00`, production broker metric.
+
+---
+
+### 18:31 KST - kr1000-latest-readiness-snapshot
+
+**Scope**: Cleared the stale scored-panel data blocker for daily readiness by
+adding a fast latest-snapshot bridge and fixing Windows/GitHub operational
+failure modes found during local GDrive validation.
+
+**What landed**:
+- Added `tools/build_latest_kr1000_scored_snapshot.py`.
+  - Builds the latest PIT KR1000 universe from GDrive data.
+  - Appends a fresh `scored_panel_v0` row set through the latest observable
+    close.
+  - Supports `--no-rs` liquidity-only mode for daily readiness when full
+    feature backfill is too expensive.
+- Added mktcap daily-value liquidity proxy fallback for missing
+  `avg_value_60d` caches. The proxy is PIT-safe: it only uses
+  `mktcap_ALL_YYYYMMDD` files dated on or before the signal date and within
+  `avg_value_mktcap_value_fallback_max_days`.
+- Added `universe_name_lookup` so operational snapshots can skip DART name
+  enrichment and avoid slow external waits.
+- Fixed Windows cp949 runtime crashes by replacing non-ASCII runtime output in
+  `run_local.py`, `kr_pipeline.py`, and `kr_universe.py`.
+- Added cache-preserving rebuild controls:
+  `--rebuild-start-date`, `--rebuild-max-new-months`, and
+  `run_local.py --incremental-max-new-months`.
+- `tools/run_kr1000_validation_gate.py --skip-backtests` now exits `0` when
+  data and daily broker gates pass.
+
+**Operational result**:
+- Generated latest scored panel:
+  `G:/.../feature_store/scored_panel_v0_2019-01-01_2026-06-04_2026-06-05-p1-pit-data-audit.parquet`.
+- Latest scored signal date is now `2026-06-04` instead of `2024-12-30`.
+- Data integrity gate now has Critical `0`.
+- Daily broker check now completes with signal age `0` and writes a 20-row
+  trade plan.
+- Caveat: the appended `2026-06-04` rows are `latest_fast_liquidity_only`
+  readiness rows, not full RS/flow/technical/fundamental backtest rows. Do not
+  treat them as an official CAGR/MDD improvement.
+
+**symbols_added**:
+- tools/build_latest_kr1000_scored_snapshot.py
+- kr_universe.compute_avg_value_proxy_from_mktcap_cache
+- kr_universe.find_prior_mktcap_value_cache
+- tests/test_kr1000_data_store.py::test_mktcap_value_proxy_fallback
+- tools/run_kr1000_validation_gate._infer_scored_panel_start_date
+
+**symbols_changed**:
+- kr_config.DEFAULT_CFG
+- kr_config.kr1000_leader_alpha_cfg
+- kr_universe.compute_avg_trading_value_60d
+- kr_universe.build_universe_snapshot
+- kr_pit_universe.build_historical_mcap_panel
+- kr_pit_universe._fetch_listing_from_historical_mcap
+- tools/refresh_kr1000_daily_data.normalize_mcap_snapshot
+- tools/run_kr1000_validation_gate.py
+- run_local.py
+- kr_pipeline.py
+- SESSION_HANDOFF.md
+
+**config_fields_added**:
+- `universe_name_lookup`
+- `avg_value_mktcap_value_fallback`
+- `avg_value_mktcap_value_fallback_max_days`
+- `scored_panel_incremental_max_new_months`
+- `scored_panel_allow_prior_engine_reuse`
+
+**breaking_changes**: none. The latest snapshot bridge is an operational
+readiness path. Official performance metrics still require broker-ledger
+backtests and full-feature signal rows.
+
+**Validation**:
+- `py -3 tools\build_latest_kr1000_scored_snapshot.py --as-of 2026-06-04 --no-rs`
+  -> 1000 latest rows, output scored panel through `2026-06-04`.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-backtests`
+  -> `completed_no_official_backtest`, data gate passed, exit code `0`.
+- Data audit summary: Critical `0`, High `4`, Medium `1`, Low `0`.
+- Daily broker check: `completed`, signal `2026-06-04`, signal age `0`,
+  trade plan rows `20`.
+- `py -3 tests/test_kr1000_data_store.py` -> 5 passed, 0 failed.
+- `py -3 tests/test_kr1000_validation_gate.py` -> 4 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` -> 24 passed, 0 failed.
+
+---
+
+### 15:33 KST - kr1000-cache-preserving-github-refresh
+
+**Scope**: Made the GitHub KR1000 data/full-validation path cache-preserving
+by default, so scheduled runs can update price/PIT data, extend the scored
+panel, and run broker-ledger A/B without recomputing every cached artifact.
+
+**What landed**:
+- Added PIT-safe prior `avg_value_60d` cache selection. The universe builder
+  can reuse only a cache dated on or before the rebalance date and only within
+  the configured date gap.
+- Added scored-panel incremental rebuild support. When the target
+  `scored_panel_v0` file is missing, `build_scored_panel_v0()` now looks for a
+  compatible same-start prior panel and computes only missing month-ends.
+- GitHub `KR1000 Data Update and Validation` full mode now preserves caches by
+  default. Manual dispatch can still force a from-scratch rebuild with
+  `force_full_rebuild=true`.
+- Updated KR1000 operations docs so other agents know to use the incremental
+  full validation path before tuning signal weights.
+
+**Operational result**:
+- This does not change the current performance target status. The best current
+  broker-ledger challenger remains `25.38%` CAGR / `-24.00%` MDD, below the
+  official `35%` CAGR gate.
+- The next GitHub full validation run should address the stale scored-panel
+  data blocker by preserving GDrive caches and extending the panel through the
+  latest observable KRX close.
+
+**symbols_added**:
+- kr_universe.find_prior_avg_value_cache
+- kr_pipeline.scored_panel_cache_path
+- kr_pipeline.find_incremental_scored_panel_cache
+- tests/test_kr1000_data_store.py::test_avg_value_prior_cache_selection
+- tests/test_kr1000_data_store.py::test_incremental_scored_panel_cache_selection
+
+**symbols_changed**:
+- kr_universe.compute_avg_trading_value_60d
+- kr_universe.build_universe_snapshot
+- kr_pipeline.build_scored_panel_v0
+- kr_config.DEFAULT_CFG
+- kr_config.kr1000_leader_alpha_cfg
+- .github/workflows/kr1000_data_update_and_validation.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**:
+- `avg_value_fallback_max_days`
+- `scored_panel_incremental_rebuild`
+
+**breaking_changes**: none. The fallback is date-limited and PIT-safe; forced
+from-scratch rebuilds remain available via `--full-rebuild` and GitHub manual
+`force_full_rebuild=true`.
+
+**Validation**:
+- `py -3 tests/test_kr1000_data_store.py` -> 4 passed, 0 failed.
+- `py -3 tests/test_kr1000_validation_gate.py` -> 3 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests/smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --refresh-data --rebuild-scored-panel --component-ab --strategy-ab --dry-run` -> 2 planned commands, 12 planned backtests.
+- Verified dry-run `rebuild_scored_panel` command uses `run_local.py --quick`
+  without `--full-rebuild`.
+- `git diff --check` -> clean except CRLF warnings.
+
+---
+
+### 15:10 KST - kr1000-portfolio-dd-ladder-challenger
+
+**Scope**: Added a portfolio-level drawdown ladder to the KR1000 broker-ledger
+engine and promoted the best current P_MB defensive configuration into the
+validation gate as a reproducible strategy challenger.
+
+**What landed**:
+- Added `portfolio_drawdown_exposure_scale()` and optional
+  `portfolio_drawdown_ladder_enabled` support inside
+  `run_event_driven_backtest()`.
+- Backtest daily NAV now records `portfolio_drawdown` and `peak_nav`.
+- Backtest metrics now record effective gross exposure when the ladder is on.
+- Added runner CLI flags:
+  `--portfolio-dd-ladder`, `--portfolio-dd-thresholds`, and
+  `--portfolio-dd-scales`.
+- Added `KR1000_STRATEGY_AB_PRESETS["pmb_defensive_mdd_gate"]` to
+  `tools/run_kr1000_validation_gate.py`.
+- GitHub full-mode KR1000 validation now passes `--strategy-ab` together with
+  `--component-ab`.
+
+**Operational result**:
+- Prior best MDD-passing broker challenger: `CAGR 24.69%`, `MDD -24.74%`,
+  Sharpe `1.26`.
+- New `pmb_defensive_mdd_gate` challenger:
+  `CAGR 25.38%`, `MDD -24.00%`, Sharpe `1.23`, IR `1.00`, KOSPI200 excess
+  `+23.12%`.
+- Standard artifact directory:
+  `G:/.../outputs/kr1000_pmb_oos_mdd_gate_bt_2020_2024`.
+- GitHub Quarterly Backtest on pushed SHA `6769679` succeeded, but KR1000
+  diagnostic still reports `failed_performance`; data gate Critical `1` is the
+  stale scored-panel signal date (`2024-12-30`).
+- This is still below the official CAGR `>= 35%` target and is not an 8y
+  official pass.
+
+**symbols_added**:
+- kr1000_leader.portfolio_drawdown_exposure_scale
+- tools/run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS
+- tools/run_kr1000_validation_gate._extend_cmd_with_strategy_preset
+- tests/test_kr1000_leader.py::test_portfolio_drawdown_ladder_scale
+- tests/test_kr1000_leader.py::test_event_backtester_drawdown_ladder_metrics
+
+**symbols_changed**:
+- kr_config.kr1000_leader_alpha_cfg
+- kr1000_leader.run_event_driven_backtest
+- tools/run_kr1000_backtest.py
+- tools/run_kr1000_validation_gate.py
+- .github/workflows/kr1000_data_update_and_validation.yml
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**:
+- `portfolio_drawdown_ladder_enabled`
+- `portfolio_drawdown_ladder_thresholds`
+- `portfolio_drawdown_ladder_scales`
+
+**breaking_changes**: none. Drawdown ladder is opt-in.
+
+**Validation**:
+- `py -3 tests/test_kr1000_leader.py` -> 10 passed, 0 failed.
+- `py -3 tests/test_kr1000_validation_gate.py` -> 3 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests/smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests/test_kr1000_data_store.py` -> 2 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run` -> 12 planned backtests.
+- `git diff --check` -> clean except CRLF warnings.
+
+---
+
+### 14:07 KST - kr1000-pmb-broker-ledger-rank-nav-fixes
+
+**Scope**: Fixed two broker-ledger issues that prevented PIT-safe P_MB OOS
+signals from being evaluated correctly, then added strategy override CLI knobs
+for reproducible defensive A/B runs.
+
+**What landed**:
+- `pmb_pre_surge` and `hybrid_pmb_rs` now rank sparse positive P_MB OOS
+  probabilities with a positive-only percentile score instead of robust z-score.
+- `generate_trade_plan()` now accepts `account_nav` and computes current
+  weights / trade notional against cash-inclusive NAV when supplied.
+- `run_event_driven_backtest()` now passes daily NAV into `generate_trade_plan()`.
+- `tools/run_kr1000_backtest.py` now supports strategy overrides:
+  `--gross-exposure`, `--hard-stop-loss-pct`, `--buy-rank-threshold`,
+  `--hold-rank-threshold`, `--min-notional-krw`, `--slippage-bp`, and
+  `--disable-daily-hard-exit`.
+- Added regression tests for sparse P_MB ranking and cash-inclusive trade-plan
+  weighting.
+
+**Operational result**:
+- P_MB OOS 2020-2024 before these fixes: `CAGR -5.61%`, `MDD -34.33%`.
+- After sparse-rank fix only: `CAGR 9.35%`, `MDD -25.18%`.
+- After sparse-rank + NAV fix: `CAGR 23.52%`, `MDD -33.07%`, Sharpe `0.99`.
+- Defensive CLI run (`pmb_pre_surge`, gross `0.60`, hard stop `0.10`) produced
+  `CAGR 24.69%`, `MDD -24.74%`, Sharpe `1.26`, KOSPI200 excess `+22.42%`.
+- Current target `CAGR >= 35%` is still not met; next work should improve alpha
+  signal quality, not the broker harness.
+
+**symbols_added**:
+- kr1000_leader._sparse_positive_rank_score
+- tests/test_kr1000_leader.py::test_sparse_pmb_oos_ranking
+- tests/test_kr1000_leader.py::test_trade_plan_uses_account_nav_for_cash_weighting
+
+**symbols_changed**:
+- kr1000_leader.apply_kr1000_score_profile
+- kr1000_leader.generate_trade_plan
+- kr1000_leader.run_event_driven_backtest
+- tools/run_kr1000_backtest.py
+- tests/test_kr1000_leader.py
+- tests/test_kr1000_validation_gate.py
+- SESSION_HANDOFF.md
+- docs/KR1000_GITHUB_OPERATIONS.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 tests/test_kr1000_leader.py` -> 8 passed, 0 failed.
+- `py -3 tests/test_kr1000_validation_gate.py` -> 3 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests/smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tests/test_kr1000_data_store.py` -> 2 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --dry-run` -> 11 planned backtests.
+- `git diff --check` -> clean except CRLF warnings.
+- Backtest artifacts written under
+  `G:/.../outputs/kr1000_pmb_oos_defensive_cli_bt_2020_2024`.
+
+---
+
+### 13:04 KST - kr1000-data-store-and-cagr35-gate
+
+**Scope**: Raised the official KR1000 performance target to CAGR 35% while
+keeping MDD -25%, and made the Google Drive data-store setup reproducible from
+both local runs and GitHub Actions.
+
+**What landed**:
+- `kr1000_leader_alpha_cfg()` now uses `target_cagr_gate = 0.35`.
+- `tools/run_kr1000_validation_gate.py` report text now states the official
+  target as CAGR `>= 35%`.
+- KR1000 component A/B now also includes performance challengers:
+  `legacy_p1_blended`, `pmb_pre_surge`, and `hybrid_pmb_rs`.
+- Added `tools/setup_kr1000_data_store.py` to create/verify the canonical
+  Google Drive data layout and write `outputs/data_store_manifest.json`.
+- Added `tests/test_kr1000_data_store.py`.
+- Wired data-store setup into daily KR1000 broker check, KR1000 data update
+  and validation, quarterly backtest, and PR smoke workflows.
+- Updated `docs/KR1000_GITHUB_OPERATIONS.md` and `SESSION_HANDOFF.md`.
+
+**Operational result**:
+- Local `DATA_ROOT` resolves to `G:/내 드라이브/kr_quant_engine`.
+- Existing GDrive folders were present for caches, PIT data, feature_store,
+  outputs, and models; `state/` was missing and is now handled by setup.
+- GitHub PR smoke for prior commit `83bf71c` passed before this update.
+- Quarterly KR1000 validation diagnostic for `83bf71c` was still running when
+  this update started; it will be superseded by the next pushed SHA.
+
+**symbols_added**:
+- tools/setup_kr1000_data_store.py: REQUIRED_DATA_DIRS,
+  build_data_store_manifest, write_manifest, main
+- tests/test_kr1000_data_store.py
+
+**symbols_changed**:
+- kr1000_leader.KR1000_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
+- kr_config.kr1000_leader_alpha_cfg
+- tools/run_kr1000_validation_gate.py
+- .github/workflows/daily_kr1000_broker_check.yml
+- .github/workflows/kr1000_data_update_and_validation.yml
+- .github/workflows/quarterly_backtest.yml
+- .github/workflows/smoke_test.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: KR1000 official acceptance is stricter: CAGR gate is now
+35%, not 30%.
+
+**Validation**:
+- pending final smoke/YAML/data-store checks after this edit.
+
+---
+
+### 11:45 KST - github-data-update-validation-automation
+
+**Scope**: Added GitHub-side automation so other agents can run KR1000 data
+updates, scored-panel rebuilds, broker validation, and performance diagnostics
+from the repository instead of relying only on local state.
+
+**What landed**:
+- Added `.github/workflows/kr1000_data_update_and_validation.yml`.
+- The new workflow has a weekday light mode for market/PIT refresh and daily
+  broker readiness, plus a weekly full mode for scored-panel rebuild,
+  DART/feature-store refresh, official 8y validation, and component A/B.
+- Updated `.github/workflows/quarterly_backtest.yml` to call
+  `tools/run_kr1000_validation_gate.py` without a hard-coded end date.
+- Updated `.github/workflows/smoke_test.yml` so PIT universe tests are skipped
+  when GitHub CI has no `historical_mcap` or `mktcap` cache.
+- Added `docs/KR1000_GITHUB_OPERATIONS.md` with required secrets, manual
+  commands, workflow roles, and the performance-improvement loop.
+
+**Operational result**:
+- GitHub CLI authentication confirmed for `wscha231`.
+- New branch created: `codex/kr1000-github-automation`.
+- Workflow YAML and validation runner commands are ready for GitHub execution.
+
+**symbols_added**:
+- .github/workflows/kr1000_data_update_and_validation.yml
+- docs/KR1000_GITHUB_OPERATIONS.md
+
+**symbols_changed**:
+- .github/workflows/quarterly_backtest.yml
+- .github/workflows/smoke_test.yml
+- CHANGELOG.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- pending final pre-commit smoke after workflow/doc update.
+
+---
+
+### 11:34 KST - kr1000-official-validation-gate
+
+**Scope**: Implemented the official KR1000 data-readiness, broker-readiness,
+8y backtest, and component A/B validation gate for the CAGR 30% / MDD -25%
+target.
+
+**What landed**:
+- Added reusable KR1000 score profiles: `full`, `rs_only`, `rs_flow`, and
+  `rs_flow_technical`.
+- `tools/run_kr1000_backtest.py` now supports `--score-profile` and defaults
+  the official start date to `2018-01-01`.
+- Added `tools/run_kr1000_validation_gate.py`, which orchestrates optional data
+  refresh, optional scored-panel rebuild, data audit, daily broker readiness,
+  official 8y broker-ledger backtest, 2016-current/stress periods, and
+  component A/B jobs.
+- The validation gate writes `kr1000_validation_gate.json/.md` with thresholds,
+  blockers, planned commands, backtest metrics, and official pass/fail checks.
+- Smoke syntax coverage now includes `tools/*.py`.
+
+**Operational result**:
+- Dry-run with component A/B planned `8` broker-ledger backtests.
+- Dry-run with `--refresh-data --rebuild-scored-panel` planned the two upstream
+  commands plus the same `8` backtests.
+- Actual gate run with `--skip-backtests` is correctly `blocked` by current
+  data state: audit Critical `1`, High `4`; daily broker check return code `2`
+  because latest signal remains `2024-12-30`.
+
+**symbols_added**:
+- kr1000_leader.LEADER_SCORE_WEIGHTS
+- kr1000_leader.KR1000_SCORE_PROFILES
+- kr1000_leader.apply_kr1000_score_profile
+- tools/run_kr1000_validation_gate.py: metric_value,
+  evaluate_backtest_metrics, main
+- tests/test_kr1000_validation_gate.py
+
+**symbols_changed**:
+- kr1000_leader.compute_leader_scores
+- tools/run_kr1000_backtest.parse_args
+- tools/run_kr1000_backtest.main
+- tests/test_kr1000_leader.py
+- tests/smoke_test.py
+
+**config_fields_added**:
+- target_cagr_gate, target_mdd_gate, target_excess_cagr_gate,
+  target_sharpe_gate, target_information_ratio_gate,
+  target_min_backtest_years, score_profile.
+
+**breaking_changes**: none. Default KR1000 score profile is `full`, preserving
+the production formula unless an A/B profile is explicitly requested.
+
+**Validation**:
+- `py -3 tests/smoke_test.py --quick` - 24 passed, 0 failed.
+- `py -3 tests/test_kr1000_leader.py` - 6 passed, 0 failed.
+- `py -3 tests/test_kr1000_validation_gate.py` - 2 passed, 0 failed.
+- `py -3 tests/smoke_test.py` - 46 passed, 0 failed.
+- `py -3 tools/run_kr1000_backtest.py --help` - OK.
+- `py -3 tools/run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --dry-run` - OK.
+- `py -3 tools/run_kr1000_validation_gate.py --as-of 2026-06-04 --skip-backtests` -
+  blocked as expected by stale scored panel and data audit critical.
+
+---
+
+### 10:25 KST - kr1000-broker-rule-daily-check
+
+**Scope**: Ported the r1000 official broker-ledger operating rule into KR1000
+and added a previous-close daily check path.
+
+**What landed**:
+- KR1000 default execution policy now uses `metric_mode=broker_ledger_next_close`,
+  `execution_price=next_close`, and `execution_timing=next_trading_day_close`.
+- `kr1000_leader.run_event_driven_backtest()` now records broker metric fields,
+  fees, gross values, fill mode, cash state, and production-metric validity.
+- Daily hard-stop monitoring now emits `SELL_HARD_STOP_DAILY` orders even on
+  non-rebalance days, filled by the next close.
+- `tools/run_kr1000_daily_broker_check.py` evaluates current holdings at the
+  previous KRX close and writes broker-rule daily check JSON/MD/CSV outputs.
+- `tools/refresh_kr1000_daily_data.py` refreshes latest mcap data and appends
+  it into `data_pit/historical_mcap.parquet` without requiring a full
+  `cache_pykrx` resync.
+- `.github/workflows/daily_kr1000_broker_check.yml` runs the daily data refresh
+  and broker check after KRX close.
+- `.github/workflows/quarterly_backtest.yml` now includes a KR1000
+  broker-ledger diagnostic backtest artifact path.
+
+**Operational result**:
+- Ran `tools/refresh_kr1000_daily_data.py --as-of 2026-06-04 --skip-avg-value`.
+- Latest mcap snapshot: `2770` rows.
+- `historical_mcap.parquet`: `287910` -> `290680` rows, max snapshot advanced
+  to `2026-06-04`.
+- Daily broker check for `2026-06-04` is correctly blocked because the latest
+  scored signal is still `2024-12-30` and the data audit still has one critical
+  scored-panel freshness issue.
+- Updated audit summary: Critical `1`, High `4`, Medium `0`.
+
+**symbols_added**:
+- tools/run_kr1000_daily_broker_check.py: previous_krx_close_date,
+  mark_holdings_to_previous_close, render_report, main
+- tools/refresh_kr1000_daily_data.py: normalize_mcap_snapshot,
+  derive_listed_history_from_historical_mcap, append_pit_mcap_snapshot, main
+
+**symbols_changed**:
+- kr_config.kr1000_leader_alpha_cfg
+- kr1000_leader.run_event_driven_backtest
+- kr1000_leader.write_leader_outputs
+- tools/audit_data_integrity._workflow_summary
+- tests/test_kr1000_leader.py
+
+**config_fields_added**:
+- metric_mode, integer_shares, no_negative_cash, no_leverage,
+  hard_stop_loss_pct.
+
+**breaking_changes**: KR1000 production-style metrics should now be interpreted
+as broker-ledger next-close metrics. Older next-open runs are no longer the
+official operating comparison.
+
+**Validation**:
+- `py -3 tests/test_kr1000_leader.py` - 5 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` - 24 passed, 0 failed.
+- `py -3 tests/smoke_test.py` - 46 passed, 0 failed.
+- `py -3 tools/refresh_kr1000_daily_data.py --dry-run --as-of 2026-06-04` - OK.
+- `py -3 tools/refresh_kr1000_daily_data.py --as-of 2026-06-04 --skip-avg-value` - OK.
+- `py -3 tools/run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04` -
+  blocked as expected by stale scored panel.
+- `py -3 -c "import yaml, pathlib; ..."` - daily/quarterly workflow YAML OK.
+- `py -3 tools/audit_data_integrity.py --as-of 2026-06-05` - generated report;
+  exits 1 by design because critical scored-panel freshness issue remains.
+
+---
+
+### 09:40 KST - data-integrity-audit-and-pit-hardening
+
+**Scope**: Started a root data-integrity audit before further KR1000
+performance work. The audit checks collection freshness, PIT membership,
+fundamental filing timestamps, workflow coverage, and the active cost model.
+
+**What landed**:
+- `tools/audit_data_integrity.py`: writes data freshness/leakage reports to
+  `outputs/data_integrity_audit_YYYYMMDD.{json,md}`.
+- `kr_features.add_macro_signals`: now uses `get_macro_snapshot_pit()` so
+  macro series publication lags are respected when phase3 macro is enabled.
+- `kr_dart_client.infer_report_period_end`: prevents newly built DART
+  fundamentals panels from creating `period_end` metadata after `rcept_dt`
+  for non-December fiscal-year companies.
+- `KR_ENGINE_REUSE_VERSION` bumped to `2026-06-05-p1-pit-data-audit` so future
+  feature-store rebuilds do not silently reuse stale formula artifacts.
+
+**Audit result**:
+- `outputs/data_integrity_audit_20260605.json` / `.md` generated under
+  `DATA_ROOT`.
+- Critical: latest scored panel signal date is stale at 2024-12-30
+  (`522` days as of 2026-06-05).
+- High: `mktcap_ALL` cache and `avg_value` cache have month-level gaps.
+- High: current scored panel has `113` rows with
+  `fundamentals_period_end > rebalance_date` and `293` rows with
+  `fundamentals_period_end > fundamentals_rcept_dt`.
+- Direct PIT checks passed for the inspected panel: `0` rows with
+  `fundamentals_rcept_dt > rebalance_date`, and `0` PIT membership misses.
+- Workflow gap: no GitHub workflow runs `tools/run_kr1000_backtest.py`;
+  `monthly_picks.yml` skips `cache_pykrx`, so PIT mcap history will not advance
+  on Actions unless `data_pit` is refreshed elsewhere.
+
+**symbols_added**:
+- kr_dart_client: CALENDAR_PERIOD_END_BY_REPRT_CODE,
+  infer_report_period_end
+- tools/audit_data_integrity.py: build_audit, write_markdown, main
+
+**symbols_changed**:
+- kr_features.add_macro_signals
+- kr_dart_client.build_universe_quarterly_panel
+- kr_dart_client.build_corp_quarterly_panel
+- tests/test_macro.py
+- tests/test_dart_pit.py
+
+**config_fields_added**: none
+
+**breaking_changes**: cache/feature artifacts should be rebuilt under
+`KR_ENGINE_REUSE_VERSION=2026-06-05-p1-pit-data-audit` before trusting new
+KR1000 performance metrics.
+
+**Validation**:
+- `py -3 tests/test_dart_pit.py` - 16 passed, 0 failed.
+- `py -3 tests/test_macro.py` - 14 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` - 24 passed, 0 failed.
+- `py -3 tests/smoke_test.py` - 46 passed, 0 failed.
+- `py -3 tools/audit_data_integrity.py --as-of 2026-06-05` - generated report;
+  exits 1 by design because critical freshness issue remains.
+- `git diff --check` - no whitespace errors; CRLF warnings only.
+
+---
+
+## 2026-05-30
+
+### 18:20 KST - kr1000-leader-alpha-v1-ledger-backtest
+
+**Scope**: Added KR1000 Leader Alpha stock-first layer and the first ledger-style
+backtest execution path for real performance inspection.
+
+**What landed**:
+- `kr1000_leader.py`: PIT KR1000 liquidity universe, KOSPI200 RS 1m/3m/6m,
+  component scoring, current-holdings reconciliation, trade-plan generation,
+  and event-driven order/cash/position ledger backtester.
+- `tools/run_kr1000_leader.py`: latest candidate/portfolio/trade-plan runner.
+- `tools/run_kr1000_backtest.py`: scored-panel-to-ledger backtest runner with
+  KOSPI200 benchmark, cached price-panel reuse, and standard output export.
+- `state/current_holdings.example.csv`: private holdings schema example.
+- `tests/test_kr1000_leader.py` and `tests/smoke_test.py`: KR1000 structural,
+  RS math, trade-plan, ledger, and import checks.
+
+**First result**:
+- Window available from current scored panel: 2019-01-31 to 2024-12-30
+  signals, NAV through 2025-01-09.
+- `outputs/kr1000_bt_2019_2024/leader_backtest_metrics.json`:
+  CAGR -4.77%, KOSPI200 CAGR +1.80%, excess CAGR -6.57pp, MDD -51.77%,
+  Sharpe -0.10, trades 1,946.
+- Verdict: KR1000 v1 execution path works, but the raw score formula fails the
+  MDD gate and benchmark gate. Next work should focus on liquidity/size gates,
+  lower turnover, and component A/B before any live use.
+
+**symbols_added**:
+- kr_config: PHASE4_KR1000_LEADER_COLUMNS, kr1000_leader_alpha_cfg
+- kr1000_leader: build_kr1000_universe, compute_kospi200_relative_strength,
+  add_leader_component_scores, compute_leader_scores, build_target_portfolio,
+  load_current_holdings, generate_trade_plan, run_event_driven_backtest,
+  write_leader_outputs, BacktestResult
+- tools/run_kr1000_leader.py: main
+- tools/run_kr1000_backtest.py: prepare_kr1000_scored_panel, main
+
+**symbols_changed**:
+- kr_universe.build_universe_snapshot: passes cfg avg_value_refresh_days into
+  compute_avg_trading_value_60d.
+- kr1000_leader.run_event_driven_backtest: defends NaN trade values and zero
+  execution prices.
+- tests/smoke_test.py: KR1000 structural/import coverage.
+
+**config_fields_added**:
+- strategy_name, universe_name, kr1000_size, kr_all_discovery_enabled,
+  universe_rank_by, universe_tiebreaker, top_holdings, buy_rank_threshold,
+  hold_rank_threshold, weekly_rebalance_day, daily_hard_exit_enabled,
+  single_stock_max_weight, sector_theme_max_weight, gross_exposure_min,
+  gross_exposure_max, gross_exposure_default, target_mdd_gate,
+  hold_band_weight, min_notional_krw, execution_price, signal_timing,
+  execution_timing, apply_no_fill_rules, avg_value_refresh_days.
+
+**breaking_changes**: none
+
+**Validation**:
+- `py -3 tests/test_kr1000_leader.py` - 4 passed, 0 failed.
+- `py -3 tests/smoke_test.py --quick` - 24 passed, 0 failed.
+- `py -3 tools/run_kr1000_backtest.py --start 2019-01-01 --end 2024-12-31 --out-dir outputs\kr1000_bt_2019_2024 --price-panel outputs\kr1000_bt_2019_2024\leader_price_panel.parquet --save-scored-panel` - completed.
+
+---
+
 ## 2026-04-27
 
 ### 14:00 KST — p0-bootstrap-scaffolding
