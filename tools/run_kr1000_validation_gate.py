@@ -127,6 +127,20 @@ def parse_args() -> argparse.Namespace:
                    help="Append a fast latest scored snapshot after data refresh and before daily broker readiness.")
     p.add_argument("--build-pmb-oos-picks", action="store_true",
                    help="Build purged 3-sleeve P_MB OOS picks before broker backtests.")
+    p.add_argument("--pmb-oos-score-mode", default="balanced",
+                   choices=[
+                       "balanced",
+                       "pre_entry_focus",
+                       "strict_pre_entry",
+                       "pre_entry_risk_only",
+                       "continuation_focus",
+                       "no_risk_balanced",
+                   ],
+                   help="Score mode passed to tools/build_pmb_oos_picks.py.")
+    p.add_argument("--pmb-pre-buffer-months", type=int, default=1,
+                   help="Months immediately before surge_start excluded from P_MB pre-entry labels.")
+    p.add_argument("--pmb-iterations", type=int, default=400,
+                   help="CatBoost iterations passed to P_MB OOS builder.")
     p.add_argument("--enrich-forward-labels", action="store_true",
                    help=(
                        "Add forward target labels to the selected scored panel before "
@@ -638,6 +652,13 @@ def _render_report(payload: dict[str, Any]) -> str:
         lines.append(f"- Path: `{pmb_gate.get('path')}`")
         lines.append(f"- Status: `{pmb_gate.get('status')}`")
         lines.append(f"- Pass: `{pmb_gate.get('pass')}`")
+        settings = payload.get("pmb_oos_build_settings") or {}
+        if settings:
+            lines.append(
+                f"- Build settings: score_mode=`{settings.get('score_mode')}`, "
+                f"pre_buffer_months=`{settings.get('pre_buffer_months')}`, "
+                f"iterations=`{settings.get('iterations')}`"
+            )
         if pmb_gate.get("expected_months") is not None:
             lines.append(
                 f"- Covered months: `{pmb_gate.get('covered_months')}` / `{pmb_gate.get('expected_months')}`"
@@ -742,6 +763,9 @@ def main() -> int:
             "--coverage-json", str(out_dir / "p_mb_oos_picks_purged_3sleeve.coverage.json"),
             "--target-start", "2018-01-01",
             "--target-end", str(as_of.date()),
+            "--score-mode", str(args.pmb_oos_score_mode),
+            "--pre-buffer-months", str(int(args.pmb_pre_buffer_months)),
+            "--iterations", str(int(args.pmb_iterations)),
         ]
         if args.scored_panel:
             build_cmd.extend(["--panel", str(args.scored_panel)])
@@ -766,6 +790,11 @@ def main() -> int:
                 "sharpe": cfg["target_sharpe_gate"],
                 "information_ratio": cfg["target_information_ratio_gate"],
                 "min_years": cfg["target_min_backtest_years"],
+            },
+            "pmb_oos_build_settings": {
+                "score_mode": args.pmb_oos_score_mode,
+                "pre_buffer_months": int(args.pmb_pre_buffer_months),
+                "iterations": int(args.pmb_iterations),
             },
         }
         json_path = out_dir / "kr1000_validation_gate.json"
@@ -906,6 +935,11 @@ def main() -> int:
             "sharpe": cfg["target_sharpe_gate"],
             "information_ratio": cfg["target_information_ratio_gate"],
             "min_years": cfg["target_min_backtest_years"],
+        },
+        "pmb_oos_build_settings": {
+            "score_mode": args.pmb_oos_score_mode,
+            "pre_buffer_months": int(args.pmb_pre_buffer_months),
+            "iterations": int(args.pmb_iterations),
         },
         "data_gate": {
             "status": data_gate_status,

@@ -6,6 +6,74 @@
 
 ## 2026-06-07
 
+### 09:47 KST - pmb-strict-pre-entry-score-mode
+
+**Scope**: Added configurable P_MB 3-sleeve OOS score modes so the official
+broker harness can test stricter pre-entry rankings without overwriting legacy
+OOS picks. This is an implementation/diagnostic pass; it does not clear the
+official performance target.
+
+**What landed**:
+- Added `combine_pmb_3sleeve_scores()` with `balanced`,
+  `pre_entry_focus`, `strict_pre_entry`, `pre_entry_risk_only`,
+  `continuation_focus`, and `no_risk_balanced` modes.
+- Extended `generate_oos_picks_purged_3sleeve()` and
+  `tools/build_pmb_oos_picks.py` with `--score-mode`,
+  `--pre-buffer-months`, `--pre-surge-months`, `--post-surge-months`, and
+  `--risk-drawdown-threshold`.
+- Extended `tools/run_kr1000_validation_gate.py` with
+  `--pmb-oos-score-mode`, `--pmb-pre-buffer-months`, and
+  `--pmb-iterations`.
+- Preserved `p_balanced` and `p_clean_pre_entry` through the sparse OOS merge
+  for diagnostics while keeping `p_pre_surge = p_combined` for existing
+  backtest compatibility.
+
+**Diagnostic result**:
+- Built strict pre-entry OOS picks:
+  `G:\내 드라이브\kr_quant_engine\outputs\p_mb_oos_picks_strict_preentry_buf2_2018_20260604.csv`.
+- Coverage passed: `102/102` official months from 2018-01 through 2026-06,
+  split gap `10` months, `99` selected features.
+- Broker-ledger next-close top20 backtest:
+  `outputs\kr1000_bt_pmb_strict_preentry_buf2_top20_2018_20260604`.
+- Result: CAGR `4.87%`, KOSPI200 CAGR `18.57%`, excess CAGR `-13.70%`,
+  MDD `-38.76%`, Sharpe `0.358`, IR `-0.886`, trades `1,785`.
+- Conclusion: stricter continuation/risk penalization improves the prior
+  strict OOS run slightly but still fails the official CAGR/MDD/excess gates.
+  The next bottleneck remains label/feature quality, not broker mechanics.
+
+**symbols_added**:
+- kr_backtester_realistic.PMB_3SLEEVE_SCORE_MODES
+- kr_backtester_realistic.combine_pmb_3sleeve_scores
+- tests/test_walkforward.py::test_pmb_3sleeve_score_modes
+
+**symbols_changed**:
+- kr_backtester_realistic.generate_oos_picks_purged_3sleeve
+- tools.build_pmb_oos_picks.parse_args
+- tools.build_pmb_oos_picks.label_three_sleeve_panel
+- tools.build_pmb_oos_picks.build_purged_oos_picks
+- tools.run_kr1000_backtest.PMB_OOS_NUMERIC_COLUMNS
+- tools.run_kr1000_validation_gate.parse_args
+- tools.run_kr1000_validation_gate._render_report
+- tools.run_kr1000_validation_gate.main
+- docs/KR1000_GITHUB_OPERATIONS.md
+- SESSION_HANDOFF.md
+
+**config_fields_added**: none. New CLI-only P_MB builder options are
+diagnostic controls, not config preset fields.
+
+**breaking_changes**: none. The default score mode remains `balanced`, which
+matches the prior 50/50 pre-entry plus continuation blend.
+
+**Validation**:
+- `py -3 -m py_compile kr_backtester_realistic.py tools\build_pmb_oos_picks.py tools\run_kr1000_validation_gate.py tools\run_kr1000_backtest.py tests\test_walkforward.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_walkforward.py` -> 16 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 10 passed, 0 failed.
+- `py -3 tests\test_kr1000_leader.py` -> 15 passed, 0 failed.
+- `py -3 tests\test_pmb_false_positive_audit.py` -> 2 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`, High `0`, Medium `0`.
+
 ### 09:17 KST - pmb-false-positive-leakage-safe-audit
 
 **Scope**: Added a leakage-safe false-positive audit for P_MB OOS candidates

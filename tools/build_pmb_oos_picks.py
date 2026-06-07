@@ -42,6 +42,8 @@ EXTRA_LEAKAGE_EXCLUDES = {
     "p_continuation",
     "p_risk",
     "p_combined",
+    "p_balanced",
+    "p_clean_pre_entry",
     "pmb_oos_rank",
 }
 
@@ -77,6 +79,24 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--nan-threshold", type=float, default=0.50)
     p.add_argument("--iterations", type=int, default=400,
                    help="CatBoost iterations for each fold/label model.")
+    p.add_argument("--pre-surge-months", type=int, default=6,
+                   help="Months before surge_start included in the pre-entry label window.")
+    p.add_argument("--pre-buffer-months", type=int, default=1,
+                   help="Months immediately before surge_start excluded from pre-entry labels.")
+    p.add_argument("--post-surge-months", type=int, default=3,
+                   help="Months after surge_start included in continuation labels.")
+    p.add_argument("--risk-drawdown-threshold", type=float, default=-0.20,
+                   help="Forward 1m drawdown threshold for is_risk labels.")
+    p.add_argument("--score-mode", default="balanced",
+                   choices=[
+                       "balanced",
+                       "pre_entry_focus",
+                       "strict_pre_entry",
+                       "pre_entry_risk_only",
+                       "continuation_focus",
+                       "no_risk_balanced",
+                   ],
+                   help="Composite used for p_combined/p_pre_surge ranking.")
     p.add_argument("--min-covered-years", type=float, default=8.0)
     p.add_argument("--min-coverage-ratio", type=float, default=0.95)
     p.add_argument("--fail-on-coverage-gap", action="store_true",
@@ -170,7 +190,15 @@ def select_pmb_feature_columns(panel: pd.DataFrame,
     return clean
 
 
-def label_three_sleeve_panel(panel: pd.DataFrame, episodes: pd.DataFrame) -> pd.DataFrame:
+def label_three_sleeve_panel(
+    panel: pd.DataFrame,
+    episodes: pd.DataFrame,
+    *,
+    pre_surge_months: int = 6,
+    pre_buffer_months: int = 1,
+    post_surge_months: int = 3,
+    risk_drawdown_threshold: float = -0.20,
+) -> pd.DataFrame:
     """Attach pre-entry, continuation, and risk labels to the scored panel."""
     from kr_multibagger_classifier import (
         label_continuation,
@@ -178,9 +206,22 @@ def label_three_sleeve_panel(panel: pd.DataFrame, episodes: pd.DataFrame) -> pd.
         label_risk,
     )
 
-    labeled = label_pre_entry(panel, episodes, pre_surge_months=6, pre_buffer_months=1)
-    labeled = label_continuation(labeled, episodes, post_surge_months=3)
-    labeled = label_risk(labeled, horizon_months=1, drawdown_threshold=-0.20)
+    labeled = label_pre_entry(
+        panel,
+        episodes,
+        pre_surge_months=int(pre_surge_months),
+        pre_buffer_months=int(pre_buffer_months),
+    )
+    labeled = label_continuation(
+        labeled,
+        episodes,
+        post_surge_months=int(post_surge_months),
+    )
+    labeled = label_risk(
+        labeled,
+        horizon_months=1,
+        drawdown_threshold=float(risk_drawdown_threshold),
+    )
     for col in LABEL_COLS:
         if col in labeled.columns:
             labeled[col] = pd.to_numeric(labeled[col], errors="coerce").fillna(0).astype(int)
@@ -308,11 +349,23 @@ def build_purged_oos_picks(
     embargo_months: int = 9,
     nan_threshold: float = 0.50,
     iterations: int = 400,
+    pre_surge_months: int = 6,
+    pre_buffer_months: int = 1,
+    post_surge_months: int = 3,
+    risk_drawdown_threshold: float = -0.20,
+    score_mode: str = "balanced",
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Label, feature-select, and generate purged 3-sleeve OOS picks."""
     from kr_backtester_realistic import generate_oos_picks_purged_3sleeve
 
-    labeled = label_three_sleeve_panel(panel, episodes)
+    labeled = label_three_sleeve_panel(
+        panel,
+        episodes,
+        pre_surge_months=pre_surge_months,
+        pre_buffer_months=pre_buffer_months,
+        post_surge_months=post_surge_months,
+        risk_drawdown_threshold=risk_drawdown_threshold,
+    )
     feature_cols = select_pmb_feature_columns(labeled, nan_threshold=nan_threshold)
     split_audit = audit_purged_splits(labeled, n_folds=n_folds, embargo_months=embargo_months)
     cb_params = {"iterations": int(iterations)}
@@ -322,6 +375,7 @@ def build_purged_oos_picks(
         n_folds=n_folds,
         embargo_months=embargo_months,
         k_per_month=k_per_month,
+        score_mode=score_mode,
         cb_params=cb_params,
     )
     build_audit = {
@@ -339,6 +393,13 @@ def build_purged_oos_picks(
         "k_per_month": int(k_per_month),
         "n_folds": int(n_folds),
         "embargo_months": int(embargo_months),
+        "label_window": {
+            "pre_surge_months": int(pre_surge_months),
+            "pre_buffer_months": int(pre_buffer_months),
+            "post_surge_months": int(post_surge_months),
+            "risk_drawdown_threshold": float(risk_drawdown_threshold),
+        },
+        "score_mode": str(score_mode),
     }
     return picks, build_audit
 
@@ -372,13 +433,19 @@ def main() -> int:
         embargo_months=args.embargo_months,
         nan_threshold=args.nan_threshold,
         iterations=args.iterations,
+        pre_surge_months=args.pre_surge_months,
+        pre_buffer_months=args.pre_buffer_months,
+        post_surge_months=args.post_surge_months,
+        risk_drawdown_threshold=args.risk_drawdown_threshold,
+        score_mode=args.score_mode,
     )
     if not picks.empty:
         picks.to_csv(out_path, index=False)
     else:
         pd.DataFrame(columns=[
             "rebalance_date", "ticker", "p_pre_entry", "p_continuation",
-            "p_risk", "p_combined", "p_pre_surge", "rank_in_month",
+            "p_risk", "p_balanced", "p_clean_pre_entry", "p_combined",
+            "p_pre_surge", "rank_in_month", "pmb_score_mode",
         ]).to_csv(out_path, index=False)
 
     target_end = args.target_end or (str(panel["rebalance_date"].max().date()) if not panel.empty else None)
@@ -405,6 +472,7 @@ def main() -> int:
     if not picks.empty:
         print(f"  window:     {pd.to_datetime(picks['rebalance_date']).min().date()} .. {pd.to_datetime(picks['rebalance_date']).max().date()}")
     print(f"  features:   {build_audit['feature_count']}")
+    print(f"  score mode: {build_audit['score_mode']}")
     print(f"  split gap:  {build_audit['split_audit'].get('min_gap_months')} months")
     print(f"  coverage:   {coverage.get('status')} ({coverage.get('covered_months')}/{coverage.get('expected_months')} months)")
     print(f"  out:        {out_path}")

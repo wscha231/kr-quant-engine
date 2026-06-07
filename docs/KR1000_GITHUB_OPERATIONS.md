@@ -85,6 +85,17 @@ produced CAGR `3.54%`, MDD `-61.39%`. Treat this as evidence that the P_MB
 label definitions need to be rebuilt, not that another exposure filter is
 needed.
 
+The strict pre-entry score-mode pass added configurable P_MB OOS composites to
+the official builder and validation gate. `balanced` preserves the legacy
+`0.5 * p_pre_entry + 0.5 * p_continuation` blend, while `strict_pre_entry`
+uses `p_pre_entry * (1 - p_continuation) * (1 - p_risk)` so post-surge
+continuation/overheat candidates are penalized before the broker ledger sees
+them. A strict buffer-2 OOS file covered all `102/102` official months, but the
+broker-ledger top20 test still failed: CAGR `4.87%`, MDD `-38.76%`, excess
+CAGR `-13.70%`, Sharpe `0.358`. This improves the prior strict run only
+slightly and confirms that the next work should redesign labels/features rather
+than just changing exposure or score weights.
+
 ## GitHub Workflows
 
 Production automation is split into three lanes:
@@ -550,6 +561,9 @@ As of the 2026-06-07 08:05 KST handoff:
 - Leakage-safe false-positive modeling is currently too weak for production:
   `p_good_oos` AUC `0.510`, `p_bad_oos` AUC `0.538`, existing `p_risk` AUC
   `0.492`. Sparse filter replays worsened drawdown, with MDD around `-60%`.
+- Strict P_MB score-mode replay improved only marginally and still failed:
+  `strict_pre_entry` buffer-2 top20 produced CAGR `4.87%`, MDD `-38.76%`,
+  excess CAGR `-13.70%`.
 
 The next production step is to provide/sync actual
 `DATA_ROOT/state/current_holdings.csv` for the daily broker readiness path, then

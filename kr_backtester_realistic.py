@@ -31,6 +31,56 @@ from kr_helpers import log
 
 
 # ===========================================================================
+# 0. P_MB 3-sleeve score combinations
+# ===========================================================================
+PMB_3SLEEVE_SCORE_MODES = {
+    "balanced",
+    "pre_entry_focus",
+    "strict_pre_entry",
+    "pre_entry_risk_only",
+    "continuation_focus",
+    "no_risk_balanced",
+}
+
+
+def combine_pmb_3sleeve_scores(
+    p_pre_entry: pd.Series,
+    p_continuation: pd.Series,
+    p_risk: pd.Series,
+    *,
+    score_mode: str = "balanced",
+) -> pd.Series:
+    """Combine 3-sleeve P_MB probabilities into one ranking score.
+
+    `balanced` preserves the legacy 50/50 pre-entry plus continuation blend.
+    Stricter modes are used for OOS diagnostics where post-surge continuation
+    probability has behaved like an overheat/false-positive proxy.
+    """
+    mode = str(score_mode or "balanced").strip().lower()
+    if mode not in PMB_3SLEEVE_SCORE_MODES:
+        valid = ", ".join(sorted(PMB_3SLEEVE_SCORE_MODES))
+        raise ValueError(f"unknown P_MB 3-sleeve score_mode={score_mode!r}; valid: {valid}")
+    pre = pd.to_numeric(p_pre_entry, errors="coerce").fillna(0.0).clip(lower=0.0, upper=1.0)
+    cont = pd.to_numeric(p_continuation, errors="coerce").fillna(0.0).clip(lower=0.0, upper=1.0)
+    risk = pd.to_numeric(p_risk, errors="coerce").fillna(0.0).clip(lower=0.0, upper=0.95)
+    if mode == "balanced":
+        raw = 0.50 * pre + 0.50 * cont
+        return (raw * (1.0 - risk)).clip(lower=0.0)
+    if mode == "pre_entry_focus":
+        raw = 0.75 * pre + 0.25 * cont
+        return (raw * (1.0 - risk)).clip(lower=0.0)
+    if mode == "strict_pre_entry":
+        return (pre * (1.0 - cont) * (1.0 - risk)).clip(lower=0.0)
+    if mode == "pre_entry_risk_only":
+        return (pre * (1.0 - risk)).clip(lower=0.0)
+    if mode == "continuation_focus":
+        raw = 0.25 * pre + 0.75 * cont
+        return (raw * (1.0 - risk)).clip(lower=0.0)
+    # no_risk_balanced: diagnostic only, useful for isolating risk-label value.
+    return (0.50 * pre + 0.50 * cont).clip(lower=0.0)
+
+
+# ===========================================================================
 # 1. OOS picks generation (fold-based, no in-sample contamination)
 # ===========================================================================
 def generate_oos_picks(
@@ -116,6 +166,7 @@ def generate_oos_picks_purged_3sleeve(
     n_folds: int = 5,
     embargo_months: int = 9,
     k_per_month: int = 40,
+    score_mode: str = "balanced",
     cb_params: Optional[dict] = None,
 ) -> pd.DataFrame:
     """Phase C3 OOS picks via 3 separate purged-walk-forward models.
@@ -130,9 +181,9 @@ def generate_oos_picks_purged_3sleeve(
     window). Output: rebalance_date, ticker [, name, market_cap],
     p_pre_entry, p_continuation, p_risk, p_combined, rank_in_month, fold_id.
 
-    p_combined = 0.5 * p_pre_entry + 0.5 * p_continuation, scaled by
-    (1 - p_risk). This single composite is the default ranking signal so the
-    realistic backtester remains compatible with picks lacking sleeve flags.
+    score_mode selects the ranking composite. `balanced` preserves the legacy
+    0.5/0.5 pre-entry plus continuation blend, while `strict_pre_entry` ranks
+    only early candidates that are not also likely continuation/high-risk names.
     """
     from kr_multibagger_classifier import walk_forward_splits_purged
     try:
@@ -210,7 +261,16 @@ def generate_oos_picks_purged_3sleeve(
     p_pre = out.get("p_pre_entry", pd.Series(0.0, index=out.index)).fillna(0)
     p_cont = out.get("p_continuation", pd.Series(0.0, index=out.index)).fillna(0)
     p_risk = out.get("p_risk", pd.Series(0.0, index=out.index)).fillna(0)
-    out["p_combined"] = (0.5 * p_pre + 0.5 * p_cont) * (1.0 - p_risk)
+    out["p_balanced"] = combine_pmb_3sleeve_scores(
+        p_pre, p_cont, p_risk, score_mode="balanced",
+    )
+    out["p_clean_pre_entry"] = combine_pmb_3sleeve_scores(
+        p_pre, p_cont, p_risk, score_mode="strict_pre_entry",
+    )
+    out["p_combined"] = combine_pmb_3sleeve_scores(
+        p_pre, p_cont, p_risk, score_mode=score_mode,
+    )
+    out["pmb_score_mode"] = str(score_mode or "balanced").strip().lower()
     # Backwards-compat: realistic backtester reads `p_pre_surge` for ranking.
     out["p_pre_surge"] = out["p_combined"]
     out = out.sort_values(["rebalance_date", "p_combined"],

@@ -227,6 +227,29 @@ def test_3sleeve_picks_columns():
     assert rank_top["rebalance_date"].nunique() == picks["rebalance_date"].nunique()
 
 
+@_test("P_MB 3-sleeve score modes penalize continuation and risk")
+def test_pmb_3sleeve_score_modes():
+    from kr_backtester_realistic import combine_pmb_3sleeve_scores
+
+    pre = pd.Series([0.8, 0.4, 0.2])
+    continuation = pd.Series([0.1, 0.8, 0.1])
+    risk = pd.Series([0.1, 0.1, 0.5])
+    balanced = combine_pmb_3sleeve_scores(
+        pre, continuation, risk, score_mode="balanced",
+    )
+    strict = combine_pmb_3sleeve_scores(
+        pre, continuation, risk, score_mode="strict_pre_entry",
+    )
+    focused = combine_pmb_3sleeve_scores(
+        pre, continuation, risk, score_mode="pre_entry_focus",
+    )
+
+    assert strict.iloc[0] > strict.iloc[1]
+    assert strict.iloc[0] > strict.iloc[2]
+    assert focused.iloc[0] > balanced.iloc[0]
+    assert focused.iloc[1] < balanced.iloc[1]
+
+
 @_test("P_MB OOS feature selector excludes forward/generated leakage columns")
 def test_pmb_oos_feature_selector_excludes_leakage():
     from tools.build_pmb_oos_picks import select_pmb_feature_columns

@@ -128,6 +128,8 @@ PMB_OOS_NUMERIC_COLUMNS = (
     "p_continuation",
     "p_risk",
     "p_combined",
+    "p_balanced",
+    "p_clean_pre_entry",
 )
 
 
