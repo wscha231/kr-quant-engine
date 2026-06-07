@@ -1,6 +1,6 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-07 12:05 KST
+## Current Status - 2026-06-07 12:26 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
@@ -51,6 +51,15 @@ Latest hardening pass:
 - Added tests that lock the purged latest default path and fail-fast build
   command behavior.
 
+Latest performance pass:
+
+- Tuned `kr1000_technical_mcap_mdd_gate` to the current best MDD-safe ladder:
+  gross `0.90`, thresholds `-0.10,-0.18,-0.24`, scales `0.95,0.75,0.50`.
+- Changed `PRODUCTION_GATE_STRATEGY_PRESET` to
+  `kr1000_technical_mcap_mdd_gate` so official validation status follows the
+  best current production challenger, not the older P_MB defensive preset.
+- Added `test_production_gate_tracks_technical_mcap_preset`.
+
 Previous pushed pass:
 
 Added `kr1000_technical_mcap_regime`.
@@ -67,16 +76,16 @@ Rules:
 - It sets `score_profile_eligible_flag = False` outside that regime so the
   broker ledger holds cash instead of buying arbitrary zero-score names.
 
-Also added and tuned `kr1000_technical_mcap_mdd_gate` in strategy A/B:
+Current `kr1000_technical_mcap_mdd_gate` strategy A/B preset:
 
 - profile: `kr1000_technical_mcap_regime`
 - top holdings: `15`
 - buy threshold: `15`
 - hold threshold: `30`
-- gross exposure: `1.00`
+- gross exposure: `0.90`
 - hard stop: `15%`
-- portfolio drawdown ladder thresholds `-0.08,-0.15,-0.25`
-- portfolio drawdown ladder scales `0.85,0.65,0.40`
+- portfolio drawdown ladder thresholds `-0.10,-0.18,-0.24`
+- portfolio drawdown ladder scales `0.95,0.75,0.50`
 
 ## Data/Leakage State
 
@@ -99,19 +108,23 @@ still uses the same PIT scored panel and broker-ledger path.
 New best current MDD-safe challenger:
 
 ```bash
-py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_mcap_regime --price-panel outputs\kr1000_bt_sparse_bench_pos_mcap_liq_technical_top20_2018_20260604\leader_price_panel.parquet --top-holdings 15 --max-rank-for-prices 40 --buy-rank-threshold 15 --hold-rank-threshold 30 --portfolio-dd-ladder --portfolio-dd-thresholds -0.08,-0.15,-0.25 --portfolio-dd-scales 0.85,0.65,0.40 --out-dir outputs\kr1000_bt_technical_mcap_regime_top15_ladder_2018_20260604 --save-scored-panel
+py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_mcap_regime --price-panel outputs\kr1000_bt_sparse_bench_pos_mcap_liq_technical_top20_2018_20260604\leader_price_panel.parquet --top-holdings 15 --max-rank-for-prices 40 --buy-rank-threshold 15 --hold-rank-threshold 30 --gross-exposure 0.90 --portfolio-dd-ladder --portfolio-dd-thresholds -0.10,-0.18,-0.24 --portfolio-dd-scales 0.95,0.75,0.50 --out-dir outputs\kr1000_bt_technical_mcap_regime_top15_g90_ladder_best_2018_20260604 --save-scored-panel
 ```
 
 Result:
 
 - years `8.34`
-- CAGR `16.44%`
+- CAGR `17.60%`
 - KOSPI200 CAGR `18.57%`
-- excess CAGR `-2.12%`
-- MDD `-24.17%`
-- Sharpe `1.007`
-- trades `975`
+- excess CAGR `-0.97%`
+- MDD `-23.45%`
+- Sharpe `1.055`
+- trades `984`
 - metric mode `broker_ledger_next_close`, fill mode `next_close`
+
+Prior top15 ladder result:
+
+- CAGR `16.44%`, MDD `-24.17%`, excess `-2.12%`, Sharpe `1.007`.
 
 Prior top20 technical/mcap result:
 
@@ -143,9 +156,9 @@ Best KR1000 sparse diagnostics from this pass:
   - KOSPI-only top15 ladder: CAGR `16.25%`, MDD `-23.78%`.
   - exchange-balanced top15 ladder: CAGR `12.97%`, MDD `-23.40%`.
 
-The target is not met. The new KR1000 technical/mcap top15 ladder profile
-improves CAGR materially while preserving the MDD and Sharpe gates, but it
-still fails CAGR/excess/IR.
+The target is not met. The new KR1000 technical/mcap top15 g90 ladder profile
+improves CAGR, MDD, Sharpe, and the KOSPI200 excess gap, but it still fails
+CAGR/excess/IR.
 
 ## Tests Run
 
@@ -158,6 +171,10 @@ still fails CAGR/excess/IR.
 - `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
 - `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --build-pmb-oos-picks --require-pmb-oos-coverage --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_pmb_oos_default_hardened` -> planned `25` broker backtests.
 - `py -3 tools\audit_data_integrity.py --as-of 2026-06-04` -> Critical `0`, High `0`, Medium `0`.
+- `py -3 -m py_compile tools\run_kr1000_validation_gate.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 13 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_technical_mcap_g90_production` -> planned `25` broker backtests.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_mcap_regime --price-panel outputs\kr1000_bt_sparse_bench_pos_mcap_liq_technical_top20_2018_20260604\leader_price_panel.parquet --top-holdings 15 --max-rank-for-prices 40 --buy-rank-threshold 15 --hold-rank-threshold 30 --gross-exposure 0.90 --portfolio-dd-ladder --portfolio-dd-thresholds -0.10,-0.18,-0.24 --portfolio-dd-scales 0.95,0.75,0.50 --out-dir outputs\kr1000_bt_technical_mcap_regime_top15_g90_ladder_best_2018_20260604 --save-scored-panel` -> CAGR `17.60%`, MDD `-23.45%`.
 - `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_technical_mcap_profile` -> planned `25` broker backtests.
 - `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_mcap_regime --price-panel outputs\kr1000_bt_sparse_bench_pos_mcap_liq_technical_top20_2018_20260604\leader_price_panel.parquet --top-holdings 15 --max-rank-for-prices 40 --buy-rank-threshold 15 --hold-rank-threshold 30 --portfolio-dd-ladder --portfolio-dd-thresholds -0.08,-0.15,-0.25 --portfolio-dd-scales 0.85,0.65,0.40 --out-dir outputs\kr1000_bt_technical_mcap_regime_top15_ladder_2018_20260604 --save-scored-panel` -> CAGR `16.44%`, MDD `-24.17%`.
 

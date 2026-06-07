@@ -140,16 +140,17 @@ Sharpe `0.918`, IR `-0.320`, and average cash weight `63.81%`. This was better
 than the P_MB-only profiles but still failed the official CAGR, excess, Sharpe,
 and IR gates.
 
-The follow-up concentration/ladder pass found a stronger operating preset for
-the same profile. Top15 with buy `<=15`, hold `<=30`, and drawdown ladder
-`-0.08,-0.15,-0.25` -> `0.85,0.65,0.40` produced CAGR `16.44%`, MDD `-24.17%`,
-excess CAGR `-2.12%`, and Sharpe `1.007`. Top15 without the ladder produced
-CAGR `16.79%` and MDD `-24.36%`, but Sharpe fell below `1.0`, so
-`kr1000_technical_mcap_mdd_gate` uses the laddered top15 setup. KOSPI-only,
-KOSDAQ-only, and exchange-balanced sparse sleeve checks did not improve the
-result; KOSDAQ-only was materially worse. The laddered top15 setup is the new
-MDD-safe challenger baseline, not a production-pass strategy, because CAGR,
-KOSPI200 excess, and IR still fail.
+The follow-up concentration/ladder passes found a stronger operating preset for
+the same profile. The current locked `kr1000_technical_mcap_mdd_gate` uses
+top15, buy `<=15`, hold `<=30`, gross `0.90`, and drawdown ladder
+`-0.10,-0.18,-0.24` -> `0.95,0.75,0.50`. The reproduced 2018-current
+broker-ledger result is CAGR `17.60%`, MDD `-23.45%`, excess CAGR `-0.97%`,
+Sharpe `1.055`, and IR `-0.111`. This improves the prior top15 ladder
+(`16.44%`, MDD `-24.17%`) and the top15 no-ladder sensitivity (`16.79%`, MDD
+`-24.36%`, Sharpe `0.98`). KOSPI-only, KOSDAQ-only, and exchange-balanced
+sparse sleeve checks did not improve the result; KOSDAQ-only was materially
+worse. The tuned top15 setup is the new production challenger baseline, not a
+production-pass strategy, because CAGR, KOSPI200 excess, and IR still fail.
 
 ## GitHub Workflows
 
@@ -350,10 +351,11 @@ The enrichment bridge defaults to cache-only price loading. Use
 `--label-as-of <date>` to prevent incomplete future horizons from being labeled;
 rows whose full forward horizon is not observable are cleared back to NaN.
 
-Official production pass/fail uses the locked `pmb_defensive_mdd_gate` strategy
-preset when `--strategy-ab` is run. The `full` score profile remains a baseline
-gate for diagnosis. P_MB and hybrid jobs cannot pass the official gate unless
-the P_MB OOS coverage audit passes the 8y PIT-safe coverage check.
+Official production pass/fail uses the locked
+`kr1000_technical_mcap_mdd_gate` strategy preset when `--strategy-ab` is run.
+The `full` score profile remains a baseline gate for diagnosis. P_MB and hybrid
+jobs cannot pass their own official diagnostics unless the P_MB OOS coverage
+audit passes the 8y PIT-safe coverage check.
 
 Mixed historical/latest scored panels are expected. New latest-readiness rows
 may add columns such as `eligible_final`; older historical rows with

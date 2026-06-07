@@ -180,14 +180,32 @@ def test_planned_component_ab_jobs():
     assert kr_technical_jobs[0]["profile"] == "kr1000_technical_mcap_regime"
     assert "--top-holdings" in kr_technical_jobs[0]["cmd"]
     assert "15" in kr_technical_jobs[0]["cmd"]
+    assert "--gross-exposure" in kr_technical_jobs[0]["cmd"]
+    assert "0.9" in kr_technical_jobs[0]["cmd"]
     assert "--portfolio-dd-thresholds" in kr_technical_jobs[0]["cmd"]
-    assert "-0.08,-0.15,-0.25" in kr_technical_jobs[0]["cmd"]
+    assert "-0.1,-0.18,-0.24" in kr_technical_jobs[0]["cmd"]
     assert "--portfolio-dd-scales" in kr_technical_jobs[0]["cmd"]
-    assert "0.85,0.65,0.4" in kr_technical_jobs[0]["cmd"]
+    assert "0.95,0.75,0.5" in kr_technical_jobs[0]["cmd"]
     assert {j["profile"] for j in stress} == {"full"}
     assert all("--score-profile" in j["cmd"] for j in jobs)
     assert all("--pmb-oos-picks" in j["cmd"] for j in jobs)
     assert all(j["start"] <= j["end"] for j in jobs)
+
+
+@_test("production gate tracks current best technical mcap preset")
+def test_production_gate_tracks_technical_mcap_preset():
+    from tools.run_kr1000_validation_gate import (
+        KR1000_STRATEGY_AB_PRESETS,
+        PRODUCTION_GATE_STRATEGY_PRESET,
+    )
+
+    assert PRODUCTION_GATE_STRATEGY_PRESET == "kr1000_technical_mcap_mdd_gate"
+    preset = KR1000_STRATEGY_AB_PRESETS[PRODUCTION_GATE_STRATEGY_PRESET]
+    assert preset["score_profile"] == "kr1000_technical_mcap_regime"
+    assert preset["top_holdings"] == 15
+    assert preset["gross_exposure"] == 0.90
+    assert preset["portfolio_dd_thresholds"] == [-0.10, -0.18, -0.24]
+    assert preset["portfolio_dd_scales"] == [0.95, 0.75, 0.50]
 
 
 @_test("workflow audit treats full validation gate as broker backtest automation")

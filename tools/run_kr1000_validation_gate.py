@@ -77,15 +77,15 @@ KR1000_STRATEGY_AB_PRESETS = {
         "top_holdings": 15,
         "buy_rank_threshold": 15,
         "hold_rank_threshold": 30,
-        "gross_exposure": 1.00,
+        "gross_exposure": 0.90,
         "hard_stop_loss_pct": 0.15,
         "portfolio_dd_ladder": True,
-        "portfolio_dd_thresholds": [-0.08, -0.15, -0.25],
-        "portfolio_dd_scales": [0.85, 0.65, 0.40],
+        "portfolio_dd_thresholds": [-0.10, -0.18, -0.24],
+        "portfolio_dd_scales": [0.95, 0.75, 0.50],
     },
 }
 
-PRODUCTION_GATE_STRATEGY_PRESET = "pmb_defensive_mdd_gate"
+PRODUCTION_GATE_STRATEGY_PRESET = "kr1000_technical_mcap_mdd_gate"
 PMB_SCORE_PROFILES = {
     "pmb_pre_surge",
     "pmb_pre_entry",

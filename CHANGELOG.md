@@ -6,6 +6,52 @@
 
 ## 2026-06-07
 
+### 12:26 KST - kr1000-technical-mcap-g90-production-preset
+
+**Scope**: Promoted the best current MDD-safe KR1000 technical/mcap ladder
+variant into the validation gate's locked production challenger preset.
+
+**What landed**:
+- Tuned `KR1000_STRATEGY_AB_PRESETS["kr1000_technical_mcap_mdd_gate"]` from
+  gross `1.00` with ladder `-0.08,-0.15,-0.25 -> 0.85,0.65,0.40` to gross
+  `0.90` with ladder `-0.10,-0.18,-0.24 -> 0.95,0.75,0.50`.
+- Changed `PRODUCTION_GATE_STRATEGY_PRESET` from `pmb_defensive_mdd_gate` to
+  `kr1000_technical_mcap_mdd_gate`.
+- Added a regression test that locks the production gate to the current best
+  technical/mcap preset.
+
+**Diagnostic result**:
+- Reproduced broker-ledger next-close run:
+  `outputs\kr1000_bt_technical_mcap_regime_top15_g90_ladder_best_2018_20260604`.
+- Result: CAGR `17.60%`, KOSPI200 CAGR `18.57%`, excess CAGR `-0.97%`,
+  MDD `-23.45%`, Sharpe `1.055`, IR `-0.111`, trades `984`.
+- Prior locked technical/mcap preset: CAGR `16.44%`, MDD `-24.17%`, excess
+  `-2.12%`, Sharpe `1.007`.
+- Interpretation: this is a real improvement in CAGR, MDD, Sharpe, and excess
+  gap, but it still fails the official CAGR `>=30%`, KOSPI200 excess `>0`, and
+  IR `>0.5` gates.
+
+**symbols_added**:
+- tests/test_kr1000_validation_gate.py::test_production_gate_tracks_technical_mcap_preset
+
+**symbols_changed**:
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS
+- tools.run_kr1000_validation_gate.PRODUCTION_GATE_STRATEGY_PRESET
+- tests/test_kr1000_validation_gate.py
+
+**config_fields_added**: none.
+
+**breaking_changes**:
+- The validation gate's production pass/fail now tracks
+  `kr1000_technical_mcap_mdd_gate`, not `pmb_defensive_mdd_gate`. P_MB profiles
+  still require the PIT-safe OOS coverage gate when they are run.
+
+**Validation**:
+- `py -3 -m py_compile tools\run_kr1000_validation_gate.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 13 passed, 0 failed.
+- `py -3 tools\run_kr1000_validation_gate.py --as-of 2026-06-04 --component-ab --strategy-ab --dry-run --out-dir outputs\kr1000_validation_dryrun_technical_mcap_g90_production` -> planned `25` broker backtests and emitted the tuned production command.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_mcap_regime --price-panel outputs\kr1000_bt_sparse_bench_pos_mcap_liq_technical_top20_2018_20260604\leader_price_panel.parquet --top-holdings 15 --max-rank-for-prices 40 --buy-rank-threshold 15 --hold-rank-threshold 30 --gross-exposure 0.90 --portfolio-dd-ladder --portfolio-dd-thresholds -0.10,-0.18,-0.24 --portfolio-dd-scales 0.95,0.75,0.50 --out-dir outputs\kr1000_bt_technical_mcap_regime_top15_g90_ladder_best_2018_20260604 --save-scored-panel` -> CAGR `17.60%`, MDD `-23.45%`.
+
 ### 12:05 KST - pmb-oos-default-path-hardening
 
 **Scope**: Hardened the official P_MB OOS input defaults so official
