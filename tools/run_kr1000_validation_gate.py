@@ -93,6 +93,22 @@ KR1000_STRATEGY_AB_PRESETS = {
         "hard_stop_loss_pct": 0.15,
         "portfolio_dd_ladder": False,
     },
+    "kr1000_technical_value_mcap_benchmark_sleeve": {
+        "score_profile": "kr1000_technical_value_mcap_regime",
+        "top_holdings": 10,
+        "buy_rank_threshold": 10,
+        "hold_rank_threshold": 20,
+        "single_stock_max_weight": 0.10,
+        "gross_exposure": 1.00,
+        "hard_stop_loss_pct": 0.15,
+        "portfolio_dd_ladder": False,
+        "benchmark_sleeve": True,
+        "benchmark_sleeve_fraction": 0.35,
+        "benchmark_sleeve_cash_trigger": 0.95,
+        "benchmark_sleeve_bench_ret_1m_min": 0.05,
+        "benchmark_sleeve_bench_ret_3m_min": 0.10,
+        "benchmark_sleeve_max_weight": 0.35,
+    },
 }
 
 PRODUCTION_GATE_STRATEGY_PRESET = "kr1000_technical_value_mcap_mdd_gate"
@@ -317,6 +333,18 @@ def _extend_cmd_with_strategy_preset(cmd: list[str], preset: dict[str, Any]) -> 
             "--portfolio-dd-scales",
             ",".join(str(float(x)) for x in preset["portfolio_dd_scales"]),
         ])
+    if preset.get("benchmark_sleeve"):
+        cmd.append("--benchmark-sleeve")
+    if preset.get("benchmark_sleeve_fraction") is not None:
+        cmd.extend(["--benchmark-sleeve-fraction", str(float(preset["benchmark_sleeve_fraction"]))])
+    if preset.get("benchmark_sleeve_cash_trigger") is not None:
+        cmd.extend(["--benchmark-sleeve-cash-trigger", str(float(preset["benchmark_sleeve_cash_trigger"]))])
+    if preset.get("benchmark_sleeve_bench_ret_1m_min") is not None:
+        cmd.extend(["--benchmark-sleeve-bench-ret-1m-min", str(float(preset["benchmark_sleeve_bench_ret_1m_min"]))])
+    if preset.get("benchmark_sleeve_bench_ret_3m_min") is not None:
+        cmd.extend(["--benchmark-sleeve-bench-ret-3m-min", str(float(preset["benchmark_sleeve_bench_ret_3m_min"]))])
+    if preset.get("benchmark_sleeve_max_weight") is not None:
+        cmd.extend(["--benchmark-sleeve-max-weight", str(float(preset["benchmark_sleeve_max_weight"]))])
 
 
 def metric_value(metrics: dict[str, Any], *names: str, default: float = 0.0) -> float:

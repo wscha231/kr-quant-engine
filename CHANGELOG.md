@@ -6,6 +6,86 @@
 
 ## 2026-06-07
 
+### 16:57 KST - kr1000-broker-benchmark-sleeve-challenger
+
+**Scope**: Added an order/fill/cost-aware KOSPI200 proxy sleeve to the
+broker-ledger backtester as a production-challenger A/B path for high-cash
+months. The sleeve is disabled by default unless `--benchmark-sleeve` is
+passed, and the current production gate preset remains unchanged.
+
+**What landed**:
+- Added synthetic benchmark sleeve ticker `900200` inside
+  `run_event_driven_backtest()` using the already PIT-safe `benchmark_nav`
+  series.
+- Added daily idle-cash sleeve monitoring so hard-stop exits can be followed by
+  next-close benchmark proxy orders when cash is high and KOSPI200 trend is
+  strong.
+- Added CLI controls to `tools/run_kr1000_backtest.py`:
+  `--benchmark-sleeve`, `--benchmark-sleeve-fraction`,
+  `--benchmark-sleeve-cash-trigger`,
+  `--benchmark-sleeve-bench-ret-1m-min`,
+  `--benchmark-sleeve-bench-ret-3m-min`, and
+  `--benchmark-sleeve-max-weight`.
+- Added validation A/B preset
+  `kr1000_technical_value_mcap_benchmark_sleeve`.
+- Kept `PRODUCTION_GATE_STRATEGY_PRESET` on
+  `kr1000_technical_value_mcap_mdd_gate`.
+
+**Backtest result**:
+- Baseline locked challenger:
+  CAGR `25.46%`, MDD `-21.90%`, KOSPI200 CAGR `18.57%`, excess `+6.89%`,
+  Sharpe `1.259`, IR `0.251`.
+- Naive large sleeve (`fraction=0.75`, `cash_trigger=0.80`,
+  `1m>=3%`, `3m>=0%`, `max=75%`) failed:
+  CAGR `19.49%`, MDD `-26.97%`.
+- Conservative default sleeve (`fraction=0.35`, `cash_trigger=0.95`,
+  `1m>=5%`, `3m>=10%`, `max=35%`) improved the locked challenger but still
+  does not pass the official gate:
+  CAGR `25.86%`, MDD `-19.65%`, KOSPI200 CAGR `18.57%`, excess `+7.29%`,
+  Sharpe `1.28`, IR `0.267`, sleeve trades `6`.
+
+**symbols_added**:
+- kr1000_leader.BENCHMARK_SLEEVE_TICKER
+- kr1000_leader.BENCHMARK_SLEEVE_NAME
+- kr1000_leader._normalise_single_ticker
+- kr1000_leader._augment_price_panel_with_benchmark_sleeve
+- kr1000_leader._benchmark_nav_trailing_return
+- kr1000_leader._benchmark_sleeve_target_weight
+- kr1000_leader._append_benchmark_sleeve_rebalance_order
+- tools.run_kr1000_backtest.parse_args[`--benchmark-sleeve`]
+- tools.run_kr1000_backtest.parse_args[`--benchmark-sleeve-fraction`]
+- tools.run_kr1000_backtest.parse_args[`--benchmark-sleeve-cash-trigger`]
+- tools.run_kr1000_backtest.parse_args[`--benchmark-sleeve-bench-ret-1m-min`]
+- tools.run_kr1000_backtest.parse_args[`--benchmark-sleeve-bench-ret-3m-min`]
+- tools.run_kr1000_backtest.parse_args[`--benchmark-sleeve-max-weight`]
+- tests.test_kr1000_leader.test_event_backtester_benchmark_sleeve_uses_idle_cash
+
+**symbols_changed**:
+- kr1000_leader.run_event_driven_backtest
+- tools.run_kr1000_backtest.main
+- tools.run_kr1000_validation_gate.KR1000_STRATEGY_AB_PRESETS
+- tools.run_kr1000_validation_gate._extend_cmd_with_strategy_preset
+- tests.test_kr1000_validation_gate.test_planned_component_ab_jobs
+
+**config_fields_added**:
+- benchmark_sleeve_enabled
+- benchmark_sleeve_ticker
+- benchmark_sleeve_fraction
+- benchmark_sleeve_cash_trigger
+- benchmark_sleeve_bench_ret_1m_min
+- benchmark_sleeve_bench_ret_3m_min
+- benchmark_sleeve_max_weight
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile kr1000_leader.py tools\run_kr1000_backtest.py tools\run_kr1000_validation_gate.py tests\test_kr1000_leader.py tests\test_kr1000_validation_gate.py` -> passed.
+- `py -3 tests\test_kr1000_leader.py` -> 16 passed, 0 failed.
+- `py -3 tests\test_kr1000_validation_gate.py` -> 14 passed, 0 failed.
+- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
+- `py -3 tests\smoke_test.py` -> 46 passed, 0 failed.
+- `py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_value_mcap_regime --price-panel outputs\kr1000_bt_technical_value_mcap_regime_top15_g90_ladder_2018_20260604\leader_price_panel.parquet --top-holdings 10 --max-rank-for-prices 20 --buy-rank-threshold 10 --hold-rank-threshold 20 --single-stock-max-weight 0.10 --gross-exposure 1.00 --hard-stop-loss-pct 0.15 --benchmark-sleeve --out-dir outputs\kr1000_bt_technical_value_mcap_benchmark_sleeve_default_2018_20260604 --save-scored-panel` -> completed, CAGR `25.86%`, MDD `-19.65%`.
+
 ### 16:31 KST - kr1000-benchmark-audit-and-loss-month-diagnostic
 
 **Scope**: Added fast benchmark-index cache sanity checks, expanded weekly

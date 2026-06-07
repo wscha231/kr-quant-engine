@@ -593,6 +593,60 @@ def test_event_backtester_daily_hard_stop():
     assert pd.Timestamp(sell_trades["execution_date"].iloc[0]) > dates[1]
 
 
+@_test("event-driven backtest can deploy idle cash into benchmark sleeve")
+def test_event_backtester_benchmark_sleeve_uses_idle_cash():
+    from kr1000_leader import BENCHMARK_SLEEVE_TICKER, run_event_driven_backtest
+
+    dates = pd.bdate_range("2024-01-01", periods=90)
+    price = pd.DataFrame({
+        "date": dates,
+        "ticker": "000001",
+        "open": 100.0,
+        "close": 100.0,
+    })
+    scored = pd.DataFrame({
+        "date": [dates[70]],
+        "ticker": ["000001"],
+        "leader_score": [-2.0],
+        "leader_rank": [99],
+        "eligible_final": [False],
+        "risk_veto_flag": [0],
+        "hard_exit_flag": [0],
+        "max_weight": [0.0],
+        "avg_trading_value_60d": [1e9],
+        "market_cap": [1e12],
+    })
+    benchmark_nav = pd.Series(
+        np.linspace(1_000_000.0, 1_250_000.0, len(dates)),
+        index=dates,
+    )
+    result = run_event_driven_backtest(
+        scored,
+        price,
+        cfg={
+            "top_holdings": 1,
+            "min_notional_krw": 1,
+            "gross_exposure": 1.0,
+            "gross_exposure_min": 0.0,
+            "benchmark_sleeve_enabled": True,
+            "benchmark_sleeve_fraction": 0.50,
+            "benchmark_sleeve_cash_trigger": 0.80,
+            "benchmark_sleeve_bench_ret_1m_min": 0.0,
+            "benchmark_sleeve_bench_ret_3m_min": 0.0,
+            "benchmark_sleeve_max_weight": 0.50,
+            "daily_hard_exit_enabled": False,
+        },
+        initial_cash=1_000_000,
+        benchmark_nav=benchmark_nav,
+    )
+    assert result.metrics["benchmark_sleeve_enabled"] is True
+    assert result.metrics["benchmark_sleeve_trades"] > 0
+    assert result.metrics["avg_benchmark_sleeve_weight"] > 0
+    assert BENCHMARK_SLEEVE_TICKER in set(result.holdings_daily["ticker"])
+    assert "BUY_BENCHMARK_SLEEVE" in set(result.orders["reason_code"])
+    assert (result.daily_nav["cash"] >= -1e-6).all()
+
+
 if __name__ == "__main__":
     print(f"kr1000 leader tests: {PASSED} passed, {FAILED} failed")
     sys.exit(0 if FAILED == 0 else 1)

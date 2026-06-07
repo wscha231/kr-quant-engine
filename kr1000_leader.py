@@ -30,6 +30,8 @@ from kr_helpers import cross_sectional_robust_z, log
 
 
 TRADE_ACTIONS = ("BUY", "ADD", "HOLD", "TRIM", "SELL", "BLOCKED", "NO_TRADE")
+BENCHMARK_SLEEVE_TICKER = "900200"
+BENCHMARK_SLEEVE_NAME = "KOSPI200 Proxy Sleeve"
 
 LEADER_SCORE_WEIGHTS = {
     "rs_score": 0.35,
@@ -995,6 +997,50 @@ def _price_lookup(price_panel: pd.DataFrame) -> pd.DataFrame:
     return p.sort_values(["date", "ticker"]).set_index(["date", "ticker"])
 
 
+def _normalise_single_ticker(ticker: Any) -> str:
+    return str(_normalise_ticker(pd.Series([ticker])).iloc[0])
+
+
+def _augment_price_panel_with_benchmark_sleeve(
+    price_panel: pd.DataFrame,
+    benchmark_nav: Optional[pd.Series],
+    initial_cash: float,
+    ticker: str = BENCHMARK_SLEEVE_TICKER,
+) -> pd.DataFrame:
+    """Add a synthetic KOSPI200 tradable sleeve price series to a stock panel."""
+    if benchmark_nav is None or benchmark_nav.empty or price_panel.empty:
+        return price_panel
+    p = price_panel.copy()
+    ticker = _normalise_single_ticker(ticker)
+    if ticker in set(_normalise_ticker(p["ticker"]).dropna()):
+        return p
+    dates = pd.to_datetime(p["date"], errors="coerce").dt.normalize().dropna().drop_duplicates().sort_values()
+    if dates.empty:
+        return p
+    b = pd.Series(benchmark_nav).copy()
+    b.index = pd.to_datetime(b.index, errors="coerce").normalize()
+    b = pd.to_numeric(b, errors="coerce").dropna().sort_index()
+    b = b[~b.index.duplicated(keep="last")]
+    aligned = b.reindex(dates).ffill().dropna()
+    if aligned.empty:
+        return p
+    base = float(initial_cash) if np.isfinite(initial_cash) and initial_cash > 0 else float(aligned.iloc[0])
+    if not np.isfinite(base) or base <= 0:
+        base = float(aligned.iloc[0])
+    level = aligned / base * 1000.0
+    sleeve = pd.DataFrame({
+        "date": level.index,
+        "ticker": ticker,
+        "open": level.values,
+        "high": level.values,
+        "low": level.values,
+        "close": level.values,
+        "volume": 1_000_000_000,
+        "value": 1_000_000_000_000_000.0,
+    })
+    return pd.concat([p, sleeve], ignore_index=True)
+
+
 def _portfolio_value(positions: dict[str, dict[str, float]], cash: float, px: pd.DataFrame, day: pd.Timestamp) -> float:
     value = cash
     for tk, pos in positions.items():
@@ -1004,6 +1050,143 @@ def _portfolio_value(positions: dict[str, dict[str, float]], cash: float, px: pd
             close = float(pos.get("last_price", pos.get("avg_cost", 0.0)) or 0.0)
         value += float(pos.get("shares", 0.0)) * close
     return float(value)
+
+
+def _benchmark_nav_trailing_return(
+    benchmark_nav: Optional[pd.Series],
+    day: pd.Timestamp,
+    periods: int,
+) -> float:
+    if benchmark_nav is None or benchmark_nav.empty or periods <= 0:
+        return float("nan")
+    b = pd.Series(benchmark_nav).copy()
+    b.index = pd.to_datetime(b.index, errors="coerce").normalize()
+    b = pd.to_numeric(b, errors="coerce").dropna().sort_index()
+    b = b[~b.index.duplicated(keep="last")]
+    sub = b[b.index <= pd.Timestamp(day).normalize()]
+    if len(sub) <= periods:
+        return float("nan")
+    current = float(sub.iloc[-1])
+    prior = float(sub.iloc[-periods - 1])
+    if not np.isfinite(current) or not np.isfinite(prior) or prior <= 0:
+        return float("nan")
+    return current / prior - 1.0
+
+
+def _benchmark_sleeve_target_weight(
+    positions: dict[str, dict[str, float]],
+    cash: float,
+    nav: float,
+    day: pd.Timestamp,
+    target_portfolio: pd.DataFrame,
+    cfg: dict[str, Any],
+    benchmark_nav: Optional[pd.Series],
+    ticker: str,
+) -> tuple[float, dict[str, float]]:
+    """Compute the broker-ledger benchmark sleeve target from PIT state only."""
+    if nav <= 0:
+        return 0.0, {}
+    stock_target_weight = 0.0
+    if target_portfolio is not None and not target_portfolio.empty and "target_weight" in target_portfolio.columns:
+        t = target_portfolio.copy()
+        t["ticker"] = _normalise_ticker(t["ticker"])
+        stock_target_weight = float(
+            pd.to_numeric(t.loc[t["ticker"] != ticker, "target_weight"], errors="coerce").fillna(0.0).sum()
+        )
+    sleeve_pos = positions.get(ticker, {})
+    sleeve_value = float(sleeve_pos.get("shares", 0.0) or 0.0) * float(sleeve_pos.get("last_price", 0.0) or 0.0)
+    idle_weight = (float(cash) + sleeve_value) / nav
+    ret_1m = _benchmark_nav_trailing_return(benchmark_nav, day, int(cfg.get("benchmark_sleeve_ret_1m_periods", 21)))
+    ret_3m = _benchmark_nav_trailing_return(benchmark_nav, day, int(cfg.get("benchmark_sleeve_ret_3m_periods", 63)))
+    trigger = float(cfg.get("benchmark_sleeve_cash_trigger", 0.95))
+    ret_1m_min = float(cfg.get("benchmark_sleeve_bench_ret_1m_min", 0.05))
+    ret_3m_min = float(cfg.get("benchmark_sleeve_bench_ret_3m_min", 0.10))
+    trend_ok = (
+        np.isfinite(ret_1m)
+        and np.isfinite(ret_3m)
+        and ret_1m >= ret_1m_min
+        and ret_3m >= ret_3m_min
+    )
+    cash_gap = max(0.0, 1.0 - stock_target_weight)
+    if idle_weight >= trigger and trend_ok and cash_gap > 0:
+        target_weight = float(cfg.get("benchmark_sleeve_fraction", 0.35)) * cash_gap
+        target_weight = min(target_weight, float(cfg.get("benchmark_sleeve_max_weight", 0.35)))
+    else:
+        target_weight = 0.0
+    target_weight = max(0.0, min(target_weight, 1.0))
+    diagnostics = {
+        "benchmark_sleeve_stock_target_weight": stock_target_weight,
+        "benchmark_sleeve_idle_weight": float(idle_weight),
+        "benchmark_sleeve_ret_1m": float(ret_1m) if np.isfinite(ret_1m) else float("nan"),
+        "benchmark_sleeve_ret_3m": float(ret_3m) if np.isfinite(ret_3m) else float("nan"),
+        "benchmark_sleeve_trend_ok": float(bool(trend_ok)),
+    }
+    return target_weight, diagnostics
+
+
+def _append_benchmark_sleeve_rebalance_order(
+    pending_orders: list[dict[str, Any]],
+    positions: dict[str, dict[str, float]],
+    cash: float,
+    nav: float,
+    day: pd.Timestamp,
+    target_portfolio: pd.DataFrame,
+    cfg: dict[str, Any],
+    benchmark_nav: Optional[pd.Series],
+    ticker: str,
+    min_notional: float,
+    broker_rule: str,
+) -> dict[str, Any]:
+    target_w, sleeve_diag = _benchmark_sleeve_target_weight(
+        positions,
+        cash,
+        nav,
+        day,
+        target_portfolio,
+        cfg,
+        benchmark_nav,
+        ticker,
+    )
+    current_pos = positions.get(ticker, {})
+    current_value = (
+        float(current_pos.get("shares", 0.0) or 0.0)
+        * float(current_pos.get("last_price", 0.0) or 0.0)
+    )
+    target_value = target_w * nav
+    delta_value = target_value - current_value
+    sleeve_diag.update({
+        "date": day,
+        "benchmark_sleeve_target_weight": float(target_w),
+        "benchmark_sleeve_current_weight": float(current_value / nav) if nav > 0 else 0.0,
+        "benchmark_sleeve_delta_value": float(delta_value),
+        "benchmark_sleeve_broker_rule": broker_rule,
+    })
+    pending_sleeve_order = any(od.get("ticker") == ticker for od in pending_orders)
+    if abs(delta_value) < min_notional or pending_sleeve_order:
+        return sleeve_diag
+    if delta_value > 0:
+        pending_orders.append({
+            "signal_date": day,
+            "ticker": ticker,
+            "side": "BUY",
+            "trade_value": float(delta_value),
+            "reason_code": "BUY_BENCHMARK_SLEEVE",
+            "broker_rule": broker_rule,
+            "target_weight": float(target_w),
+        })
+    elif current_value > 0:
+        side = "SELL" if target_w <= 1e-9 else "SELL_PARTIAL"
+        reason = "SELL_BENCHMARK_SLEEVE_EXIT" if side == "SELL" else "TRIM_BENCHMARK_SLEEVE"
+        pending_orders.append({
+            "signal_date": day,
+            "ticker": ticker,
+            "side": side,
+            "trade_value": float(abs(delta_value) if side == "SELL_PARTIAL" else current_value),
+            "reason_code": reason,
+            "broker_rule": broker_rule,
+            "target_weight": float(target_w),
+        })
+    return sleeve_diag
 
 
 def _metrics_from_nav(nav: pd.DataFrame, benchmark_nav: Optional[pd.Series] = None) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame]:
@@ -1064,7 +1247,13 @@ def run_event_driven_backtest(
     if "leader_rank" not in sp.columns:
         sp = sp.groupby(date_col, group_keys=False).apply(lambda g: compute_leader_scores(g, cfg)).reset_index(drop=True)
 
-    px = _price_lookup(price_panel)
+    benchmark_sleeve_enabled = bool(cfg.get("benchmark_sleeve_enabled", False))
+    benchmark_sleeve_ticker = _normalise_single_ticker(cfg.get("benchmark_sleeve_ticker", BENCHMARK_SLEEVE_TICKER))
+    price_input = (
+        _augment_price_panel_with_benchmark_sleeve(price_panel, benchmark_nav, initial_cash, benchmark_sleeve_ticker)
+        if benchmark_sleeve_enabled else price_panel
+    )
+    px = _price_lookup(price_input)
     days = sorted(set(px.index.get_level_values(0)))
     signal_days = sorted(set(sp[date_col]))
     signal_set = set(signal_days)
@@ -1099,6 +1288,7 @@ def run_event_driven_backtest(
     dd_ladder_scales = cfg.get("portfolio_drawdown_ladder_scales", (0.85, 0.65, 0.40))
     peak_nav = float(initial_cash)
     exposure_scale_rows: list[dict[str, Any]] = []
+    benchmark_sleeve_signal_rows: list[dict[str, Any]] = []
 
     for i, day in enumerate(days):
         # Execute orders generated after the previous signal day.
@@ -1243,6 +1433,27 @@ def run_event_driven_backtest(
                         "broker_rule": "signal_after_close_fill_next_close",
                     })
 
+        if benchmark_sleeve_enabled and i < len(days) - 1 and day not in signal_set:
+            pending_stock_buy = any(
+                od.get("side") == "BUY" and od.get("ticker") != benchmark_sleeve_ticker
+                for od in pending_orders
+            )
+            if not pending_stock_buy:
+                sleeve_diag = _append_benchmark_sleeve_rebalance_order(
+                    pending_orders,
+                    positions,
+                    cash,
+                    nav,
+                    day,
+                    pd.DataFrame(),
+                    cfg,
+                    benchmark_nav,
+                    benchmark_sleeve_ticker,
+                    min_notional,
+                    "benchmark_sleeve_daily_idle_cash_fill_next_close",
+                )
+                benchmark_sleeve_signal_rows.append(sleeve_diag)
+
         if i >= len(days) - 1 or day not in signal_set:
             continue
 
@@ -1267,6 +1478,8 @@ def run_event_driven_backtest(
         target = build_target_portfolio(todays, rebalance_cfg, as_of_date=day)
         cur_rows = []
         for tk, pos in positions.items():
+            if benchmark_sleeve_enabled and tk == benchmark_sleeve_ticker:
+                continue
             cur_rows.append({
                 "ticker": tk,
                 "shares": pos["shares"],
@@ -1320,6 +1533,22 @@ def run_event_driven_backtest(
                     "reason_code": r["reason_code"],
                 })
 
+        if benchmark_sleeve_enabled:
+            sleeve_diag = _append_benchmark_sleeve_rebalance_order(
+                pending_orders,
+                positions,
+                cash,
+                nav,
+                day,
+                target,
+                rebalance_cfg,
+                benchmark_nav,
+                benchmark_sleeve_ticker,
+                min_notional,
+                "benchmark_sleeve_signal_after_close_fill_next_close",
+            )
+            benchmark_sleeve_signal_rows.append(sleeve_diag)
+
     daily_nav = pd.DataFrame(nav_rows)
     holdings_daily = pd.DataFrame(holding_rows)
     orders = pd.DataFrame(order_rows)
@@ -1338,6 +1567,32 @@ def run_event_driven_backtest(
     metrics["ending_cash_krw"] = float(daily_nav["cash"].iloc[-1]) if not daily_nav.empty and "cash" in daily_nav.columns else float(cash)
     metrics["avg_cash_weight"] = float((daily_nav["cash"] / daily_nav["nav"]).replace([np.inf, -np.inf], np.nan).mean()) if not daily_nav.empty else 0.0
     metrics["portfolio_drawdown_ladder_enabled"] = bool(use_dd_ladder)
+    metrics["benchmark_sleeve_enabled"] = bool(benchmark_sleeve_enabled)
+    if benchmark_sleeve_enabled:
+        metrics["benchmark_sleeve_ticker"] = benchmark_sleeve_ticker
+        metrics["benchmark_sleeve_fraction"] = float(cfg.get("benchmark_sleeve_fraction", 0.35))
+        metrics["benchmark_sleeve_cash_trigger"] = float(cfg.get("benchmark_sleeve_cash_trigger", 0.95))
+        metrics["benchmark_sleeve_bench_ret_1m_min"] = float(cfg.get("benchmark_sleeve_bench_ret_1m_min", 0.05))
+        metrics["benchmark_sleeve_bench_ret_3m_min"] = float(cfg.get("benchmark_sleeve_bench_ret_3m_min", 0.10))
+        metrics["benchmark_sleeve_max_weight"] = float(cfg.get("benchmark_sleeve_max_weight", 0.35))
+        if not holdings_daily.empty:
+            sleeve_weights = (
+                holdings_daily.loc[holdings_daily["ticker"] == benchmark_sleeve_ticker]
+                .groupby("date")["weight"].sum()
+                .reindex(daily_nav["date"], fill_value=0.0)
+            )
+            metrics["avg_benchmark_sleeve_weight"] = float(sleeve_weights.mean())
+            metrics["max_benchmark_sleeve_weight"] = float(sleeve_weights.max())
+        else:
+            metrics["avg_benchmark_sleeve_weight"] = 0.0
+            metrics["max_benchmark_sleeve_weight"] = 0.0
+        metrics["benchmark_sleeve_orders"] = int((orders.get("ticker", pd.Series(dtype=str)).astype(str) == benchmark_sleeve_ticker).sum()) if not orders.empty else 0
+        metrics["benchmark_sleeve_trades"] = int((trades.get("ticker", pd.Series(dtype=str)).astype(str) == benchmark_sleeve_ticker).sum()) if not trades.empty else 0
+        if benchmark_sleeve_signal_rows:
+            sleeve_signals = pd.DataFrame(benchmark_sleeve_signal_rows)
+            metrics["benchmark_sleeve_signal_count"] = int(len(sleeve_signals))
+            metrics["avg_benchmark_sleeve_target_weight"] = float(pd.to_numeric(sleeve_signals["benchmark_sleeve_target_weight"], errors="coerce").mean())
+            metrics["benchmark_sleeve_trend_ok_ratio"] = float(pd.to_numeric(sleeve_signals["benchmark_sleeve_trend_ok"], errors="coerce").mean())
     if exposure_scale_rows:
         scales_df = pd.DataFrame(exposure_scale_rows)
         metrics["avg_gross_exposure_effective"] = float(pd.to_numeric(scales_df["gross_exposure_effective"], errors="coerce").mean())

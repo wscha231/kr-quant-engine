@@ -31,6 +31,7 @@ from kr_config import DATA_ROOT, kr1000_leader_alpha_cfg  # noqa: E402
 from kr_helpers import log  # noqa: E402
 from kr_pykrx_client import fetch_index_ohlcv, fetch_ticker_history  # noqa: E402
 from kr1000_leader import (  # noqa: E402
+    BENCHMARK_SLEEVE_TICKER,
     KR1000_SCORE_PROFILES,
     build_target_portfolio,
     compute_leader_scores,
@@ -93,6 +94,20 @@ def parse_args() -> argparse.Namespace:
                         "Optional PIT-safe P_MB OOS picks CSV with p_pre_surge. "
                         "Defaults to DATA_ROOT/outputs/p_mb_oos_picks_purged_3sleeve_latest.csv."
                     ))
+    p.add_argument("--benchmark-sleeve", action="store_true",
+                   help="Enable a broker-ledger KOSPI200 proxy sleeve for otherwise idle cash.")
+    p.add_argument("--benchmark-sleeve-ticker", default=BENCHMARK_SLEEVE_TICKER,
+                   help="Synthetic numeric ticker used for the benchmark sleeve ledger rows.")
+    p.add_argument("--benchmark-sleeve-fraction", type=float, default=0.35,
+                   help="Fraction of the stock target gap assigned to the benchmark sleeve.")
+    p.add_argument("--benchmark-sleeve-cash-trigger", type=float, default=0.95,
+                   help="Minimum cash+sleeve idle weight required before the sleeve can be held.")
+    p.add_argument("--benchmark-sleeve-bench-ret-1m-min", type=float, default=0.05,
+                   help="Minimum trailing 1m KOSPI200 return for benchmark sleeve entry/maintenance.")
+    p.add_argument("--benchmark-sleeve-bench-ret-3m-min", type=float, default=0.10,
+                   help="Minimum trailing 3m KOSPI200 return for benchmark sleeve entry/maintenance.")
+    p.add_argument("--benchmark-sleeve-max-weight", type=float, default=0.35,
+                   help="Maximum portfolio weight for the benchmark sleeve.")
     return p.parse_args()
 
 
@@ -457,6 +472,16 @@ def main() -> int:
         cfg_overrides["portfolio_drawdown_ladder_thresholds"] = dd_thresholds
     if dd_scales is not None:
         cfg_overrides["portfolio_drawdown_ladder_scales"] = dd_scales
+    if args.benchmark_sleeve:
+        cfg_overrides.update({
+            "benchmark_sleeve_enabled": True,
+            "benchmark_sleeve_ticker": args.benchmark_sleeve_ticker,
+            "benchmark_sleeve_fraction": args.benchmark_sleeve_fraction,
+            "benchmark_sleeve_cash_trigger": args.benchmark_sleeve_cash_trigger,
+            "benchmark_sleeve_bench_ret_1m_min": args.benchmark_sleeve_bench_ret_1m_min,
+            "benchmark_sleeve_bench_ret_3m_min": args.benchmark_sleeve_bench_ret_3m_min,
+            "benchmark_sleeve_max_weight": args.benchmark_sleeve_max_weight,
+        })
     cfg = kr1000_leader_alpha_cfg(cfg_overrides)
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "outputs" / f"kr1000_leader_backtest_{start.date()}_{end.date()}"
     out_dir.mkdir(parents=True, exist_ok=True)

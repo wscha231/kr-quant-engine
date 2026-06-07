@@ -208,6 +208,15 @@ def test_planned_component_ab_jobs():
     assert value_cmd[value_cmd.index("--single-stock-max-weight") + 1] == "0.1"
     assert "--portfolio-dd-ladder" not in kr_value_jobs[0]["cmd"]
     assert "--portfolio-dd-scales" not in kr_value_jobs[0]["cmd"]
+    sleeve_jobs = [j for j in official if j.get("strategy_preset") == "kr1000_technical_value_mcap_benchmark_sleeve"]
+    assert len(sleeve_jobs) == 1
+    sleeve_cmd = sleeve_jobs[0]["cmd"]
+    assert sleeve_jobs[0]["profile"] == "kr1000_technical_value_mcap_regime"
+    assert "--benchmark-sleeve" in sleeve_cmd
+    assert sleeve_cmd[sleeve_cmd.index("--benchmark-sleeve-fraction") + 1] == "0.35"
+    assert sleeve_cmd[sleeve_cmd.index("--benchmark-sleeve-cash-trigger") + 1] == "0.95"
+    assert sleeve_cmd[sleeve_cmd.index("--benchmark-sleeve-bench-ret-1m-min") + 1] == "0.05"
+    assert sleeve_cmd[sleeve_cmd.index("--benchmark-sleeve-bench-ret-3m-min") + 1] == "0.1"
     assert {j["profile"] for j in stress} == {"full"}
     assert all("--score-profile" in j["cmd"] for j in jobs)
     assert all("--pmb-oos-picks" in j["cmd"] for j in jobs)
