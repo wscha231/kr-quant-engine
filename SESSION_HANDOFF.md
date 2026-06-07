@@ -1,11 +1,11 @@
 # Session Handoff - Single Inbox
 
-## Current Status - 2026-06-07 14:46 KST
+## Current Status - 2026-06-07 15:07 KST
 
 KR1000 Leader Alpha is on branch `codex/kr1000-github-automation`.
 Draft PR: https://github.com/wscha231/kr-quant-engine/pull/1
 
-Latest committed base before this pass: `f0c064c`.
+Latest committed base before this pass: `4525ae3`.
 
 Active target:
 
@@ -25,12 +25,12 @@ Do not stage or revert this unrelated dirty file:
 
 - `research/10_theme_lifecycle/leader_themes_per_quarter.csv`
 
-Local diagnostic CSVs under `outputs/` are research artifacts and are not meant
-for git staging unless explicitly requested.
+Local diagnostic CSVs/parquets under `outputs/` are research artifacts and are
+not meant for git staging unless explicitly requested.
 
 ## Current Best Broker-Ledger Result
 
-The active production challenger is still:
+The active production challenger remains:
 
 - strategy preset: `kr1000_technical_value_mcap_mdd_gate`
 - score profile: `kr1000_technical_value_mcap_regime`
@@ -42,7 +42,7 @@ The active production challenger is still:
 - hard stop: `15%`
 - portfolio drawdown ladder: disabled
 
-Official runner command:
+Official runner:
 
 ```bash
 py -3 tools\run_kr1000_backtest.py --start 2018-01-01 --end 2026-06-04 --initial-cash 100000000 --score-profile kr1000_technical_value_mcap_regime --price-panel outputs\kr1000_bt_technical_value_mcap_regime_top15_g90_ladder_2018_20260604\leader_price_panel.parquet --top-holdings 10 --max-rank-for-prices 20 --buy-rank-threshold 10 --hold-rank-threshold 20 --single-stock-max-weight 0.10 --gross-exposure 1.00 --hard-stop-loss-pct 0.15 --out-dir outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604 --save-scored-panel
@@ -61,55 +61,60 @@ Result:
 - average cash weight `59.88%`
 - metric mode `broker_ledger_next_close`, fill mode `next_close`
 
-This remains below the official CAGR `>=30%` and IR `>0.5` gates.
+This remains below the official CAGR `>=30%`, IR `>0.5`, and stretch CAGR
+`>=35%` goals.
 
 ## This Pass
 
-Performance diagnostics:
+Weekly price overlay research:
 
-- Wrote `outputs/kr1000_value_top10_month_active_exposure_audit.csv`.
-- Worst active months are still strong KOSPI200 rebound/bull months, especially
-  2026-05, 2020-11, 2023-11, 2019-01, and 2020-04.
-- Fast A/B of recovery mask `bench_ret_3m > 0 or bench_ret_1m > 0` reached
-  roughly CAGR `25.68%` but MDD worsened to `-25.38%`.
-- Gross/stop/DD-ladder variants restored risk only by giving back CAGR. Do not
-  promote the recovery mask yet.
+- Built local research artifacts under
+  `outputs/kr1000_weekly_price_overlay_research/`.
+- Simple weekly price-only overlay was weak. Best saved row was approximately
+  CAGR `16.04%`, MDD `-37.38%`, excess `-2.53%`.
+- Do not pursue this simple price-only weekly overlay without a proper
+  universe-wide daily feature build.
 
-Daily broker safety:
+Cash benchmark sleeve research:
 
-- Added `NON_ACTIONABLE_SNAPSHOT_MODES`.
-- Added `non_actionable_snapshot_reasons()`.
-- Added `select_actionable_signal_snapshot()`.
-- `tools/run_kr1000_daily_broker_check.py` now skips
-  `snapshot_build_mode=latest_fast_liquidity_only` for live action generation
-  and falls back to the latest prior actionable signal.
-- Actual selector check on the current official scored panel selected
-  `2026-05-29` while recording visible latest `2026-06-04` as skipped
-  `latest_fast_liquidity_only`.
+- Added `tools/analyze_kr1000_cash_benchmark_sleeve.py`.
+- It is diagnostic-only and marks `official_broker_ledger_metric=false`.
+- Cost-aware selected sleeve:
+  - fraction `0.75`
+  - 21d KOSPI200 guard `-3%`
+  - one-way cost `5bp`
+  - CAGR `26.81%`
+  - MDD `-33.38%`
+  - IR `0.378`
+- MDD-safe sleeve grid rows stayed near CAGR `26.3%`, still below the official
+  `30%` gate and well below the `35%` stretch target.
+- Conclusion: do not claim KOSPI200 cash sleeve solves the target gap until an
+  actual tradable KODEX200/benchmark sleeve is integrated into the broker
+  ledger with order/fill/cost accounting and clears the gates.
 
-Reason: a liquidity-only latest snapshot has incomplete feature scores and can
-otherwise create false `SELL_RANK_BREAK` actions for real current holdings.
+Daily broker usability:
+
+- Added `--skip-data-audit` to `tools/run_kr1000_daily_broker_check.py`.
+- This is local dry-run only; production validation must keep the data audit.
+- Verified skip-audit daily check completed for evaluation date `2026-06-04`,
+  selected actionable signal `2026-05-29`, and visible latest `2026-06-04`.
 
 ## Tests Run
 
-- `py -3 -m py_compile tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py` -> passed.
-- `py -3 tests\test_kr1000_data_repair_tools.py` -> 14 passed, 0 failed.
-- `py -3 tests\smoke_test.py --quick` -> 24 passed, 0 failed.
-
-The full daily broker check with data audit timed out in an interactive
-120-second run; the new signal-selector behavior itself was verified directly.
+- `py -3 -m py_compile tools\analyze_kr1000_cash_benchmark_sleeve.py tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py` -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 15 passed, 0 failed.
+- `py -3 tools\analyze_kr1000_cash_benchmark_sleeve.py --daily-nav outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604\leader_backtest_daily_nav.csv --out-dir outputs\kr1000_cash_benchmark_sleeve_diag_2018_20260604 --selected-fraction 0.75 --selected-guard -0.03 --selected-cost-bp 5` -> selected CAGR `26.81%`, MDD `-33.38%`.
+- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04 --scored-panel outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604\leader_scored_panel.parquet --allow-empty-holdings --skip-data-audit --out-dir outputs\kr1000_daily_check_skip_audit_test` -> completed.
 
 ## Next Engineering Steps
 
-1. Keep the current top10/cap10/no-ladder value preset as the production
-   challenger; it is not a pass.
-2. Next performance work should focus on a signal that captures rebound months
-   without breaking the MDD gate. The simple `bench1` recovery mask was not
-   enough.
-3. Investigate daily/weekly feature refresh rather than only monthly scored
-   panels, because several worst active months are missed before month-end
-   signals can react.
-4. Add actual `DATA_ROOT/state/current_holdings.csv`; without it daily broker
-   readiness must remain blocked.
-5. If touching daily check again, consider a bounded/optional data-audit mode
-   for local dry-runs, but keep production validation strict.
+1. Keep the top10/cap10/no-ladder value preset as the active challenger; it is
+   not a pass.
+2. Stop testing simple weekly price-only overlays and simple cash benchmark
+   sleeves as if they are likely to solve the gap; both failed after realistic
+   checks.
+3. The next credible performance path is a proper daily/weekly full-universe
+   feature refresh: KR1000-wide trailing price/RS/technical features, not just
+   ever-top20 price panel overlays.
+4. Daily readiness still needs actual `DATA_ROOT/state/current_holdings.csv`.
+   Without it, production daily broker readiness must remain blocked.

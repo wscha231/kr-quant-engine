@@ -6,6 +6,56 @@
 
 ## 2026-06-07
 
+### 15:07 KST - kr1000-cash-benchmark-sleeve-diagnostic
+
+**Scope**: Added a cost-aware KOSPI200 proxy sleeve diagnostic and made the
+daily broker check faster to validate locally without weakening production
+defaults.
+
+**What landed**:
+- Added `tools/analyze_kr1000_cash_benchmark_sleeve.py` to test whether idle
+  broker cash should be allocated to a KOSPI200 proxy sleeve.
+- The sleeve diagnostic includes a 21-trading-day benchmark guard, one-way
+  rebalance cost, average sleeve exposure, and explicit
+  `official_broker_ledger_metric=false` metadata.
+- Added `--skip-data-audit` to `tools/run_kr1000_daily_broker_check.py` for
+  local dry-runs. Production default still runs `build_audit()`.
+- Added regression coverage for the sleeve diagnostic.
+
+**Diagnostic result**:
+- Cost-aware sleeve grid:
+  `outputs\kr1000_cash_benchmark_sleeve_diag_2018_20260604\cash_benchmark_sleeve_grid.csv`.
+- The selected 75% idle-cash sleeve with 21d guard `-3%` and `5bp` one-way
+  cost produced CAGR `26.81%`, MDD `-33.38%`, IR `0.378`; it fails the MDD
+  gate and is diagnostic-only.
+- The best MDD-safe cash-sleeve grid rows were only around CAGR `26.3%`, still
+  below the official `30%` gate and the `35%` stretch objective.
+- Weekly price-overlay research also underperformed: the best saved row in
+  `outputs\kr1000_weekly_price_overlay_research\weekly_overlay_results.csv`
+  was about CAGR `16.04%` with MDD `-37.38%`. Do not pursue the simple weekly
+  price-only overlay path without a stronger universe-wide daily feature build.
+
+**symbols_added**:
+- tools.analyze_kr1000_cash_benchmark_sleeve.parse_args
+- tools.analyze_kr1000_cash_benchmark_sleeve.simulate_cash_benchmark_sleeve
+- tools.analyze_kr1000_cash_benchmark_sleeve.main
+- tests.test_kr1000_data_repair_tools.test_cash_benchmark_sleeve_diagnostic_metrics
+- tools.run_kr1000_daily_broker_check.parse_args[`--skip-data-audit`]
+
+**symbols_changed**:
+- tools.run_kr1000_daily_broker_check.main
+- tests/test_kr1000_data_repair_tools.py
+
+**config_fields_added**: none.
+
+**breaking_changes**: none.
+
+**Validation**:
+- `py -3 -m py_compile tools\analyze_kr1000_cash_benchmark_sleeve.py tools\run_kr1000_daily_broker_check.py tests\test_kr1000_data_repair_tools.py` -> passed.
+- `py -3 tests\test_kr1000_data_repair_tools.py` -> 15 passed, 0 failed.
+- `py -3 tools\analyze_kr1000_cash_benchmark_sleeve.py --daily-nav outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604\leader_backtest_daily_nav.csv --out-dir outputs\kr1000_cash_benchmark_sleeve_diag_2018_20260604 --selected-fraction 0.75 --selected-guard -0.03 --selected-cost-bp 5` -> selected CAGR `26.81%`, MDD `-33.38%`.
+- `py -3 tools\run_kr1000_daily_broker_check.py --evaluation-date 2026-06-04 --scored-panel outputs\kr1000_bt_technical_value_mcap_regime_top10_cap10_g100_no_ladder_official_runner_2018_20260604\leader_scored_panel.parquet --allow-empty-holdings --skip-data-audit --out-dir outputs\kr1000_daily_check_skip_audit_test` -> completed, selected signal `2026-05-29`, visible latest `2026-06-04`.
+
 ### 14:46 KST - kr1000-daily-actionable-signal-guard
 
 **Scope**: Hardened the daily broker-readiness path so a fast liquidity-only

@@ -403,6 +403,34 @@ def test_daily_broker_check_skips_non_actionable_latest_snapshot():
     }]
 
 
+@_test("cash benchmark sleeve diagnostic includes cost and stays non-official")
+def test_cash_benchmark_sleeve_diagnostic_metrics():
+    from tools.analyze_kr1000_cash_benchmark_sleeve import simulate_cash_benchmark_sleeve
+
+    dates = pd.date_range("2024-01-01", periods=30, freq="B")
+    nav = pd.DataFrame({
+        "date": dates,
+        "nav": [100.0 + i * 0.1 for i in range(len(dates))],
+        "cash": [50.0 for _ in dates],
+    })
+    benchmark = pd.Series(
+        [100.0 + i * 0.2 for i in range(len(dates))],
+        index=dates,
+    )
+    daily, metrics = simulate_cash_benchmark_sleeve(
+        nav,
+        benchmark,
+        fraction=0.5,
+        guard_21d=None,
+        cost_bp=10.0,
+    )
+    assert len(daily) == len(nav)
+    assert metrics["diagnostic_only"] is True
+    assert metrics["official_broker_ledger_metric"] is False
+    assert metrics["total_rebalance_cost_krw"] > 0
+    assert metrics["avg_benchmark_sleeve_weight"] > 0
+
+
 @_test("current holdings resolver prefers DATA_ROOT state over project fallback")
 def test_current_holdings_resolver_prefers_data_root_state():
     from kr1000_leader import resolve_current_holdings_path

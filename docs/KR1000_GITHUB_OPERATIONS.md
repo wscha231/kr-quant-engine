@@ -228,6 +228,22 @@ engine-version change or suspected cache corruption requires a from-scratch
   `DATA_ROOT/state/current_holdings.csv` first, then project-local
   `state/current_holdings.csv`. Use `--allow-empty-holdings` only for research
   dry-runs; production readiness must be based on actual account holdings.
+- `--skip-data-audit` exists only for local dry-runs when the operator needs to
+  verify signal selection or trade-plan mechanics quickly. Production
+  validation should not use it.
+
+`Cash Benchmark Sleeve Diagnostic`
+
+- `tools/analyze_kr1000_cash_benchmark_sleeve.py` tests whether idle KR1000
+  broker cash should be allocated to a KOSPI200 proxy sleeve.
+- It is explicitly diagnostic-only and writes
+  `official_broker_ledger_metric=false`; do not use it as the official CAGR/MDD
+  gate until an actual tradable KODEX200/benchmark sleeve is integrated into
+  the broker ledger with order/fill/cost accounting.
+- The 2026-06-07 test showed that cost-aware KOSPI200 proxy sleeves did not
+  solve the target gap: the selected 75% idle-cash sleeve with a 21d `-3%`
+  guard and `5bp` one-way cost produced CAGR `26.81%` but MDD `-33.38%`, while
+  MDD-safe grid rows stayed near CAGR `26.3%`.
 
 `Quarterly Backtest`
 

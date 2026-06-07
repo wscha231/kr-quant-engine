@@ -57,6 +57,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-signal-age-days", type=int, default=7,
                    help="Block production check when latest signal is older than this.")
     p.add_argument("--audit-stale-days", type=int, default=45)
+    p.add_argument("--skip-data-audit", action="store_true",
+                   help="Skip the data-integrity audit for local broker-check dry-runs only.")
     p.add_argument("--refresh-days", type=int, default=2,
                    help="Price cache TTL for held names.")
     return p.parse_args()
@@ -289,7 +291,10 @@ def main() -> int:
     plan["evaluation_price_date"] = str(evaluation_date.date())
     plan["source_signal_date"] = str(signal_date.date())
 
-    audit = build_audit(evaluation_date, args.audit_stale_days)
+    audit = (
+        {"summary": {"critical": 0, "skipped": True}, "issues": []}
+        if args.skip_data_audit else build_audit(evaluation_date, args.audit_stale_days)
+    )
     blockers: list[str] = []
     if signal_age > args.max_signal_age_days:
         blockers.append(f"latest_signal_stale_{signal_age}d_gt_{args.max_signal_age_days}d")
@@ -320,6 +325,7 @@ def main() -> int:
         "current_holdings_path": str(holdings_path),
         "current_holdings_file_exists": holdings_path.exists(),
         "allow_empty_holdings": bool(args.allow_empty_holdings),
+        "data_audit_skipped": bool(args.skip_data_audit),
         "current_holding_count": int(len(holdings)),
         "trade_plan_rows": int(len(plan)),
         "action_counts": {str(k): int(v) for k, v in action_counts.items()},
