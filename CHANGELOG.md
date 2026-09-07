@@ -738,3 +738,15 @@ Next session priority:
   - Survivorship-corrected universe (DART corp_code history)
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
+## 2026-09-07 22:40 KST — isolated research decision market export
+
+- Source: main 80cb0721896a834a45d257fc4f65255134338f36. No existing engine changes.
+- symbols_added: package_hash, main (tools/export_research_decision_market.py).
+- symbols_changed: none.
+- config_fields_added: --engine-root, --engine-source-hash, --input (new CLI only).
+- breaking_changes: none.
+- Verification: 2 source-pin counterexample tests and 23 existing quick smoke checks passed.
+- No schedules, models, policy, official target, account or order changes.
+- Actual US2/KR1 pilot has partial IR extracts only; current raw data admission remains blocked.
