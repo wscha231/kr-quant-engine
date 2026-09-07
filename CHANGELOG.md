@@ -750,3 +750,8 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 - Verification: 2 source-pin counterexample tests and 23 existing quick smoke checks passed.
 - No schedules, models, policy, official target, account or order changes.
 - Actual US2/KR1 pilot has partial IR extracts only; current raw data admission remains blocked.
+
+### 2026-09-07 — Research export review correction
+- Hash recursive package Python files and parent initializer; execute only the
+  verified snapshot. Cover parent/nested source and checkout-race counterexamples.
+- Register source-pin tests in the existing PR smoke workflow (no new schedule).

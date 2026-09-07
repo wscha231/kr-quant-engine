@@ -29,3 +29,8 @@ official target/account changes and orders blocked without separate approval.
 The prior May 2026 handoff and historical claims remain in Git history at
 `80cb0721896a834a45d257fc4f65255134338f36:SESSION_HANDOFF.md`; they are not today's
 operating evidence. See `research/research_decision_v1.md` for the new contract.
+
+Review update: PR #2 first review identified incomplete import pin coverage and
+check/import races. Both are covered by verified-byte snapshot execution and
+new regression tests, now included in the existing smoke workflow. A fresh
+exact-head review is still required; no operational promotion or merge allowed.

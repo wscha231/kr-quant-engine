@@ -27,3 +27,9 @@ No new API credentials, schedule, paper account or live book is created.
 Current blockers and real-data run results are recorded in the final US/KR V1
 handoff. May 2026 SESSION_HANDOFF production claims are historical, not a new
 approval or current evidence in this change.
+
+Review hardening: source pins include recursive Python files and the parent
+initializer; the loader executes a temporary snapshot made from the exact bytes
+that were hashed. It does not reopen the mutable US checkout for imports. The
+source-pin regression tests are registered in the existing PR smoke workflow;
+no new trigger or schedule is added.
