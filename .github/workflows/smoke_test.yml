@@ -27,6 +27,9 @@ jobs:
       - name: Smoke test (quick syntax + structural)
         run: python tests/smoke_test.py --quick
 
+      - name: Research export source pin tests
+        run: python tests/research_decision_export_smoke.py
+
       - name: Smoke test (full)
         run: python tests/smoke_test.py
 
