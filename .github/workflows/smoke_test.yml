@@ -30,6 +30,9 @@ jobs:
       - name: Smoke test (full)
         run: python tests/smoke_test.py
 
+      - name: Qualitative moat / quality V2 tests
+        run: python tests/test_moat_quality_v2.py
+
       - name: PIT universe tests (Phase C1)
         run: python tests/test_pit_universe.py
         # Some tests soft-skip when no historical mcap cache present.
