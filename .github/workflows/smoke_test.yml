@@ -43,6 +43,9 @@ jobs:
       - name: VKOSPI tests (Phase C4)
         run: python tests/test_vkospi.py
 
+      - name: Qualitative moat / quality V2 tests
+        run: python tests/test_moat_quality_v2.py
+
       - name: DART PIT tests
         run: python tests/test_dart_pit.py
         continue-on-error: true   # network-dependent

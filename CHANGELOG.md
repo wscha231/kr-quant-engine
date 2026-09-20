@@ -738,3 +738,34 @@ Next session priority:
   - Survivorship-corrected universe (DART corp_code history)
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
+---
+
+## 2026-09-20
+
+### 19:55 KST — moat-quality-v2-research-contract
+
+**Scope**: 기술적 해자·독점성·기업질을 재무 `quality_score`와 분리해, 증거 기반 연구 레이어로 구조화.
+
+**What landed**:
+- `research/moat_quality_v2.py`: qualification/switching cost, market structure, IP/patent durability, pricing power, replacement difficulty, next-generation relevance 6축 계약.
+- `docs/moat_quality_v2_contract.json`: evidence/PIT/safety canonical contract.
+- `research/09_moat_quality_v2/HANDOFF_20260920.md`: 한국시장 적용 규칙과 다음 검증 단계.
+- `tests/test_moat_quality_v2.py`: 13개 fail-closed/PIT/authority regression.
+- `.github/workflows/smoke_test.yml`: 새 focused regression을 PR CI에 등록.
+- `CLAUDE.md`: 기존 재무 `quality_score`와 질적 moat V2를 혼합하지 않는 invariant 추가.
+
+**Safety / authority**:
+- 현재 질적 평가는 historical PIT certified 아님.
+- OOS 검증 전 selector weight, live picks, portfolio weights, targets, broker/orders 영향 0.
+- missing/stale/future/synthetic evidence는 fail closed.
+
+**symbols_added**: moat_quality_v2.evaluate_packet, MoatQualityContractError, DIMENSIONS, SOURCE_TYPES
+**symbols_changed**: none in live selector / scoring / portfolio code
+**config_fields_added**: none
+**breaking_changes**: none
+
+**Validation**: local focused suite 13/13 PASS; CI exact-head required before merge.
+
+**Next**: 한국 후보 기업의 timestamped evidence packet 축적 → 충분한 PIT history 확보 후 1/3/6/12개월 incremental alpha OOS 실험.

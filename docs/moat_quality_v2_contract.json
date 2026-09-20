@@ -1,0 +1,53 @@
+{
+  "schema": "moat-quality-v2-contract",
+  "version": 2,
+  "purpose": "Evidence-bound qualitative moat and company-quality research. This contract does not change selector weights, targets, portfolio sizing, or orders.",
+  "dimensions": [
+    "qualification_switching_cost",
+    "market_structure_position",
+    "ip_patent_durability",
+    "pricing_power",
+    "replacement_difficulty",
+    "next_generation_relevance"
+  ],
+  "dimension_scale": {
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "missing_policy": "BLOCK_NO_SCORE"
+  },
+  "evidence_requirements": {
+    "each_dimension_requires_evidence": true,
+    "each_dimension_requires_confidence": true,
+    "each_dimension_requires_counter_argument": true,
+    "each_dimension_requires_invalidation_conditions": true,
+    "published_at_must_not_exceed_available_at": true,
+    "available_at_must_not_exceed_as_of": true,
+    "as_of_must_not_exceed_review_time_or_cutoff": true,
+    "raw_sha256_required": true,
+    "global_evidence_id_unique": true,
+    "missing_evidence_imputation_allowed": false
+  },
+  "allowed_source_types": [
+    "REGULATORY_FILING",
+    "COMPANY_DISCLOSURE",
+    "CUSTOMER_DISCLOSURE",
+    "PATENT_RECORD",
+    "COURT_OR_REGULATORY_DECISION",
+    "TECHNICAL_STANDARD",
+    "INDUSTRY_DATA",
+    "OTHER_PRIMARY"
+  ],
+  "score_method": "UNWEIGHTED_MEAN_SIX_REQUIRED_DIMENSIONS",
+  "confidence_policy": "Report evidence confidence separately. Do not multiply confidence into the research score and do not convert this index into an alpha weight without PIT/OOS validation.",
+  "historical_policy": "Current reviewed qualitative evidence must not be backfilled to earlier dates. Historical use requires evidence availability timestamps that were genuinely observable at each decision date.",
+  "safety": {
+    "research_only": true,
+    "selector_weight_change_allowed": false,
+    "portfolio_weight_effect": 0.0,
+    "target_book_write_allowed": false,
+    "ledger_write_allowed": false,
+    "orders_allowed": false,
+    "production_activation_allowed": false,
+    "oos_validation_required_before_weighting": true
+  }
+}
