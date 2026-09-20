@@ -367,7 +367,7 @@ def evaluate_packet(
         key=lambda key: normalized_dimensions[key]["assessment"],
     )
     return {
-        "schema": RESULT_SCHMA,
+        "schema": RESULT_SCHEMA,
         "status": "COMPLETE_RESEARCH_REVIEW",
         "asset_id": asset_id,
         "issuer_id": issuer_id,
@@ -407,7 +407,7 @@ __all__ = [
     "INDEPENDENT_AFFILIATIONS",
     "MAX_VERIFICATION_AGE_DAYS",
     "MoatQualityContractError",
-    "RESULT_SCHMA",
+    "RESULT_SCHEMA",
     "SCHEMA",
     "SOURCE_AFFILIATIONS",
     "SOURCE_TYPE_AFFILIATIONS",

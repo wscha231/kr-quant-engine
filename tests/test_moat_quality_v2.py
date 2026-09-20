@@ -194,7 +194,7 @@ class MoatQualityV2Smoke(unittest.TestCase):
     def test_duplicate_evidence_id_is_rejected_across_dimensions(self):
         value = packet()
         value["dimensions"][DIMENSIONS[1]]["evidence"][0]["evidence_id"] = \
-            value["dimensions"][DIMENSIONS[0]]["evidence_id"]
+            value["dimensions"][DIMENSIONS[0]]["evidence"][0]["evidence_id"]
         with self.assertRaisesRegex(MoatQualityContractError, "duplicate_evidence_id"):
             evaluate_packet(value, "2026-09-19T02:00:00Z", resolver)
 
