@@ -156,13 +156,11 @@ def compute_listed_months(
     """Listed months derived from PIT historical mcap snapshots.
 
     Replaces the legacy 999-stub with real values via kr_pit_universe.
-    Tickers whose listing predates the earliest cached snapshot are returned
-    as 999 (treated as "long-listed, exact unknown" so the
-    min_listed_months ≥ 12 filter passes them).
-
-    Tickers NOT present in listed_history get listed_months = 0 — meaning
-    they will fail the min_listed_months filter (correct behaviour: never
-    seen in the historical mcap snapshots ⇒ not eligible).
+    Tickers whose true listing date is not established by retained PIT
+    history keep listed_months missing. Tickers absent from listed_history also
+    remain missing. The eligibility filter converts missing to a failing
+    comparison, so unknown listing age never becomes a favorable long-listing
+    assumption.
     """
     df = compute_listed_months_pit(rebalance_date, tickers)
     return df[["ticker", "listed_months"]].copy()
