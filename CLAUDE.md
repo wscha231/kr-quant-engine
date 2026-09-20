@@ -22,7 +22,7 @@ KOSPI + KOSDAQ 통합 유니버스 기반 한국 주식 퀀트 엔진. `r1000-qu
 - `colab_run.ipynb` — Colab 런북 (P0 후 추가 예정)
 
 ## Current Engine Version
-- `KR_ENGINE_REUSE_VERSION = "2026-04-27-p0-bootstrap"` (in `kr_config.py`)
+- `KR_ENGINE_REUSE_VERSION = "2026-09-21-p1-pit-listing-age-failclosed"` (in `kr_config.py`; H1 PR #5, pending merge)
 - 시그널 공식 변경 시 bump → cache_*, feature_store, models 자동 무효화
 
 ## Environments

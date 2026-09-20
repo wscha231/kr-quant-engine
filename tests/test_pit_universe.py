@@ -191,6 +191,12 @@ def test_listed_months_not_stub():
     assert pd.notna(values.loc["000002"]) and 40 <= int(values.loc["000002"]) <= 60, values.to_dict()
 
 
+@_test("engine reuse version invalidates pre-fix listing-age caches")
+def test_engine_version_invalidates_pre_fix_listing_age_caches():
+    from kr_config import KR_ENGINE_REUSE_VERSION
+    assert KR_ENGINE_REUSE_VERSION == "2026-09-21-p1-pit-listing-age-failclosed"
+
+
 @_test("missing_history_never_imputes_long_listing_age")
 def test_missing_history_never_imputes_long_listing_age():
     import kr_pit_universe as pit

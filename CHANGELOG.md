@@ -761,9 +761,9 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 **Non-scope**: alpha weights, theme model, classifier, portfolio sizing, broker/order path, historical return claims.
 
-**symbols_changed**: `kr_pit_universe.compute_listed_months_pit` missing/lower-bound semantics only; `kr_universe.compute_listed_months` documentation.
+**symbols_changed**: `kr_pit_universe.compute_listed_months_pit` missing/lower-bound semantics; `kr_universe.compute_listed_months` documentation; `KR_ENGINE_REUSE_VERSION` bumped to invalidate feature/model caches built with the 999-month fallback.
 **symbols_added**: none in production.
-**config_fields_added**: none.
+**config_fields_added**: none. Existing engine reuse version advanced for cache invalidation.
 **breaking_changes**: Unknown listing age now stays missing/ineligible instead of being treated as 999 months. This is intentional fail-closed behavior.
 
 **Validation**: exact-head GitHub CI required before merge.
