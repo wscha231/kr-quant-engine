@@ -1,0 +1,84 @@
+{
+  "schema": "moat-quality-v2-contract",
+  "version": 2,
+  "revision": 3,
+  "purpose": "Evidence-bound qualitative moat and company-quality research. This contract does not change selector weights, targets, portfolio sizing, or orders.",
+  "dimensions": [
+    "qualification_switching_cost",
+    "market_structure_position",
+    "ip_patent_durability",
+    "pricing_power",
+    "replacement_difficulty",
+    "next_generation_relevance"
+  ],
+  "dimension_scale": {
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "missing_policy": "BLOCK_NO_SCORE"
+  },
+  "freshness_policy": {
+    "basis": "last_verified_at, not original publication age",
+    "max_verification_age_days": {
+      "REGULATORY_FILING": 548,
+      "COMPANY_DISCLOSURE": 365,
+      "CUSTOMER_DISCLOSURE": 365,
+      "PATENT_RECORD": 365,
+      "COURT_OR_REGULATORY_DECISION": 548,
+      "TECHNICAL_STANDARD": 548,
+      "INDUSTRY_DATA": 180,
+      "OTHER_PRIMARY": 365
+    },
+    "valid_through_required": true
+  },
+  "evidence_requirements": {
+    "trusted_cutoff_required_from_caller": true,
+    "subject_asset_and_issuer_identity_required": true,
+    "each_dimension_requires_evidence": true,
+    "each_dimension_requires_confidence": true,
+    "each_dimension_requires_counter_argument": true,
+    "each_dimension_requires_reconciliation": true,
+    "each_dimension_requires_invalidation_conditions": true,
+    "published_at_lte_available_at_lte_verified_at_lte_as_of": true,
+    "as_of_lte_reviewed_at_lte_cutoff": true,
+    "raw_bytes_must_resolve_and_match_sha256": true,
+    "global_evidence_id_unique": true,
+    "missing_evidence_imputation_allowed": false,
+    "positive_assessment_requires_independent_support": true,
+    "negative_assessment_requires_challenge": true,
+    "neutral_assessment_requires_support_and_challenge": true,
+    "minimum_packet_independent_source_groups": 2
+  },
+  "allowed_source_types": [
+    "REGULATORY_FILING",
+    "COMPANY_DISCLOSURE",
+    "CUSTOMER_DISCLOSURE",
+    "PATENT_RECORD",
+    "COURT_OR_REGULATORY_DECISION",
+    "TECHNICAL_STANDARD",
+    "INDUSTRY_DATA",
+    "OTHER_PRIMARY"
+  ],
+  "allowed_source_affiliations": [
+    "ISSUER",
+    "CUSTOMER",
+    "REGULATOR",
+    "PATENT_OFFICE",
+    "COURT",
+    "STANDARD_BODY",
+    "INDUSTRY_THIRD_PARTY",
+    "OTHER_INDEPENDENT"
+  ],
+  "score_method": "UNWEIGHTED_MEAN_SIX_REQUIRED_DIMENSIONS",
+  "confidence_policy": "Report evidence confidence separately. Do not multiply confidence into the research score and do not convert this index into an alpha weight without PIT/OOS validation.",
+  "historical_policy": "Current reviewed qualitative evidence must not be backfilled to earlier dates. Historical use requires evidence availability and verification timestamps genuinely observable at each decision date.",
+  "safety": {
+    "research_only": true,
+    "selector_weight_change_allowed": false,
+    "portfolio_weight_effect": 0.0,
+    "target_book_write_allowed": false,
+    "ledger_write_allowed": false,
+    "orders_allowed": false,
+    "production_activation_allowed": false,
+    "oos_validation_required_before_weighting": true
+  }
+}
