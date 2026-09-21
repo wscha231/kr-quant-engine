@@ -4,12 +4,16 @@ import json
 import math
 from pathlib import Path
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+import kr_pykrx_client as kr_client
 
 from research.kr_strict_market_snapshot_v1 import (
     BENCHMARK_BY_MARKET,
@@ -130,6 +134,67 @@ class KrStrictMarketSnapshotV1Tests(unittest.TestCase):
         self.assertEqual(normalized_frame_sha256(first), normalized_frame_sha256(second))
         second.loc[0, "close"] += 1.0
         self.assertNotEqual(normalized_frame_sha256(first), normalized_frame_sha256(second))
+
+
+    def test_kosdaq150_uses_exact_krx_code_fdr_path_and_source_segregated_cache(self):
+        class FakeFdr:
+            calls = []
+
+            @classmethod
+            def DataReader(cls, symbol, start, end):
+                cls.calls.append((symbol, start, end))
+                self.assertEqual(symbol, "KRX-INDEX:2203")
+                dates = pd.bdate_range(start=start, end=end)
+                frame = pd.DataFrame(
+                    {
+                        "Open": range(100, 100 + len(dates)),
+                        "High": range(101, 101 + len(dates)),
+                        "Low": range(99, 99 + len(dates)),
+                        "Close": range(100, 100 + len(dates)),
+                        "Volume": [1000] * len(dates),
+                    },
+                    index=dates,
+                )
+                frame.index.name = "Date"
+                return frame
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(kr_client, "CACHE_DIR", Path(tmp)),
+                patch.object(kr_client, "PYKRX_AVAILABLE", False),
+                patch.object(kr_client, "FDR_AVAILABLE", True),
+                patch.object(kr_client, "_fdr", FakeFdr),
+            ):
+                out = kr_client.fetch_index_ohlcv(
+                    "2203", "2026-09-01", "2026-09-18", refresh_days=1
+                )
+                self.assertEqual(
+                    out.attrs["source_identity"],
+                    "FINANCE_DATAREADER_KRX_INDEX_MDCSTAT00301_2203_NORMALIZED",
+                )
+                self.assertEqual(len(FakeFdr.calls), 1)
+                cache = kr_client.index_cache_path(
+                    "2203", "2026-09-01", "2026-09-18"
+                )
+                self.assertIn("krx-direct-v1", cache.name)
+                self.assertTrue(cache.is_file())
+                self.assertTrue(kr_client.index_source_meta_path(cache).is_file())
+
+                with patch.object(
+                    FakeFdr,
+                    "DataReader",
+                    side_effect=AssertionError("provider should not be called"),
+                ):
+                    replay = kr_client.fetch_index_ohlcv(
+                        "2203", "2026-09-01", "2026-09-18", refresh_days=1
+                    )
+                self.assertEqual(
+                    replay.attrs["source_identity"],
+                    "FINANCE_DATAREADER_KRX_INDEX_MDCSTAT00301_2203_NORMALIZED",
+                )
+
+                legacy = Path(tmp) / "index_2203_20260901_20260918.parquet"
+                self.assertNotEqual(cache, legacy)
 
     def test_missing_market_field_is_not_neutral_filled(self):
         out = compute_snapshot(
