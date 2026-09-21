@@ -16,6 +16,7 @@ with install instructions. Cache reads still work without pykrx.
 """
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -46,6 +47,106 @@ except ImportError:
 
 CACHE_DIR = DATA_ROOT / "cache_pykrx"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+INDEX_SOURCE_META_SCHEMA = "kr-index-cache-source-v1"
+_KOSDAQ150_INDEX_TICKER = "2203"
+_KOSDAQ150_FDR_DIRECT = "KRX-INDEX:2203"
+_KOSDAQ150_SOURCE_IDENTITIES = {
+    "PYKRX_KRX_INDEX_2203_NORMALIZED",
+    "FINANCE_DATAREADER_KRX_INDEX_MDCSTAT00301_2203_NORMALIZED",
+}
+
+
+def index_cache_path(ticker: str, start: str, end: str) -> Path:
+    """Return the cache path for an index history.
+
+    KOSDAQ150 uses a source-segregated v1 cache so a former KQ150/Yahoo cache
+    cannot be reused as direct KRX-code evidence.
+    """
+    if ticker == _KOSDAQ150_INDEX_TICKER:
+        return CACHE_DIR / (
+            f"index_{ticker}_krx-direct-v1_{_yyyymmdd(start)}_{_yyyymmdd(end)}.parquet"
+        )
+    return CACHE_DIR / f"index_{ticker}_{_yyyymmdd(start)}_{_yyyymmdd(end)}.parquet"
+
+
+def index_source_meta_path(cache_path: Path) -> Path:
+    return Path(str(cache_path) + ".source.json")
+
+
+def _load_index_cached(
+    path: Path,
+    *,
+    ticker: str,
+    refresh_days: int,
+) -> Optional[pd.DataFrame]:
+    cached = _load_cached(path, refresh_days)
+    if cached is None or cached.empty:
+        return cached
+    if ticker != _KOSDAQ150_INDEX_TICKER:
+        return cached
+
+    meta_path = index_source_meta_path(path)
+    if not meta_path.exists():
+        log(
+            f"[pykrx_client] KOSDAQ150 cache missing source receipt: {meta_path.name}",
+            level="WARN",
+        )
+        return None
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log(
+            f"[pykrx_client] KOSDAQ150 source receipt unreadable: {type(exc).__name__}",
+            level="WARN",
+        )
+        return None
+    source_identity = meta.get("source_identity")
+    if (
+        meta.get("schema") != INDEX_SOURCE_META_SCHEMA
+        or meta.get("index_ticker") != ticker
+        or meta.get("cache_file") != path.name
+        or source_identity not in _KOSDAQ150_SOURCE_IDENTITIES
+    ):
+        log("[pykrx_client] KOSDAQ150 source receipt mismatch", level="WARN")
+        return None
+
+    cached.attrs["source_identity"] = source_identity
+    cached.attrs["source_receipt_path"] = str(meta_path)
+    cached.attrs["index_ticker"] = ticker
+    return cached
+
+
+def _save_index_cache(
+    df: pd.DataFrame,
+    path: Path,
+    *,
+    ticker: str,
+    source_identity: str,
+) -> None:
+    _save_cache(df, path)
+    if not path.exists():
+        return
+    df.attrs["source_identity"] = source_identity
+    df.attrs["index_ticker"] = ticker
+    if ticker != _KOSDAQ150_INDEX_TICKER:
+        return
+    if source_identity not in _KOSDAQ150_SOURCE_IDENTITIES:
+        raise RuntimeError("unapproved_kosdaq150_source_identity")
+    meta = {
+        "schema": INDEX_SOURCE_META_SCHEMA,
+        "index_ticker": ticker,
+        "cache_file": path.name,
+        "source_identity": source_identity,
+        "raw_source_claimed": False,
+        "normalized_only": True,
+    }
+    meta_path = index_source_meta_path(path)
+    meta_path.write_text(
+        json.dumps(meta, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    df.attrs["source_receipt_path"] = str(meta_path)
 
 
 def _require_pykrx() -> None:
@@ -361,7 +462,7 @@ _FDR_INDEX_MAP = {
     "1001": "KS11",      # KOSPI
     "1028": "KS200",     # KOSPI 200
     "2001": "KQ11",      # KOSDAQ
-    "2203": "KQ150",     # KOSDAQ 150
+    "2203": "KRX-INDEX:2203",  # exact KRX index code; bypass KQ150/Yahoo
     "1003": "VKOSPI",    # KRX VKOSPI (FDR may not have)
 }
 
@@ -372,13 +473,13 @@ def fetch_index_ohlcv(ticker: str, start: str, end: str, refresh_days: int = 1) 
     Returns date-indexed DataFrame: date, open, high, low, close, volume.
     Tries pykrx first; falls back to FDR mapping.
     """
-    cache_name = f"index_{ticker}_{_yyyymmdd(start)}_{_yyyymmdd(end)}"
-    path = CACHE_DIR / f"{cache_name}.parquet"
-    cached = _load_cached(path, refresh_days)
+    path = index_cache_path(ticker, start, end)
+    cached = _load_index_cached(path, ticker=ticker, refresh_days=refresh_days)
     if cached is not None and not cached.empty:
         return cached
 
     df = pd.DataFrame()
+    source_identity: Optional[str] = None
     if PYKRX_AVAILABLE:
         try:
             df = _pykrx_stock.get_index_ohlcv_by_date(
@@ -391,6 +492,11 @@ def fetch_index_ohlcv(ticker: str, start: str, end: str, refresh_days: int = 1) 
                     "거래대금": "value",
                 })
                 df["index_ticker"] = ticker
+                source_identity = (
+                    "PYKRX_KRX_INDEX_2203_NORMALIZED"
+                    if ticker == _KOSDAQ150_INDEX_TICKER
+                    else "PYKRX_KRX_INDEX_NORMALIZED"
+                )
             else:
                 df = pd.DataFrame()
         except Exception:
@@ -409,6 +515,12 @@ def fetch_index_ohlcv(ticker: str, start: str, end: str, refresh_days: int = 1) 
                 })
                 fdr_df["index_ticker"] = ticker
                 df = fdr_df
+                source_identity = (
+                    "FINANCE_DATAREADER_KRX_INDEX_MDCSTAT00301_2203_NORMALIZED"
+                    if ticker == _KOSDAQ150_INDEX_TICKER
+                    and fdr_code == _KOSDAQ150_FDR_DIRECT
+                    else f"FINANCE_DATAREADER_NORMALIZED:{fdr_code}"
+                )
         except Exception as e:
             log(f"[pykrx_client] FDR index fail {ticker} ({fdr_code}): {e}",
                 level="WARN")
@@ -416,8 +528,19 @@ def fetch_index_ohlcv(ticker: str, start: str, end: str, refresh_days: int = 1) 
     if df.empty:
         return pd.DataFrame()
 
-    _save_cache(df, path)
-    log(f"[pykrx_client] fetch_index_ohlcv({ticker}, {start}, {end}) -> {len(df)} rows")
+    if source_identity is None:
+        source_identity = "UNRESOLVED_INDEX_PROVIDER_NORMALIZED"
+    _save_index_cache(
+        df,
+        path,
+        ticker=ticker,
+        source_identity=source_identity,
+    )
+    df.attrs["source_identity"] = source_identity
+    log(
+        f"[pykrx_client] fetch_index_ohlcv({ticker}, {start}, {end}) "
+        f"-> {len(df)} rows source={source_identity}"
+    )
     return df
 
 
