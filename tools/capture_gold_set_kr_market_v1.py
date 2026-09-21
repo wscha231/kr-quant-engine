@@ -32,6 +32,8 @@ from kr_pykrx_client import (
     fetch_ticker_history,
     index_cache_path,
     index_source_meta_path,
+    ticker_cache_path,
+    ticker_source_meta_path,
 )
 from research.kr_strict_market_snapshot_v1 import (
     assert_no_zero_imputation,
@@ -90,6 +92,8 @@ def ymd(value) -> str:
 def cache_path(kind: str, ticker: str, start: str, end: str) -> Path:
     if kind == "index":
         return index_cache_path(ticker, start, end)
+    if kind == "ticker":
+        return ticker_cache_path(ticker, start, end)
     return CACHE_DIR / f"{kind}_{ticker}_{ymd(start)}_{ymd(end)}.parquet"
 
 
@@ -109,6 +113,21 @@ def hash_and_copy_cache(path: Path, attempt: Path) -> dict:
 
 def archive_index_source_receipt(cache: Path, attempt: Path) -> dict:
     meta = index_source_meta_path(cache)
+    if not meta.is_file():
+        return {}
+    raw = meta.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    target = attempt / "source_receipts" / (digest + ".json")
+    exclusive(target, raw)
+    return {
+        "source_receipt_sha256": digest,
+        "source_receipt_bytes": len(raw),
+        "source_receipt_archived_name": target.name,
+    }
+
+
+def archive_ticker_source_receipt(cache: Path, attempt: Path) -> dict:
+    meta = ticker_source_meta_path(cache)
     if not meta.is_file():
         return {}
     raw = meta.read_bytes()
@@ -205,6 +224,11 @@ def capture(registry: dict, attempt: Path, code_sha: str, explicit_session: str 
         require(not df.empty, "ticker_fetch_empty:" + ticker)
         cp = cache_path("ticker", ticker, start, end)
         cache_info = hash_and_copy_cache(cp, attempt)
+        cache_info.update(archive_ticker_source_receipt(cp, attempt))
+        source_identity = df.attrs.get(
+            "source_identity",
+            "UNRESOLVED_PYKRX_OR_FDR",
+        )
         norm = normalized_rows_bytes(df)
         norm_sha = hashlib.sha256(norm).hexdigest()
         exclusive(attempt / "normalized" / (norm_sha + ".json"), norm)
@@ -219,7 +243,7 @@ def capture(registry: dict, attempt: Path, code_sha: str, explicit_session: str 
             market=row["market"],
             session_date=session.date().isoformat(),
             available_at=datetime.now(ZoneInfo("Asia/Seoul")).isoformat(),
-            source_identity="KR_CLIENT_NORMALIZED_CACHE_UNRESOLVED_PROVIDER",
+            source_identity=source_identity,
         )
         assert_no_zero_imputation(snapshot)
         snapshots.append(snapshot)
@@ -227,7 +251,7 @@ def capture(registry: dict, attempt: Path, code_sha: str, explicit_session: str 
             "asset_id": row["asset_id"],
             "ticker": ticker,
             "market": row["market"],
-            "provider_identity": "UNRESOLVED_PYKRX_OR_FDR",
+            "provider_identity": source_identity,
             "normalized_client": "kr_pykrx_client.fetch_ticker_history",
             "normalized_sha256": normalized_frame_sha256(df),
             **cache_info,
@@ -241,7 +265,7 @@ def capture(registry: dict, attempt: Path, code_sha: str, explicit_session: str 
         "session_date": session.date().isoformat(),
         "captured_at": datetime.now(ZoneInfo("Asia/Seoul")).isoformat(),
         "registry_upstream": registry["upstream"],
-        "provider_identity": "UNRESOLVED_PYKRX_OR_FDR",
+        "provider_identity": "MIXED_EXPLICIT_NORMALIZED_SOURCES",
         "return_basis": "KRX_OR_FDR_CLOSE_PROXY_UNREVIEWED",
         "snapshots": snapshots,
         "ticker_receipts": receipts,

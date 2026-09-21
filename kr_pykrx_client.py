@@ -51,6 +51,7 @@ CACHE_DIR = DATA_ROOT / "cache_pykrx"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 INDEX_SOURCE_META_SCHEMA = "kr-index-cache-source-v1"
+TICKER_SOURCE_META_SCHEMA = "kr-ticker-cache-source-v1"
 _KOSDAQ150_INDEX_TICKER = "2203"
 _KOSDAQ150_FDR_DIRECT = "KRX-INDEX:2203"
 _KOSDAQ150_SOURCE_IDENTITIES = {
@@ -58,6 +59,98 @@ _KOSDAQ150_SOURCE_IDENTITIES = {
     "FINANCE_DATAREADER_KRX_INDEX_MDCSTAT00301_2203_NORMALIZED",
     "KRX_OPENAPI_KOSDAQ_DAILY_2203_NORMALIZED",
 }
+
+
+_TICKER_HISTORY_SOURCE_IDENTITIES = {
+    "PYKRX_ADJUSTED_TRUE_NORMALIZED",
+    "FINANCE_DATAREADER_NAVER_CLOSE_PROXY_NORMALIZED",
+}
+
+
+def ticker_cache_path(ticker: str, start: str, end: str) -> Path:
+    """Source-segregated research cache for per-security long history."""
+    return CACHE_DIR / (
+        f"ticker_{ticker}_adjusted-proxy-v1_"
+        f"{_yyyymmdd(start)}_{_yyyymmdd(end)}.parquet"
+    )
+
+
+def ticker_source_meta_path(cache_path: Path) -> Path:
+    return Path(str(cache_path) + ".source.json")
+
+
+def _load_ticker_cached(
+    path: Path,
+    *,
+    ticker: str,
+    refresh_days: int,
+) -> Optional[pd.DataFrame]:
+    cached = _load_cached(path, refresh_days)
+    if cached is None or cached.empty:
+        return cached
+    meta_path = ticker_source_meta_path(path)
+    if not meta_path.exists():
+        log(
+            f"[pykrx_client] ticker cache missing source receipt: {meta_path.name}",
+            level="WARN",
+        )
+        return None
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log(
+            f"[pykrx_client] ticker source receipt unreadable: {type(exc).__name__}",
+            level="WARN",
+        )
+        return None
+    source_identity = meta.get("source_identity")
+    if (
+        meta.get("schema") != TICKER_SOURCE_META_SCHEMA
+        or meta.get("ticker") != ticker
+        or meta.get("cache_file") != path.name
+        or source_identity not in _TICKER_HISTORY_SOURCE_IDENTITIES
+    ):
+        log(f"[pykrx_client] ticker source receipt mismatch: {ticker}", level="WARN")
+        return None
+    cached.attrs["source_identity"] = source_identity
+    cached.attrs["source_receipt_path"] = str(meta_path)
+    cached.attrs["ticker"] = ticker
+    cached.attrs["raw_source_claimed"] = False
+    return cached
+
+
+def _save_ticker_cache(
+    df: pd.DataFrame,
+    path: Path,
+    *,
+    ticker: str,
+    source_identity: str,
+    adjustment_semantics: str,
+) -> None:
+    if source_identity not in _TICKER_HISTORY_SOURCE_IDENTITIES:
+        raise RuntimeError("unapproved_ticker_history_source_identity")
+    _save_cache(df, path)
+    if not path.exists():
+        return
+    meta = {
+        "schema": TICKER_SOURCE_META_SCHEMA,
+        "ticker": ticker,
+        "cache_file": path.name,
+        "source_identity": source_identity,
+        "adjustment_semantics": adjustment_semantics,
+        "raw_source_claimed": False,
+        "normalized_only": True,
+        "a3_reviewed": False,
+    }
+    meta_path = ticker_source_meta_path(path)
+    meta_path.write_text(
+        json.dumps(meta, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    df.attrs["source_identity"] = source_identity
+    df.attrs["source_receipt_path"] = str(meta_path)
+    df.attrs["ticker"] = ticker
+    df.attrs["raw_source_claimed"] = False
 
 
 def index_cache_path(ticker: str, start: str, end: str) -> Path:
@@ -644,22 +737,35 @@ def fetch_index_ohlcv(ticker: str, start: str, end: str, refresh_days: int = 1) 
 
 
 def fetch_ticker_history(ticker: str, start: str, end: str, refresh_days: int = 1) -> pd.DataFrame:
-    """Single-ticker daily OHLCV (long history). Used for momentum lookback.
+    """Single-ticker daily OHLCV with explicit research-source provenance.
 
-    Tries pykrx first, falls back to FDR (FinanceDataReader.DataReader).
-    Cache key includes ticker + date range. Stale > refresh_days → refetch.
+    The research request is split/corporate-action aware when pykrx can serve
+    adjusted=True. If that path is unavailable, FinanceDataReader is called
+    explicitly through NAVER:<ticker>; that fallback remains an unreviewed
+    close proxy and is never relabeled as reviewed A3/ER evidence.
+
+    Legacy unsuffixed ticker caches are intentionally not reused.
     """
-    cache_name = f"ticker_{ticker}_{_yyyymmdd(start)}_{_yyyymmdd(end)}"
-    path = CACHE_DIR / f"{cache_name}.parquet"
-    cached = _load_cached(path, refresh_days)
+    path = ticker_cache_path(ticker, start, end)
+    cached = _load_ticker_cached(
+        path,
+        ticker=ticker,
+        refresh_days=refresh_days,
+    )
     if cached is not None and not cached.empty:
         return cached
 
     df = pd.DataFrame()
+    source_identity: Optional[str] = None
+    adjustment_semantics: Optional[str] = None
+
     if PYKRX_AVAILABLE:
         try:
             df = _pykrx_stock.get_market_ohlcv_by_date(
-                _yyyymmdd(start), _yyyymmdd(end), ticker,
+                _yyyymmdd(start),
+                _yyyymmdd(end),
+                ticker,
+                adjusted=True,
             )
             if df is not None and not df.empty:
                 df = df.reset_index().rename(columns={
@@ -668,16 +774,23 @@ def fetch_ticker_history(ticker: str, start: str, end: str, refresh_days: int = 
                     "등락률": "change_pct",
                 })
                 df["ticker"] = ticker
+                source_identity = "PYKRX_ADJUSTED_TRUE_NORMALIZED"
+                adjustment_semantics = "PYKRX_REQUEST_ADJUSTED_TRUE"
             else:
                 df = pd.DataFrame()
-        except Exception:
+        except Exception as exc:
+            log(
+                f"[pykrx_client] pykrx adjusted ticker history fail {ticker}: "
+                f"{type(exc).__name__}",
+                level="WARN",
+            )
             df = pd.DataFrame()
 
     if df.empty and FDR_AVAILABLE:
         try:
             s = pd.Timestamp(start).strftime("%Y-%m-%d")
             e = pd.Timestamp(end).strftime("%Y-%m-%d")
-            fdr_df = _fdr.DataReader(ticker, s, e)
+            fdr_df = _fdr.DataReader(f"NAVER:{ticker}", s, e)
             if fdr_df is not None and not fdr_df.empty:
                 fdr_df = fdr_df.reset_index().rename(columns={
                     "Date": "date", "Open": "open", "High": "high",
@@ -686,23 +799,32 @@ def fetch_ticker_history(ticker: str, start: str, end: str, refresh_days: int = 
                 })
                 fdr_df["ticker"] = ticker
                 df = fdr_df
-        except Exception as e:
-            log(f"[pykrx_client] FDR ticker history fail {ticker}: {e}", level="WARN")
+                source_identity = "FINANCE_DATAREADER_NAVER_CLOSE_PROXY_NORMALIZED"
+                adjustment_semantics = "NAVER_CLOSE_PROXY_UNREVIEWED"
+        except Exception as exc:
+            log(
+                f"[pykrx_client] FDR NAVER ticker history fail {ticker}: {exc}",
+                level="WARN",
+            )
 
     if df.empty:
         return pd.DataFrame()
 
-    # Universal post-processing: derive `value` (거래대금 in KRW) if missing.
-    # Both pykrx 1.2.7 (KRX broken) and FDR omit `value`. We compute it as
-    # close × volume (close-based proxy; pykrx's actual value uses VWAP — small
-    # difference for our universe filter use case).
     if "value" not in df.columns and "close" in df.columns and "volume" in df.columns:
         df["value"] = (
             pd.to_numeric(df["close"], errors="coerce").fillna(0)
             * pd.to_numeric(df["volume"], errors="coerce").fillna(0)
         )
 
-    _save_cache(df, path)
+    if source_identity is None or adjustment_semantics is None:
+        raise RuntimeError("ticker_history_source_identity_unresolved")
+    _save_ticker_cache(
+        df,
+        path,
+        ticker=ticker,
+        source_identity=source_identity,
+        adjustment_semantics=adjustment_semantics,
+    )
     return df
 
 
