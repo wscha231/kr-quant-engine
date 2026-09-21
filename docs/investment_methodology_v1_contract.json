@@ -1,0 +1,123 @@
+{
+  "schema": "investment-methodology-v1-contract",
+  "version": 1,
+  "purpose": "Style-neutral research comparison across canonical pillars. Named investment methods are explanatory lenses over the same pillars and are never additive selector factors.",
+  "pillars": [
+    "industry_structure_bottleneck",
+    "moat_durability",
+    "growth_runway_customer_product",
+    "profitability_reinvestment_capital_efficiency",
+    "valuation_margin_of_safety",
+    "earnings_revision_operating_acceleration",
+    "market_leadership_price_volume_rs",
+    "management_governance_capital_allocation",
+    "catalyst_ownership_information_edge",
+    "downside_balance_sheet_cycle_regime"
+  ],
+  "sector_profiles": [
+    "GENERAL",
+    "SEMICONDUCTOR_HARDWARE",
+    "POWER_UTILITIES_INFRA",
+    "PROJECT_INDUSTRIAL_SHIPBUILDING_NUCLEAR",
+    "CONSUMER_BRAND_ODM",
+    "BIOTECH_PRECOMMERCIAL",
+    "SOFTWARE_PLATFORM",
+    "FINANCIALS",
+    "COMMODITY_CYCLICAL"
+  ],
+  "fairness": {
+    "universal_pillars_required_for_every_asset": true,
+    "absolute_and_peer_scores_reported_separately": true,
+    "sector_profiles_change_interpretation_not_weight": true,
+    "stage_adjustment_must_be_explicit": true,
+    "peer_group_minimum_members": 3,
+    "global_industry_peers_preferred_when_available": true,
+    "missing_pillars_imputation_allowed": false,
+    "peer_relative_score_derived_from_rank": true,
+    "non_global_peer_scope_requires_exception_reason": true,
+    "peer_relative_formula": "(peer_member_count - peer_rank) / (peer_member_count - 1), rank 1 = best"
+  },
+  "lenses": {
+    "classic": [
+      "GRAHAM_MARGIN_OF_SAFETY",
+      "BUFFETT_MUNGER_COMPOUNDER",
+      "FISHER_QUALITY_GROWTH",
+      "LYNCH_GARP",
+      "GREENBLATT_QUALITY_VALUE",
+      "ONEIL_CANSLIM",
+      "MINERVINI_SUPERPERFORMANCE",
+      "PORTER_INDUSTRY_STRUCTURE",
+      "DAMODARAN_SCENARIO_VALUATION",
+      "DRUCKENMILLER_LEADERSHIP_LIQUIDITY",
+      "HOWARD_MARKS_CYCLE_RISK",
+      "PIOTROSKI_FINANCIAL_STRENGTH",
+      "SOROS_REFLEXIVITY",
+      "MAUBOUSSIN_COMPETITIVE_ADVANTAGE_PERIOD"
+    ],
+    "project": [
+      "PROJECT_QUALITY_COMPOUNDER",
+      "PROJECT_MARKET_LEADER",
+      "PROJECT_EARLY_GROWTH_INFLECTION",
+      "PROJECT_TURNAROUND_VALUE",
+      "PROJECT_SMART_MONEY_EVENT",
+      "PROJECT_REGIME_RESILIENCE"
+    ],
+    "policy": "Lens scores are unweighted means of referenced canonical pillars for interpretation only. They are not summed into the equal-pillar score and have zero selector authority.",
+    "academic": [
+      "FAMA_FRENCH_VALUE_PROFITABILITY_INVESTMENT",
+      "JEGADEESH_TITMAN_MOMENTUM",
+      "NOVY_MARX_GROSS_PROFITABILITY",
+      "ASNESS_QUALITY_VALUE_MOMENTUM",
+      "POST_EARNINGS_ANNOUNCEMENT_DRIFT"
+    ]
+  },
+  "evidence": {
+    "each_pillar_requires_absolute_assessment": true,
+    "each_pillar_requires_peer_relative_assessment": true,
+    "each_pillar_requires_confidence": true,
+    "each_pillar_requires_rationale_counter_argument_invalidation": true,
+    "each_pillar_requires_reviewed_artifact_reference": true,
+    "artifact_available_at_must_not_exceed_packet_as_of": true,
+    "peer_snapshot_as_of_must_not_exceed_packet_as_of": true,
+    "artifact_bytes_must_resolve_and_match_sha256": true,
+    "peer_snapshot_artifact_bytes_must_resolve_and_match_sha256": true,
+    "peer_snapshot_artifact_id_required": true
+  },
+  "outputs": {
+    "equal_absolute_score": "unweighted mean of ten canonical pillars",
+    "equal_peer_score": "unweighted mean of ten rank-derived peer percentiles",
+    "method_lens_scores": "explanatory only",
+    "confidence": "reported separately"
+  },
+  "safety": {
+    "research_only": true,
+    "historical_pit_certified": false,
+    "oos_validated": false,
+    "selector_eligible": false,
+    "portfolio_weight_effect": 0,
+    "target_book_write_allowed": false,
+    "orders_allowed": false,
+    "production_authority": false,
+    "oos_validation_required_before_weighting": true
+  },
+  "revision": 2,
+  "assessment_anchor_version": "canonical-pillar-anchor-v1",
+  "assessment_scale": {
+    "0.00": "severe impairment / thesis-negative on this pillar",
+    "0.25": "materially below investable/global peer standard",
+    "0.50": "neutral or mixed; approximately ordinary/median economics",
+    "0.75": "strong, durable and evidence-backed",
+    "1.00": "exceptional/global best-in-class with durable multi-source evidence"
+  },
+  "portfolio_theories": {
+    "stage": "A5_ONLY_NOT_COMPANY_SCORE",
+    "methods": [
+      "MARKOWITZ_MEAN_VARIANCE",
+      "FRACTIONAL_KELLY",
+      "BLACK_LITTERMAN",
+      "RISK_BUDGETING",
+      "FACTOR_RESIDUAL_ALPHA"
+    ],
+    "policy": "Portfolio construction theories are evaluated after reviewed expected returns and downside; they do not add company-selection points."
+  }
+}
