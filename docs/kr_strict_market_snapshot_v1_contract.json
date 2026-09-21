@@ -1,0 +1,57 @@
+{
+  "schema": "kr-strict-market-snapshot-v1-contract",
+  "version": 1,
+  "purpose": "Strict 20/60/120/240 trading-session Korean Gold Set price/RS research capture, separate from legacy month-offset momentum features.",
+  "upstream_gold_set": {
+    "repository": "wscha231/r1000-quant-engine",
+    "blob_sha": "26006cade37cf5ce37c74abd77d665be50986875",
+    "local_subset_count": 16
+  },
+  "benchmark_policy": {
+    "KOSPI": {
+      "ticker": "1028",
+      "id": "KR:KOSPI200"
+    },
+    "KOSDAQ": {
+      "ticker": "2203",
+      "id": "KR:KOSDAQ150"
+    }
+  },
+  "math": {
+    "horizons_trading_sessions": [
+      20,
+      60,
+      120,
+      240
+    ],
+    "rs_method": "LOG_RELATIVE_RETURN",
+    "rs_formula": "log(1 + asset_return_h) - log(1 + benchmark_return_h)",
+    "missing_to_zero_allowed": false,
+    "complete_241_session_grid_required": true
+  },
+  "source_boundary": {
+    "client": "kr_pykrx_client",
+    "provider_identity": "UNRESOLVED_PYKRX_OR_FDR",
+    "return_basis": "KRX_OR_FDR_CLOSE_PROXY_UNREVIEWED",
+    "normalized_parquet_cache_bytes_archived": true,
+    "normalized_frame_sha256_required": true,
+    "provider_raw_bytes_preserved": false,
+    "review_required": true
+  },
+  "legacy_separation": {
+    "modify_kr_features_add_basic_momentum": false,
+    "month_offset_return_semantics_preserved": true,
+    "simple_legacy_rs_semantics_preserved": true,
+    "downstream_legacy_zero_fill_preserved": true,
+    "strict_adapter_is_separate": true
+  },
+  "authority": {
+    "research_only": true,
+    "selector_eligible": false,
+    "portfolio_weight_effect": 0,
+    "validated_er_available": false,
+    "target_book_write_allowed": false,
+    "orders_allowed": false,
+    "production_authority": false
+  }
+}

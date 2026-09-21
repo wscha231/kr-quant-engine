@@ -848,3 +848,28 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 - 기존 KR quality_score/classifier/theme/live-picks/portfolio/order 로직 변경 없음.
 
 **Validation**: exact-head GitHub CI + A6 review required before merge.
+
+
+---
+
+## 2026-09-21
+
+### 14:10 KST — a1-strict-kr-gold-market-snapshot-v1
+
+**Scope**: cross-market Gold Set용 한국 20/60/120/240D strict market/RS research capture.
+
+**Separation**:
+- 기존 `kr_features.add_basic_momentum` 공식/zero-fill/모델 입력 의미 변경 없음.
+- strict adapter는 exact KRX sessions + KOSPI200/KOSDAQ150 + log-relative RS를 별도 산출.
+- 결측/중복/불완전 241-session grid는 fail closed.
+
+**Provenance**:
+- 현 `kr_pykrx_client`가 pykrx/FDR 원문 bytes/provider identity를 보존하지 않으므로 `UNRESOLVED_PYKRX_OR_FDR`로 표시.
+- 실제 정규화 parquet cache bytes를 content-addressed artifact에 복사하고 SHA-256 기록.
+- provider raw evidence/total-return/corporate-action 인증은 아직 미완료.
+
+**Authority**:
+- UNREVIEWED research only; selector/ER/portfolio/target/order authority 0.
+- upstream US Gold Set membership은 blob SHA `26006cade37cf5ce37c74abd77d665be50986875`에 pin.
+
+**Validation**: exact-head Smoke Test + post-merge source capture required.

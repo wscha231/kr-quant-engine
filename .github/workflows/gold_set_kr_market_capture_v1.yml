@@ -1,0 +1,74 @@
+name: KR Gold Set Strict Market Capture V1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'research/kr_strict_market_snapshot_v1.py'
+      - 'research/cross_market_gold_set_kr_v1.json'
+      - 'tools/capture_gold_set_kr_market_v1.py'
+      - 'kr_pykrx_client.py'
+      - 'kr_config.py'
+      - '.github/workflows/gold_set_kr_market_capture_v1.yml'
+  workflow_dispatch:
+    inputs:
+      session:
+        description: 'Optional completed KRX session YYYY-MM-DD'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kr-gold-set-market-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Capture strict UNREVIEWED Korean Gold Set market evidence
+        env:
+          SESSION: ${{ github.event.inputs.session || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SESSION" ]; then
+            python tools/capture_gold_set_kr_market_v1.py               --output-dir outputs/gold_set_kr_market               --attempt-id "run-${{ github.run_id }}-${{ github.run_attempt }}"               --session "$SESSION"
+          else
+            python tools/capture_gold_set_kr_market_v1.py               --output-dir outputs/gold_set_kr_market               --attempt-id "run-${{ github.run_id }}-${{ github.run_attempt }}"
+          fi
+
+      - name: Publish capture receipt
+        if: always()
+        env:
+          RECEIPT: outputs/gold_set_kr_market/attempts/run-${{ github.run_id }}-${{ github.run_attempt }}/receipt.json
+        run: |
+          if [ -f "$RECEIPT" ]; then cat "$RECEIPT" >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload normalized research artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kr-gold-set-market-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            outputs/gold_set_kr_market/attempts/
+            outputs/gold_set_kr_market/latest_attempt.json
+          if-no-files-found: error
+          retention-days: 45

@@ -115,6 +115,14 @@ py -3 run_local.py --no-collector    # collector 단계 건너뜀
 - Markowitz, Kelly, Black-Litterman, risk budgeting and factor-residual alpha belong to A5 portfolio construction, not stock-selection scoring.
 - Missing pillars fail closed. Current methodology outputs have zero selector/portfolio/order authority until PIT/OOS validation.
 
+## Strict Cross-Market KR Market Snapshot Invariant
+
+- Do not relabel `kr_features.add_basic_momentum` as the cross-market Methodology/A3 RS source. Its month-offset/simple-RS/zero-fill semantics remain separate legacy strategy features.
+- Strict Gold Set research snapshots use exact 20/60/120/240 KRX sessions, KOSPI200 for KOSPI and KOSDAQ150 for KOSDAQ, and log-relative RS.
+- Missing sessions never become zero/neutral values.
+- Current pykrx/FDR wrapper provenance is recorded as `UNRESOLVED_PYKRX_OR_FDR`; exact normalized parquet cache bytes are hashed/archived, but provider raw-byte provenance is not claimed.
+- Strict snapshots remain UNREVIEWED and have zero selector/portfolio/order authority until a separate review/promotion contract exists.
+
 ## Result Analysis
 백테스트 결과에서 확인할 핵심 지표:
 - `strategy_cagr` — 연복리 수익률

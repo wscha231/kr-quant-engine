@@ -39,6 +39,9 @@ jobs:
       - name: Investment methodology V1 tests
         run: python tests/test_investment_methodology_v1.py
 
+      - name: Strict KR Gold Set market snapshot tests
+        run: python tests/test_kr_strict_market_snapshot_v1.py
+
       - name: PIT universe tests (Phase C1)
         run: python tests/test_pit_universe.py
         # Some tests soft-skip when no historical mcap cache present.
