@@ -36,6 +36,9 @@ jobs:
       - name: Classifier model binding tests
         run: python tests/test_classifier_model_binding.py
 
+      - name: Investment methodology V1 tests
+        run: python tests/test_investment_methodology_v1.py
+
       - name: PIT universe tests (Phase C1)
         run: python tests/test_pit_universe.py
         # Some tests soft-skip when no historical mcap cache present.

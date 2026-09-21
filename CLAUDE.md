@@ -107,6 +107,14 @@ py -3 run_local.py --no-collector    # collector 단계 건너뜀
 - Missing/stale/expired/future/conflicting evidence fails closed; current reviewed evidence is not historical PIT data and must not be backfilled.
 - Until a separately preregistered PIT/OOS incremental-alpha experiment passes, `moat_quality_v2` has zero selector/portfolio/order authority.
 
+## Investment Methodology V1 Invariant
+
+- All serious candidates use the same ten canonical pillars; sector/lifecycle adapters change interpretation, not pillar weight.
+- Absolute and peer-relative research scores remain separate. Peer-relative scores are derived from reviewed peer rank, not manually entered.
+- Classic/academic/project investment methods are explanatory lenses over canonical pillars and never additive alpha factors.
+- Markowitz, Kelly, Black-Litterman, risk budgeting and factor-residual alpha belong to A5 portfolio construction, not stock-selection scoring.
+- Missing pillars fail closed. Current methodology outputs have zero selector/portfolio/order authority until PIT/OOS validation.
+
 ## Result Analysis
 백테스트 결과에서 확인할 핵심 지표:
 - `strategy_cagr` — 연복리 수익률

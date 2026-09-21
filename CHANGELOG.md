@@ -822,3 +822,29 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 **breaking_changes**: old classifier artifacts without rev2 binding metadata are intentionally rejected until retrained under the current engine version.
 
 **Validation**: exact-head GitHub CI required before merge.
+
+
+---
+
+## 2026-09-21
+
+### 10:20 KST — investment-methodology-v1-style-neutral
+
+**Scope**: 미국/한국 종목을 같은 10개 canonical pillar로 비교하는 research-only 방법론 계약.
+
+**Design**:
+- 절대평가와 peer-relative 평가 분리;
+- peer-relative는 reviewed peer rank percentile로 자동 계산;
+- global industry peer 우선, 예외 peer scope는 사유 필수;
+- peer snapshot/upstream artifact bytes SHA 검증;
+- sector/lifecycle profile은 metric interpretation만 변경하고 pillar weight는 변경하지 않음;
+- Graham/Buffett/Fisher/Lynch/Greenblatt/O'Neil/Minervini/Porter/Damodaran/Druckenmiller/Marks/Piotroski/Soros/Mauboussin 및 academic factor 연구를 동일 pillar의 explanatory lens로만 사용;
+- project-native quality/leader/early/turnaround/smart-money/regime lens도 동일 원칙;
+- Markowitz/Kelly/Black-Litterman/risk budgeting/factor residual alpha는 A5-only.
+
+**Safety**:
+- research_only, historical_pit_certified=false, oos_validated=false;
+- selector_eligible=false, portfolio_weight_effect=0;
+- 기존 KR quality_score/classifier/theme/live-picks/portfolio/order 로직 변경 없음.
+
+**Validation**: exact-head GitHub CI + A6 review required before merge.
