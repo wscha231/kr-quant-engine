@@ -47,6 +47,7 @@ jobs:
       - name: Capture strict UNREVIEWED Korean Gold Set market evidence
         env:
           SESSION: ${{ github.event.inputs.session || '' }}
+          KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
         run: |
           set -euo pipefail
           if [ -n "$SESSION" ]; then

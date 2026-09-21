@@ -17,12 +17,14 @@ with install instructions. Cache reads still work without pykrx.
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+import requests
 
 from kr_config import DATA_ROOT
 from kr_helpers import log, safe_float
@@ -54,6 +56,7 @@ _KOSDAQ150_FDR_DIRECT = "KRX-INDEX:2203"
 _KOSDAQ150_SOURCE_IDENTITIES = {
     "PYKRX_KRX_INDEX_2203_NORMALIZED",
     "FINANCE_DATAREADER_KRX_INDEX_MDCSTAT00301_2203_NORMALIZED",
+    "KRX_OPENAPI_KOSDAQ_DAILY_2203_NORMALIZED",
 }
 
 
@@ -467,6 +470,97 @@ _FDR_INDEX_MAP = {
 }
 
 
+_KRX_OPENAPI_KOSDAQ_URL = (
+    "https://data-dbg.krx.co.kr/svc/apis/idx/kosdaq_dd_trd.json"
+)
+
+
+def _fetch_kosdaq150_openapi(start: str, end: str) -> pd.DataFrame:
+    """Official KRX Open API fallback for KOSDAQ150 (index code 2203).
+
+    The endpoint is daily and returns all KOSDAQ-series indices for one session.
+    We walk the already-admitted KOSPI trading-session grid, select the exact
+    normalized name '코스닥150', and never substitute another index.
+    """
+    api_key = os.environ.get("KRX_API_KEY", "").strip()
+    if not api_key:
+        log("[pykrx_client] KRX_API_KEY absent; official 2203 fallback unavailable", level="WARN")
+        return pd.DataFrame()
+
+    calendar = fetch_index_ohlcv("1001", start, end)
+    if calendar is None or calendar.empty or "date" not in calendar.columns:
+        log("[pykrx_client] KRX calendar unavailable for official 2203 fallback", level="WARN")
+        return pd.DataFrame()
+
+    session_days = sorted(pd.to_datetime(calendar["date"]).dt.strftime("%Y%m%d").unique())
+    rows: list[dict] = []
+    with requests.Session() as session:
+        for day in session_days:
+            try:
+                response = session.get(
+                    _KRX_OPENAPI_KOSDAQ_URL,
+                    params={"basDd": day},
+                    headers={"AUTH_KEY": api_key, "User-Agent": "kr-quant-engine"},
+                    timeout=20,
+                )
+            except requests.RequestException:
+                log("[pykrx_client] KRX Open API transport failure for 2203", level="WARN")
+                return pd.DataFrame()
+            if response.status_code != 200:
+                log(
+                    f"[pykrx_client] KRX Open API HTTP {response.status_code} for 2203",
+                    level="WARN",
+                )
+                return pd.DataFrame()
+            try:
+                body = response.json()
+            except ValueError:
+                log("[pykrx_client] KRX Open API non-JSON response for 2203", level="WARN")
+                return pd.DataFrame()
+            if not isinstance(body, dict):
+                return pd.DataFrame()
+            if body.get("respCode"):
+                log(
+                    f"[pykrx_client] KRX Open API vendor code {body.get('respCode')} for 2203",
+                    level="WARN",
+                )
+                return pd.DataFrame()
+            blocks = [
+                value for key, value in body.items()
+                if str(key).startswith("OutBlock_") and isinstance(value, list)
+            ]
+            if len(blocks) != 1:
+                log("[pykrx_client] KRX Open API unexpected block shape for 2203", level="WARN")
+                return pd.DataFrame()
+            matches = [
+                row for row in blocks[0]
+                if isinstance(row, dict)
+                and str(row.get("IDX_NM", "")).replace(" ", "") == "코스닥150"
+            ]
+            if len(matches) != 1:
+                log(
+                    f"[pykrx_client] KRX Open API 2203 identity count={len(matches)} date={day}",
+                    level="WARN",
+                )
+                return pd.DataFrame()
+            row = matches[0]
+            try:
+                rows.append({
+                    "date": pd.Timestamp(str(row.get("BAS_DD") or day)),
+                    "open": float(str(row["OPNPRC_IDX"]).replace(",", "")),
+                    "high": float(str(row["HGPRC_IDX"]).replace(",", "")),
+                    "low": float(str(row["LWPRC_IDX"]).replace(",", "")),
+                    "close": float(str(row["CLSPRC_IDX"]).replace(",", "")),
+                    "volume": float(str(row.get("ACC_TRDVOL") or "0").replace(",", "")),
+                    "value": float(str(row.get("ACC_TRDVAL") or "0").replace(",", "")),
+                    "index_ticker": _KOSDAQ150_INDEX_TICKER,
+                })
+            except (KeyError, TypeError, ValueError):
+                log("[pykrx_client] KRX Open API numeric parse failure for 2203", level="WARN")
+                return pd.DataFrame()
+    return pd.DataFrame(rows)
+
+
 def fetch_index_ohlcv(ticker: str, start: str, end: str, refresh_days: int = 1) -> pd.DataFrame:
     """KRX index daily OHLCV (KOSPI 1001, KOSPI200 1028, KOSDAQ 2001 등).
 
@@ -524,6 +618,11 @@ def fetch_index_ohlcv(ticker: str, start: str, end: str, refresh_days: int = 1) 
         except Exception as e:
             log(f"[pykrx_client] FDR index fail {ticker} ({fdr_code}): {e}",
                 level="WARN")
+
+    if df.empty and ticker == _KOSDAQ150_INDEX_TICKER:
+        df = _fetch_kosdaq150_openapi(start, end)
+        if df is not None and not df.empty:
+            source_identity = "KRX_OPENAPI_KOSDAQ_DAILY_2203_NORMALIZED"
 
     if df.empty:
         return pd.DataFrame()
