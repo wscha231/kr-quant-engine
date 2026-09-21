@@ -350,19 +350,18 @@ def select_theme_leaders_with_classifier(
         from kr_config import DATA_ROOT
         cls_path = (Path(classifier_path) if classifier_path
                      else (DATA_ROOT / "models" / "classifier_latest.cbm"))
-        metrics_path = (DATA_ROOT / "models" / "classifier_latest_metrics.json")
         if cls_path.exists():
             try:
+                from kr_model_compat import load_classifier_binding
+                binding = load_classifier_binding(cls_path)
+                feat_cols = binding["feature_cols"]
                 from catboost import CatBoostClassifier
                 cb_model = CatBoostClassifier()
                 cb_model.load_model(str(cls_path))
-                if metrics_path.exists():
-                    import json
-                    with open(metrics_path, "r", encoding="utf-8") as f:
-                        feat_cols = json.load(f).get("feature_cols")
             except Exception as e:
-                log(f"[g5] classifier load fail: {e}", level="WARN")
+                log(f"[g5] classifier binding/load fail: {e}", level="WARN")
                 cb_model = None
+                feat_cols = None
 
     rows = []
     for tk in tickers:

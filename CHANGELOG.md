@@ -793,3 +793,32 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 **Validation**: exact-head GitHub CI required; H1 PIT listing-age fix #5 is already merged into this base.
 
 **Review mode**: maintainer-directed A6 exact-head review may replace Codex while Codex review quota is unavailable; this does not grant selector or production authority.
+
+
+---
+
+## 2026-09-21
+
+### 09:40 KST — h1-classifier-engine-version-binding
+
+**Scope**: Issue #6. Persisted multibagger classifier identity/version fail-closed guard.
+
+**Root cause**:
+- retraining metadata already recorded `engine_version`, but live inference loaded fixed-name `classifier_latest.cbm` without checking it;
+- a skipped/failed retrain after a signal/PIT semantic change could therefore reuse a stale model;
+- metadata did not cryptographically bind to the exact model bytes;
+- live-picks metadata reported classifier intent rather than actual successful classifier use.
+
+**Change**:
+- add `kr_model_compat.py` model/metadata binding contract;
+- require metadata schema, exact `KR_ENGINE_REUSE_VERSION`, non-duplicate training feature list, and model SHA-256 match;
+- retrainer records hashes for both dated and latest model artifacts;
+- monthly picks and theme classifier paths reject stale/unbound models and preserve existing fallback behavior;
+- live pick metadata records actual `classifier_used` plus binding status;
+- deterministic no-CatBoost artifact-binding regressions added to CI.
+
+**Non-scope**: classifier weights, fallback ranking formula, theme scoring weights, portfolio sizing, broker/order paths, model performance claims.
+
+**breaking_changes**: old classifier artifacts without rev2 binding metadata are intentionally rejected until retrained under the current engine version.
+
+**Validation**: exact-head GitHub CI required before merge.

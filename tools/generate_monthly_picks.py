@@ -167,27 +167,22 @@ def main() -> int:
     # 4. Score / rank
     from kr_governance import is_hard_veto, governance_weight_cap
 
+    classifier_used = False
+    classifier_binding_status = "DISABLED_BY_ARGUMENT" if args.no_classifier else "NOT_FOUND"
     if not args.no_classifier:
         # Try persisted classifier
         classifier_path = _find_classifier()
         if classifier_path is not None:
             try:
+                from kr_model_compat import load_classifier_binding
+                binding = load_classifier_binding(classifier_path)
+                feat_cols = binding["feature_cols"]
                 from catboost import CatBoostClassifier
                 model = CatBoostClassifier()
                 model.load_model(str(classifier_path))
 
-                # Feature alignment — load the training-time feature_cols list
-                # so that inference uses the EXACT same columns in the same
-                # order. Missing features in `enriched` are zero-filled rather
-                # than silently dropped (which previously triggered
-                # "Feature N is present in model but not in pool").
-                feat_cols = _load_classifier_feature_cols(classifier_path)
-                if feat_cols is None:
-                    from kr_multibagger_classifier import select_feature_columns
-                    feat_cols = select_feature_columns(enriched)
-                    log("[picks] no feature_cols metadata -> selecting from live "
-                        f"features ({len(feat_cols)} cols, may misalign)",
-                        level="WARN")
+                # Feature alignment is permitted only after exact model bytes,
+                # engine version and training feature metadata are bound.
 
                 aligned = pd.DataFrame(0.0, index=enriched.index,
                                         columns=feat_cols)
@@ -202,11 +197,14 @@ def main() -> int:
                 X = aligned.values
                 proba = model.predict_proba(X)[:, 1]
                 enriched["p_pre_surge"] = proba
+                classifier_used = True
+                classifier_binding_status = "BOUND_CURRENT_ENGINE"
                 log(f"[picks] classifier scored {len(enriched)} rows from "
                     f"{classifier_path.name} ({len(feat_cols)} features, "
                     f"{len(shared)} shared, {len(missing)} zero-filled)")
             except Exception as ex:
-                log(f"[picks] classifier load fail: {ex} -> momentum fallback",
+                classifier_binding_status = f"REJECTED:{type(ex).__name__}:{ex}"
+                log(f"[picks] classifier binding/load fail: {ex} -> momentum fallback",
                     level="WARN")
                 enriched["p_pre_surge"] = enriched.get(
                     "p0_momentum_score", pd.Series(0.0, index=enriched.index))
@@ -373,7 +371,8 @@ def main() -> int:
         "n_picks": int(len(picks)),
         "n_universe_eligible": int(len(eligible)),
         "n_universe_total": int(len(universe)),
-        "classifier_used": (not args.no_classifier),
+        "classifier_used": classifier_used,
+        "classifier_binding_status": classifier_binding_status,
         "governance_overlay": (not args.no_governance),
         "p_pre_surge_mean": float(picks["p_pre_surge"].mean())
             if "p_pre_surge" in picks else None,
@@ -405,33 +404,12 @@ def _find_classifier() -> Path | None:
 
 
 def _load_classifier_feature_cols(classifier_path: Path) -> list[str] | None:
-    """Locate the feature_cols list saved alongside the classifier.
-
-    Looks for (in order):
-      1. <models>/classifier_latest_metrics.json
-      2. <models>/classifier_metrics_<YYYY-MM>.json (most recent)
-    Returns the feature_cols list, or None when neither exists / lacks the key.
-    """
-    models_dir = classifier_path.parent
-    candidates = [
-        models_dir / "classifier_latest_metrics.json",
-    ] + sorted(
-        models_dir.glob("classifier_metrics_*.json"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    for p in candidates:
-        if not p.exists():
-            continue
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-        except Exception:
-            continue
-        cols = meta.get("feature_cols")
-        if cols and isinstance(cols, list):
-            return list(cols)
-    return None
+    """Compatibility wrapper retained for external callers; fail closed."""
+    try:
+        from kr_model_compat import load_classifier_binding
+        return list(load_classifier_binding(classifier_path)["feature_cols"])
+    except Exception:
+        return None
 
 
 if __name__ == "__main__":

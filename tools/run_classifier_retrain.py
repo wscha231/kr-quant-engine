@@ -26,6 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from kr_config import DATA_ROOT, KR_ENGINE_REUSE_VERSION  # noqa: E402
 from kr_helpers import log  # noqa: E402
+from kr_model_compat import METADATA_SCHEMA, sha256_file  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -116,9 +117,16 @@ def main() -> int:
         log(f"[retrain] save failed: {ex}", level="ERROR")
         return 1
 
+    model_sha256s = {
+        model_path.name: sha256_file(model_path),
+        latest_path.name: sha256_file(latest_path),
+    }
+
     metrics = {
+        "metadata_schema": METADATA_SCHEMA,
         "stamp": stamp,
         "engine_version": KR_ENGINE_REUSE_VERSION,
+        "model_sha256s": model_sha256s,
         "n_features": len(feat_cols),
         "n_panel_rows": int(len(labeled)),
         "n_positive": int(labeled.get("is_pre_surge", pd.Series()).sum()),
