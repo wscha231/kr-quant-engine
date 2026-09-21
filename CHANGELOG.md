@@ -767,3 +767,29 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 **breaking_changes**: Unknown listing age now stays missing/ineligible instead of being treated as 999 months. This is intentional fail-closed behavior.
 
 **Validation**: exact-head GitHub CI required before merge.
+
+
+---
+
+## 2026-09-21
+
+### 09:25 KST — moat-quality-v2-rev3-research-contract
+
+**Scope**: 기술적 해자·독점성·기업질을 기존 재무 `quality_score`와 분리한 evidence-bound research layer로 추가.
+
+**What landed**:
+- `research/moat_quality_v2.py`: qualification/switching cost, market structure, IP/patent durability, pricing power, replacement difficulty, next-generation relevance 6축.
+- trusted caller cutoff, reviewed asset/issuer identity binding, verified-at freshness/expiry, raw-byte SHA 검증, independent corroboration, SUPPORT/CHALLENGE reconciliation을 fail-closed로 강제.
+- `docs/moat_quality_v2_contract.json`: rev3 canonical evidence/safety contract.
+- `research/09_moat_quality_v2/HANDOFF_20260921.md`: 한국시장 적용 및 승격 절차.
+- `tests/test_moat_quality_v2.py`: 20개 deterministic contract regressions.
+- CI에서 새 moat regression은 PIT regression과 함께 실행.
+
+**Safety / authority**:
+- `historical_pit_certified=false`, `oos_validated=false`, `selector_eligible=false`.
+- 기존 `quality_score`, `p1_blended_score`, multibagger classifier, theme rotation, live picks, portfolio weights, targets, broker/orders 변경 없음.
+- historical weighting은 별도 preregistered PIT-safe OOS 실험 전 금지.
+
+**Validation**: exact-head GitHub CI required; H1 PIT listing-age fix #5 is already merged into this base.
+
+**Review mode**: maintainer-directed A6 exact-head review may replace Codex while Codex review quota is unavailable; this does not grant selector or production authority.
