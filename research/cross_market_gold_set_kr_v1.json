@@ -1,0 +1,142 @@
+{
+  "schema": "cross-market-gold-set-kr-v1",
+  "version": 1,
+  "authority": "RESEARCH_VALIDATION_ONLY",
+  "upstream": {
+    "repository": "wscha231/r1000-quant-engine",
+    "path": "research/cross_market_gold_set_v1.json",
+    "observed_commit": "8fbbb8e697b5ac0f3dc5dd58a37912f8903d9d2a",
+    "blob_sha": "26006cade37cf5ce37c74abd77d665be50986875",
+    "note": "Local subset must be refreshed when upstream Gold Set membership changes."
+  },
+  "candidates": [
+    {
+      "asset_id": "KR:000660",
+      "ticker": "000660",
+      "market": "KOSPI",
+      "benchmark_ticker": "1028",
+      "benchmark_id": "KR:KOSPI200",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:357780",
+      "ticker": "357780",
+      "market": "KOSDAQ",
+      "benchmark_ticker": "2203",
+      "benchmark_id": "KR:KOSDAQ150",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:058470",
+      "ticker": "058470",
+      "market": "KOSDAQ",
+      "benchmark_ticker": "2203",
+      "benchmark_id": "KR:KOSDAQ150",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:095340",
+      "ticker": "095340",
+      "market": "KOSDAQ",
+      "benchmark_ticker": "2203",
+      "benchmark_id": "KR:KOSDAQ150",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:403870",
+      "ticker": "403870",
+      "market": "KOSDAQ",
+      "benchmark_ticker": "2203",
+      "benchmark_id": "KR:KOSDAQ150",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:267260",
+      "ticker": "267260",
+      "market": "KOSPI",
+      "benchmark_ticker": "1028",
+      "benchmark_id": "KR:KOSPI200",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:298040",
+      "ticker": "298040",
+      "market": "KOSPI",
+      "benchmark_ticker": "1028",
+      "benchmark_id": "KR:KOSPI200",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:034020",
+      "ticker": "034020",
+      "market": "KOSPI",
+      "benchmark_ticker": "1028",
+      "benchmark_id": "KR:KOSPI200",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:009540",
+      "ticker": "009540",
+      "market": "KOSPI",
+      "benchmark_ticker": "1028",
+      "benchmark_id": "KR:KOSPI200",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:042660",
+      "ticker": "042660",
+      "market": "KOSPI",
+      "benchmark_ticker": "1028",
+      "benchmark_id": "KR:KOSPI200",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:192820",
+      "ticker": "192820",
+      "market": "KOSPI",
+      "benchmark_ticker": "1028",
+      "benchmark_id": "KR:KOSPI200",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:278470",
+      "ticker": "278470",
+      "market": "KOSPI",
+      "benchmark_ticker": "1028",
+      "benchmark_id": "KR:KOSPI200",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:207940",
+      "ticker": "207940",
+      "market": "KOSPI",
+      "benchmark_ticker": "1028",
+      "benchmark_id": "KR:KOSPI200",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:196170",
+      "ticker": "196170",
+      "market": "KOSDAQ",
+      "benchmark_ticker": "2203",
+      "benchmark_id": "KR:KOSDAQ150",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:141080",
+      "ticker": "141080",
+      "market": "KOSDAQ",
+      "benchmark_ticker": "2203",
+      "benchmark_id": "KR:KOSDAQ150",
+      "currency": "KRW"
+    },
+    {
+      "asset_id": "KR:046970",
+      "ticker": "046970",
+      "market": "KOSDAQ",
+      "benchmark_ticker": "2203",
+      "benchmark_id": "KR:KOSDAQ150",
+      "currency": "KRW"
+    }
+  ]
+}
