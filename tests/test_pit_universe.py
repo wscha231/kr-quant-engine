@@ -23,6 +23,7 @@ Run: py -3 tests/test_pit_universe.py
 from __future__ import annotations
 
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -51,6 +52,55 @@ def _test(name: str):
 
 
 # ---------------------------------------------------------------------------
+# Deterministic PIT fixture
+# ---------------------------------------------------------------------------
+# Unit/CI correctness must not depend on a developer's GDrive or local pykrx
+# cache. Production code remains fail-closed; these snapshots exist only inside
+# this test process.
+_PIT_TEST_TMP = tempfile.TemporaryDirectory(prefix="kr-pit-universe-test-")
+_PIT_TEST_ROOT = Path(_PIT_TEST_TMP.name)
+_PIT_TEST_CACHE = _PIT_TEST_ROOT / "cache_pykrx"
+_PIT_TEST_DATA = _PIT_TEST_ROOT / "data_pit"
+_PIT_TEST_CACHE.mkdir(parents=True, exist_ok=True)
+_PIT_TEST_DATA.mkdir(parents=True, exist_ok=True)
+
+_SNAPSHOTS = {
+    "20190131": [
+        {"ticker": "000001", "market": "KOSPI", "market_cap": 1_000_000, "listed_shares": 100_000},
+        {"ticker": "000004", "market": "KOSDAQ", "market_cap": 400_000, "listed_shares": 40_000},
+    ],
+    "20200630": [
+        {"ticker": "000001", "market": "KOSPI", "market_cap": 1_100_000, "listed_shares": 100_000},
+        {"ticker": "000002", "market": "KOSPI", "market_cap": 700_000, "listed_shares": 70_000},
+        {"ticker": "000004", "market": "KOSDAQ", "market_cap": 450_000, "listed_shares": 40_000},
+    ],
+    "20240628": [
+        {"ticker": "000001", "market": "KOSPI", "market_cap": 1_300_000, "listed_shares": 100_000},
+        {"ticker": "000002", "market": "KOSPI", "market_cap": 900_000, "listed_shares": 70_000},
+        {"ticker": "000003", "market": "KOSDAQ", "market_cap": 600_000, "listed_shares": 60_000},
+        {"ticker": "000004", "market": "KOSDAQ", "market_cap": 500_000, "listed_shares": 40_000},
+    ],
+    "20260430": [
+        {"ticker": "000001", "market": "KOSPI", "market_cap": 1_500_000, "listed_shares": 100_000},
+        {"ticker": "000002", "market": "KOSPI", "market_cap": 1_000_000, "listed_shares": 70_000},
+        {"ticker": "000003", "market": "KOSDAQ", "market_cap": 800_000, "listed_shares": 60_000},
+    ],
+}
+for _date, _rows in _SNAPSHOTS.items():
+    pd.DataFrame(_rows).to_parquet(
+        _PIT_TEST_CACHE / f"mktcap_ALL_{_date}.parquet",
+        index=False,
+    )
+
+import kr_pit_universe as _pit
+_pit.PYKRX_CACHE_DIR = _PIT_TEST_CACHE
+_pit.PIT_DIR = _PIT_TEST_DATA
+_pit.LISTED_HISTORY_PATH = _PIT_TEST_DATA / "listed_history.parquet"
+_pit.HISTORICAL_MCAP_PATH = _PIT_TEST_DATA / "historical_mcap.parquet"
+_pit.invalidate_pit_caches()
+
+
+# ---------------------------------------------------------------------------
 # Module sanity
 # ---------------------------------------------------------------------------
 @_test("import kr_pit_universe succeeds")
@@ -63,15 +113,11 @@ def test_import():
     assert callable(pit.load_listed_history)
 
 
-@_test("listed_history.parquet exists or builds on demand")
+@_test("listed_history builds deterministically from PIT snapshots")
 def test_listed_history_loads():
     from kr_pit_universe import load_listed_history
     df = load_listed_history(rebuild_if_missing=True)
-    if df.empty:
-        # Acceptable if no cached snapshots -- but raise so the user knows
-        raise AssertionError(
-            "listed_history empty; run tools/build_pit_universe_history.py "
-            "(or have cached mktcap_ALL_*.parquet snapshots).")
+    assert not df.empty, "deterministic PIT fixture failed to build listed_history"
     assert "ticker" in df.columns
     assert "first_seen_date" in df.columns
     assert "is_active_latest" in df.columns
@@ -93,10 +139,7 @@ def test_fdr_current_listing_not_used_for_historical_backtest():
 
     rebalance_date = pd.Timestamp("2020-06-30")
     universe = fetch_listing_at_date(rebalance_date, name_lookup=False)
-    if universe.empty:
-        raise AssertionError(
-            "PIT universe empty for 2020-06-30; rebuild cache via "
-            "tools/build_pit_universe_history.py")
+    assert not universe.empty, "deterministic 2020 PIT fixture unexpectedly empty"
 
     panel = load_historical_mcap()
     assert not panel.empty, "historical_mcap empty"
@@ -133,22 +176,60 @@ def test_listed_months_not_stub():
     from kr_pit_universe import compute_listed_months_pit, load_listed_history
 
     hist = load_listed_history()
-    if hist.empty:
-        raise AssertionError("listed_history empty")
+    assert not hist.empty
 
-    # Pick a date well inside the cache range so newly-listed tickers exist
     rebalance_date = pd.Timestamp("2024-06-30")
-    sample_tickers = hist["ticker"].head(500).tolist()
-    df = compute_listed_months_pit(rebalance_date, sample_tickers)
+    df = compute_listed_months_pit(rebalance_date, ["000001", "000002"])
     assert not df.empty
-    values = df["listed_months"].astype(int)
-    n_999 = int((values == 999).sum())
-    # At least SOME ticker must have real (non-999, non-zero) listed_months.
-    real_count = int(((values > 0) & (values < 999)).sum())
-    assert real_count > 0, (
-        f"All listed_months values were 999 or 0 -- stub still active. "
-        f"999 count={n_999}, real count={real_count}, "
-        f"sample size={len(values)}")
+    values = df.set_index("ticker")["listed_months"]
+
+    # 000001 existed at the earliest retained snapshot. Its true listing date
+    # is unknown, so fail closed rather than fabricating 999 months.
+    assert pd.isna(values.loc["000001"]), values.to_dict()
+
+    # 000002 first appears later inside retained history, so its age is known.
+    assert pd.notna(values.loc["000002"]) and 40 <= int(values.loc["000002"]) <= 60, values.to_dict()
+
+
+@_test("engine reuse version invalidates pre-fix listing-age caches")
+def test_engine_version_invalidates_pre_fix_listing_age_caches():
+    from kr_config import KR_ENGINE_REUSE_VERSION
+    assert KR_ENGINE_REUSE_VERSION == "2026-09-21-p1-pit-listing-age-failclosed"
+
+
+@_test("missing_history_never_imputes_long_listing_age")
+def test_missing_history_never_imputes_long_listing_age():
+    import kr_pit_universe as pit
+
+    originals = (
+        pit.PYKRX_CACHE_DIR,
+        pit.PIT_DIR,
+        pit.LISTED_HISTORY_PATH,
+        pit.HISTORICAL_MCAP_PATH,
+    )
+    empty_cache = _PIT_TEST_ROOT / "empty_cache"
+    empty_pit = _PIT_TEST_ROOT / "empty_pit"
+    empty_cache.mkdir(exist_ok=True)
+    empty_pit.mkdir(exist_ok=True)
+    try:
+        pit.PYKRX_CACHE_DIR = empty_cache
+        pit.PIT_DIR = empty_pit
+        pit.LISTED_HISTORY_PATH = empty_pit / "listed_history.parquet"
+        pit.HISTORICAL_MCAP_PATH = empty_pit / "historical_mcap.parquet"
+        pit.invalidate_pit_caches()
+
+        df = pit.compute_listed_months_pit(pd.Timestamp("2024-06-30"), ["000001"])
+        assert len(df) == 1
+        assert pd.isna(df.loc[0, "listed_months"]), df.to_dict(orient="records")
+        assert not bool(df.loc[0, "listing_date_known"])
+    finally:
+        (
+            pit.PYKRX_CACHE_DIR,
+            pit.PIT_DIR,
+            pit.LISTED_HISTORY_PATH,
+            pit.HISTORICAL_MCAP_PATH,
+        ) = originals
+        pit.invalidate_pit_caches()
 
 
 @_test("delisted_ticker_can_exist_in_past_universe")
@@ -162,8 +243,7 @@ def test_delisted_ticker_can_exist_in_past_universe():
     )
 
     hist = load_listed_history()
-    if hist.empty:
-        raise AssertionError("listed_history empty")
+    assert not hist.empty
 
     delisted = hist[~hist["is_active_latest"]]
     if delisted.empty:

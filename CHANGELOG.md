@@ -738,3 +738,32 @@ Next session priority:
   - Survivorship-corrected universe (DART corp_code history)
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
+---
+
+## 2026-09-21
+
+### 01:25 KST — h1-pit-listing-age-fail-closed
+
+**Scope**: Phase C1 PIT universe의 listing-age fail-open 제거와 CI fixture 독립화.
+
+**Root cause**:
+- `compute_listed_months_pit()`가 listed history 전체 누락 시 모든 종목을 999개월로 채워 min-listing-age filter를 통과시킬 수 있었음.
+- earliest retained mcap snapshot에서 처음 관측된 종목도 실제 상장일이 불명확한데 999개월로 간주됐음.
+- 기존 `tests/test_pit_universe.py`는 개발자/GDrive의 historical parquet cache가 없으면 GitHub clean runner에서 실패하여 invariant test가 재현 불가능했음.
+
+**Change**:
+- missing listed history와 pre-cache lower-bound listing age를 nullable `NA`로 보존.
+- `build_universe_snapshot`의 기존 `fillna(0) < min_listed_months` 경로가 unknown age를 fail-closed exclusion으로 처리.
+- PIT tests는 temp directory에 synthetic monthly mcap snapshots를 생성하여 survivorship, pre-date rejection, listing age, delisted-history, publication-lag invariant를 deterministic하게 검증.
+- 별도 regression으로 history 전체 누락 시 999가 재도입되지 않는지 검증.
+
+**Non-scope**: alpha weights, theme model, classifier, portfolio sizing, broker/order path, historical return claims.
+
+**symbols_changed**: `kr_pit_universe.compute_listed_months_pit` missing/lower-bound semantics; `kr_universe.compute_listed_months` documentation; `KR_ENGINE_REUSE_VERSION` bumped to invalidate feature/model caches built with the 999-month fallback.
+**symbols_added**: none in production.
+**config_fields_added**: none. Existing engine reuse version advanced for cache invalidation.
+**breaking_changes**: Unknown listing age now stays missing/ineligible instead of being treated as 999 months. This is intentional fail-closed behavior.
+
+**Validation**: exact-head GitHub CI required before merge.

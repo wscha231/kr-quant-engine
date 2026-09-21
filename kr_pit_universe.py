@@ -438,24 +438,26 @@ def compute_listed_months_pit(
     """Real listed_months via inferred_listing_date in listed_history.
 
     For each ticker, returns months elapsed between inferred_listing_date and
-    rebalance_date. If the ticker's listing_date_is_lower_bound flag is set
-    (= the ticker existed before the earliest cached snapshot), we return
-    a high value (999) to indicate "long-listed, exact unknown" -- this is
-    safe for the min_listed_months ≥ 12 filter since long-listed names pass.
+    rebalance_date only when the listing date is actually bounded by retained
+    PIT history. If first_seen equals the earliest cached snapshot, the true
+    listing date is unknown and listed_months remains NA so eligibility fails
+    closed rather than assuming a long listing history.
 
     Returns DataFrame with columns: ticker, listed_months,
     listing_date_known (bool).
     """
     rd = pd.Timestamp(rebalance_date).normalize()
+    tickers_padded = [str(t).zfill(6) for t in tickers]
     hist = load_listed_history()
     if hist.empty:
+        # Missing listing history is unknown, not evidence that a security is
+        # long-listed. Keep it missing so the universe soft filter excludes it.
         return pd.DataFrame({
-            "ticker": tickers,
-            "listed_months": [999] * len(tickers),  # legacy stub fallback
-            "listing_date_known": [False] * len(tickers),
+            "ticker": tickers_padded,
+            "listed_months": pd.Series([pd.NA] * len(tickers_padded), dtype="Int64"),
+            "listing_date_known": [False] * len(tickers_padded),
         })
 
-    tickers_padded = [str(t).zfill(6) for t in tickers]
     sub = hist[hist["ticker"].isin(tickers_padded)][[
         "ticker", "inferred_listing_date", "listing_date_is_lower_bound",
     ]].copy()
@@ -464,18 +466,19 @@ def compute_listed_months_pit(
         (rd - sub["inferred_listing_date"]).dt.days / 30.4375
     ).round().astype("Int64")
     sub["listed_months"] = months_diff
-    # If listing date is a lower bound (pre-cache), set 999 so the filter
-    # treats them as long-listed (passes min_listed_months).
+    # If first_seen is the earliest cache date, the true listing date is
+    # unknown. Do not infer "long-listed": preserve NA and fail closed in the
+    # eligibility filter until older PIT evidence is available.
     pre_cache = sub["listing_date_is_lower_bound"].fillna(False)
-    sub.loc[pre_cache, "listed_months"] = 999
+    sub.loc[pre_cache, "listed_months"] = pd.NA
     sub["listing_date_known"] = ~pre_cache
 
     out = pd.DataFrame({"ticker": tickers_padded}).merge(
         sub[["ticker", "listed_months", "listing_date_known"]],
         on="ticker", how="left",
     )
-    out["listed_months"] = out["listed_months"].fillna(0).astype(int)
-    out["listing_date_known"] = out["listing_date_known"].fillna(False)
+    out["listed_months"] = out["listed_months"].astype("Int64")
+    out["listing_date_known"] = out["listing_date_known"].fillna(False).astype(bool)
     return out
 
 
