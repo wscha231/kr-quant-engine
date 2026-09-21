@@ -239,6 +239,100 @@ class KrStrictMarketSnapshotV1Tests(unittest.TestCase):
             "KRX_OPENAPI_KOSDAQ_DAILY_2203_NORMALIZED",
         )
 
+    def test_ticker_history_requests_pykrx_adjusted_true_and_persists_source_receipt(self):
+        class FakeStock:
+            calls = []
+
+            @classmethod
+            def get_market_ohlcv_by_date(cls, start, end, ticker, adjusted=True):
+                cls.calls.append((start, end, ticker, adjusted))
+                dates = pd.bdate_range("2026-09-01", "2026-09-18")
+                return pd.DataFrame(
+                    {
+                        "시가": [100] * len(dates),
+                        "고가": [101] * len(dates),
+                        "저가": [99] * len(dates),
+                        "종가": [100] * len(dates),
+                        "거래량": [1000] * len(dates),
+                        "거래대금": [100000] * len(dates),
+                    },
+                    index=pd.Index(dates, name="날짜"),
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(kr_client, "CACHE_DIR", Path(tmp)),
+                patch.object(kr_client, "PYKRX_AVAILABLE", True),
+                patch.object(kr_client, "_pykrx_stock", FakeStock),
+                patch.object(kr_client, "FDR_AVAILABLE", False),
+            ):
+                out = kr_client.fetch_ticker_history(
+                    "267260", "2026-09-01", "2026-09-18", refresh_days=1
+                )
+                self.assertEqual(FakeStock.calls[-1][-1], True)
+                self.assertEqual(
+                    out.attrs["source_identity"],
+                    "PYKRX_ADJUSTED_TRUE_NORMALIZED",
+                )
+                cache = kr_client.ticker_cache_path(
+                    "267260", "2026-09-01", "2026-09-18"
+                )
+                self.assertIn("adjusted-proxy-v1", cache.name)
+                self.assertTrue(cache.is_file())
+                self.assertTrue(kr_client.ticker_source_meta_path(cache).is_file())
+                legacy = Path(tmp) / "ticker_267260_20260901_20260918.parquet"
+                self.assertNotEqual(cache, legacy)
+
+    def test_ticker_history_fdr_fallback_is_explicit_naver_and_remains_proxy(self):
+        class FakeFdr:
+            calls = []
+
+            @classmethod
+            def DataReader(cls, symbol, start, end):
+                cls.calls.append((symbol, start, end))
+                self.assertEqual(symbol, "NAVER:267260")
+                dates = pd.bdate_range(start=start, end=end)
+                frame = pd.DataFrame(
+                    {
+                        "Open": [100] * len(dates),
+                        "High": [101] * len(dates),
+                        "Low": [99] * len(dates),
+                        "Close": [100] * len(dates),
+                        "Volume": [1000] * len(dates),
+                    },
+                    index=dates,
+                )
+                frame.index.name = "Date"
+                return frame
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(kr_client, "CACHE_DIR", Path(tmp)),
+                patch.object(kr_client, "PYKRX_AVAILABLE", False),
+                patch.object(kr_client, "FDR_AVAILABLE", True),
+                patch.object(kr_client, "_fdr", FakeFdr),
+            ):
+                out = kr_client.fetch_ticker_history(
+                    "267260", "2026-09-01", "2026-09-18", refresh_days=1
+                )
+                self.assertEqual(
+                    out.attrs["source_identity"],
+                    "FINANCE_DATAREADER_NAVER_CLOSE_PROXY_NORMALIZED",
+                )
+                meta = json.loads(
+                    kr_client.ticker_source_meta_path(
+                        kr_client.ticker_cache_path(
+                            "267260", "2026-09-01", "2026-09-18"
+                        )
+                    ).read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    meta["adjustment_semantics"],
+                    "NAVER_CLOSE_PROXY_UNREVIEWED",
+                )
+                self.assertFalse(meta["a3_reviewed"])
+                self.assertFalse(meta["raw_source_claimed"])
+
     def test_missing_market_field_is_not_neutral_filled(self):
         out = compute_snapshot(
             frame(0.0015), frame(0.0007),
