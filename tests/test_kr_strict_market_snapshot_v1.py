@@ -196,6 +196,49 @@ class KrStrictMarketSnapshotV1Tests(unittest.TestCase):
                 legacy = Path(tmp) / "index_2203_20260901_20260918.parquet"
                 self.assertNotEqual(cache, legacy)
 
+    def test_kosdaq150_falls_back_to_official_krx_openapi_after_fdr_logout(self):
+        class LogoutFdr:
+            @staticmethod
+            def DataReader(_symbol, _start, _end):
+                raise ValueError("LOGOUT")
+
+        dates = pd.bdate_range("2026-09-01", "2026-09-18")
+        official = pd.DataFrame(
+            {
+                "date": dates,
+                "open": [100.0] * len(dates),
+                "high": [101.0] * len(dates),
+                "low": [99.0] * len(dates),
+                "close": [100.5] * len(dates),
+                "volume": [1000.0] * len(dates),
+                "value": [100000.0] * len(dates),
+                "index_ticker": ["2203"] * len(dates),
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(kr_client, "CACHE_DIR", Path(tmp)),
+                patch.object(kr_client, "PYKRX_AVAILABLE", False),
+                patch.object(kr_client, "FDR_AVAILABLE", True),
+                patch.object(kr_client, "_fdr", LogoutFdr),
+                patch.object(
+                    kr_client,
+                    "_fetch_kosdaq150_openapi",
+                    return_value=official,
+                ) as fallback,
+            ):
+                out = kr_client.fetch_index_ohlcv(
+                    "2203", "2026-09-01", "2026-09-18", refresh_days=1
+                )
+
+        fallback.assert_called_once_with("2026-09-01", "2026-09-18")
+        self.assertFalse(out.empty)
+        self.assertEqual(
+            out.attrs["source_identity"],
+            "KRX_OPENAPI_KOSDAQ_DAILY_2203_NORMALIZED",
+        )
+
     def test_missing_market_field_is_not_neutral_filled(self):
         out = compute_snapshot(
             frame(0.0015), frame(0.0007),
