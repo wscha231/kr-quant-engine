@@ -25,7 +25,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from kr_config import BENCHMARK_KOSDAQ150, BENCHMARK_KOSPI200
-from kr_pykrx_client import CACHE_DIR, fetch_business_days, fetch_index_ohlcv, fetch_ticker_history
+from kr_pykrx_client import (
+    CACHE_DIR,
+    fetch_business_days,
+    fetch_index_ohlcv,
+    fetch_ticker_history,
+    index_cache_path,
+    index_source_meta_path,
+)
 from research.kr_strict_market_snapshot_v1 import (
     assert_no_zero_imputation,
     compute_snapshot,
@@ -81,6 +88,8 @@ def ymd(value) -> str:
 
 
 def cache_path(kind: str, ticker: str, start: str, end: str) -> Path:
+    if kind == "index":
+        return index_cache_path(ticker, start, end)
     return CACHE_DIR / f"{kind}_{ticker}_{ymd(start)}_{ymd(end)}.parquet"
 
 
@@ -95,6 +104,21 @@ def hash_and_copy_cache(path: Path, attempt: Path) -> dict:
         "cache_sha256": digest,
         "cache_bytes": len(raw),
         "archived_name": target.name,
+    }
+
+
+def archive_index_source_receipt(cache: Path, attempt: Path) -> dict:
+    meta = index_source_meta_path(cache)
+    if not meta.is_file():
+        return {}
+    raw = meta.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    target = attempt / "source_receipts" / (digest + ".json")
+    exclusive(target, raw)
+    return {
+        "source_receipt_sha256": digest,
+        "source_receipt_bytes": len(raw),
+        "source_receipt_archived_name": target.name,
     }
 
 
@@ -159,13 +183,15 @@ def capture(registry: dict, attempt: Path, code_sha: str, explicit_session: str 
         require(not df.empty, "benchmark_fetch_empty:" + benchmark)
         cp = cache_path("index", benchmark, start, end)
         cache_info = hash_and_copy_cache(cp, attempt)
+        cache_info.update(archive_index_source_receipt(cp, attempt))
+        source_identity = df.attrs.get("source_identity", "UNRESOLVED_PYKRX_OR_FDR")
         norm = normalized_rows_bytes(df)
         norm_sha = hashlib.sha256(norm).hexdigest()
         exclusive(attempt / "normalized" / (norm_sha + ".json"), norm)
         benchmark_frames[benchmark] = df
         benchmark_receipts[benchmark] = {
             "benchmark_ticker": benchmark,
-            "provider_identity": "UNRESOLVED_PYKRX_OR_FDR",
+            "provider_identity": source_identity,
             "normalized_client": "kr_pykrx_client.fetch_index_ohlcv",
             "normalized_sha256": normalized_frame_sha256(df),
             **cache_info,
