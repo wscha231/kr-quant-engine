@@ -99,6 +99,14 @@ py -3 run_local.py --no-collector    # collector 단계 건너뜀
 - **공시 데드라인**: 분기보고서 45일 / 반기보고서 45일 / 사업보고서 90일
 - **회계기준**: K-IFRS (한국채택국제회계기준), 연결재무제표 우선
 
+## Qualitative Moat / Quality V2 Invariant
+
+- Existing `quality_score` remains the financial factor (ROE / operating margin / leverage). Do not redefine or silently blend it.
+- Qualitative moat research uses `research/moat_quality_v2.py` and `docs/moat_quality_v2_contract.json`.
+- Evidence must be issuer/security-bound, raw-byte verified, current as of its trusted cutoff, and independently corroborated where the assessment is positive.
+- Missing/stale/expired/future/conflicting evidence fails closed; current reviewed evidence is not historical PIT data and must not be backfilled.
+- Until a separately preregistered PIT/OOS incremental-alpha experiment passes, `moat_quality_v2` has zero selector/portfolio/order authority.
+
 ## Result Analysis
 백테스트 결과에서 확인할 핵심 지표:
 - `strategy_cagr` — 연복리 수익률
